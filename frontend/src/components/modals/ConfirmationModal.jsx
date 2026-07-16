@@ -11,12 +11,11 @@ import {
   HStack,
   Text,
   Box,
-  Alert,
-  AlertIcon,
 } from '@chakra-ui/react'
 
 /**
- * Generic confirmation dialog for the Apply action.
+ * Generic confirmation dialog for the Apply action. Axis0-only (this board never
+ * drives axis1).
  */
 const ConfirmationModal = ({
   isOpen,
@@ -28,7 +27,6 @@ const ConfirmationModal = ({
   confirmText = 'Apply & Save',
   commandCount = 0,
   customCommandCount = 0,
-  targetAxis = 0,
 }) => (
   <Modal isOpen={isOpen} onClose={onClose} isCentered>
     <ModalOverlay />
@@ -40,7 +38,7 @@ const ConfirmationModal = ({
           <Text color="gray.300" fontSize="sm">{description}</Text>
           <Box bg="gray.900" p={3} borderRadius="md">
             <HStack justify="space-between"><Text fontSize="sm" color="gray.400">Target:</Text>
-              <Text fontSize="sm">{targetAxis === 'both' ? 'Both Axes (0 & 1)' : `Axis ${targetAxis}`}</Text></HStack>
+              <Text fontSize="sm">Axis 0</Text></HStack>
             <HStack justify="space-between"><Text fontSize="sm" color="gray.400">Commands:</Text>
               <Text fontSize="sm">{commandCount}</Text></HStack>
             {customCommandCount > 0 && (
@@ -48,11 +46,6 @@ const ConfirmationModal = ({
                 <Text fontSize="sm">{customCommandCount}</Text></HStack>
             )}
           </Box>
-          {targetAxis === 'both' && (
-            <Alert status="warning" borderRadius="md" bg="orange.900" fontSize="sm">
-              <AlertIcon /> Writing to both axes. Make sure a motor and encoder are connected to Axis 0 and Axis 1; applying to an unconnected axis can leave it misconfigured.
-            </Alert>
-          )}
         </VStack>
       </ModalBody>
       <ModalFooter>

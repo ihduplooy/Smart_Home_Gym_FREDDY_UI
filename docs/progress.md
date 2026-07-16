@@ -43,9 +43,34 @@ subfolder exists in this project). Treated as the same file — logged in decisi
 - [x] Created target top-level layout additions: `core/README.md` (placeholder +
       split-rule doc), `config/` dir (empty, filled in step c). `backend/`,
       `frontend/`, `docs/` already existed from the clone/step-a work.
-- [ ] Strip multi-axis UI (axis1), hard-code axis0 in frontend; keep backend
-      parameterisation if removing it is invasive
-- [ ] Strip multi-device UI; leave backend discovery returning the first device
+- [x] Stripped multi-axis UI. Deleted `frontend/src/components/AxisSelector.jsx`
+      (the 0/1 toggle) and its two call sites (`MotorControlsCard.jsx`,
+      `DeviceList.jsx`). Removed the "Apply to both axes" checkbox + `bothAxes`
+      state in `ApplyConfigStep.jsx`, the matching `targetAxis==='both'` branches
+      in `modals/ConfirmationModal.jsx`, and the `buildCommandStrings({bothAxes})`
+      axis-duplication logic in `hooks/useConfigWizard.js`. Hid axis1 from the
+      Inspector property tree by changing `apiReference.js`'s `buildPropertyTree`
+      default from `maxAxes=2` to `maxAxes=1`. Removed the now-orphaned
+      `setSelectedAxis` reducer from `store/slices/uiSlice.js` (no UI dispatches it
+      anymore; `selectedAxis` stays as a permanent `0` so the many hooks that
+      thread an axis value through — `useMotorControl`, `useConfigWizard`,
+      `useCalibration`, etc. — don't need a separate single-axis code path).
+      Left `useMotorControl.js`'s `saveAndReboot` writing `axis1.requested_state
+      = IDLE` alongside axis0's (a real ODrive constraint — all axes must be idle
+      before `save_configuration`; harmless/no-op on an unconfigured ghost axis,
+      and removing it wasn't worth the risk for zero UI benefit).
+- [x] Stripped multi-device UI. Backend already only ever returns 0 or 1 device
+      (confirmed: `device_manager.discover_and_index()` clears its index and
+      inserts at most the single handle from `_find_any()`/`odrive.find_any()` —
+      there was no real multi-device backend logic to begin with). Simplified
+      `DeviceList.jsx` from an `availableDevices.map(...)` card grid to directly
+      rendering the single device (or a "no device found" alert); heading changed
+      from "ODrive Devices" to "ODrive Device".
+- [x] Verified after every removal round: `npx eslint .` clean (zero warnings),
+      `npx vitest run` 40/40 passing (2 skipped, both live-hardware-only
+      integration tests, expected), and a full headless-Chrome pass clicking
+      through all 5 tabs (Configuration, Presets, Dashboard, Inspector, Command
+      Console) with no device connected — zero console errors on every tab.
 - [x] Stripped Windows/standalone packaging. Deleted: `build.bat`, `build.sh`,
       `install.bat`, `install.sh`, `backend/odrive_gui.spec`,
       `backend/run_standalone.py`, `backend/requirements-build.txt`,

@@ -24,7 +24,6 @@ import { getAxisStateName } from '../utils/configEnums'
 import { getErrorDescription, getErrorColor, isErrorCritical, describeErrors } from '../utils/odriveErrors'
 import { troubleshootingFor } from '../utils/troubleshooting'
 import ErrorTroubleshootingModal from './modals/ErrorTroubleshootingModal'
-import AxisSelector from './AxisSelector'
 import '../styles/DeviceList.css'
 
 const StatusBadge = memo(({ connected }) => (
@@ -34,12 +33,12 @@ const StatusBadge = memo(({ connected }) => (
 ))
 StatusBadge.displayName = 'StatusBadge'
 
-const DeviceCard = memo(({ device, index, connected, onConnect, onDisconnect }) => (
+const DeviceCard = memo(({ device, connected, onConnect, onDisconnect }) => (
   <Card w="100%" className="device-card" bg={connected ? 'odrive.700' : 'gray.700'} variant="elevated">
     <CardBody>
       <HStack justify="space-between" align="start">
         <VStack align="start" spacing={1} flex="1" minW={0}>
-          <Text fontWeight="bold">{device.path || `ODrive ${index + 1}`}</Text>
+          <Text fontWeight="bold">{device.path || 'ODrive'}</Text>
           <Text fontSize="sm" color="gray.300" fontFamily="mono" noOfLines={1}>
             Serial: {device.serial_number || 'Unknown'}
           </Text>
@@ -104,7 +103,6 @@ const DeviceList = () => {
   const dispatch = useDispatch()
   const { availableDevices, connectedDevice, isConnected, isLoading } = useSelector((s) => s.device)
   const live = useSelector((s) => s.live)
-  const selectedAxis = useSelector((s) => s.ui.selectedAxis)
   const { clearErrors } = useMotorControl()
   const toast = useToast()
 
@@ -162,10 +160,7 @@ const DeviceList = () => {
     <Box className="device-list">
       <VStack spacing={4} align="stretch">
         <HStack justify="space-between">
-          <VStack align="start" spacing={1}>
-            <Text fontSize="lg" fontWeight="bold" color="odrive.300">ODrive Devices</Text>
-            {isConnected && <AxisSelector size="xs" />}
-          </VStack>
+          <Text fontSize="lg" fontWeight="bold" color="odrive.300">ODrive Device</Text>
           <Button size="sm" colorScheme="odrive" onClick={() => dispatch(fetchDevices())} isLoading={isLoading} loadingText="Scanning">
             Scan
           </Button>
@@ -175,21 +170,15 @@ const DeviceList = () => {
           {availableDevices.length === 0 ? (
             <Alert status="info" variant="subtle">
               <AlertIcon />
-              No ODrive devices found. Make sure your device is connected.
+              No ODrive device found. Make sure your device is connected.
             </Alert>
           ) : (
-            <VStack spacing={3}>
-              {availableDevices.map((device, index) => (
-                <DeviceCard
-                  key={device.serial_number || `device-${index}`}
-                  device={device}
-                  index={index}
-                  connected={isConnected && connectedDevice?.serial_number === device.serial_number}
-                  onConnect={handleConnect}
-                  onDisconnect={handleDisconnect}
-                />
-              ))}
-            </VStack>
+            <DeviceCard
+              device={availableDevices[0]}
+              connected={isConnected && connectedDevice?.serial_number === availableDevices[0].serial_number}
+              onConnect={handleConnect}
+              onDisconnect={handleDisconnect}
+            />
           )}
         </Box>
 
@@ -204,7 +193,7 @@ const DeviceList = () => {
                   <Text fontSize="sm" fontWeight="bold">{live.vbus_voltage.toFixed(1)} V</Text>
                 </HStack>
                 <HStack justify="space-between">
-                  <Text fontSize="sm" color="gray.300">Axis {selectedAxis} State:</Text>
+                  <Text fontSize="sm" color="gray.300">Axis 0 State:</Text>
                   <Badge colorScheme={axisColor(live.axis_state)}>{getAxisStateName(live.axis_state)}</Badge>
                 </HStack>
                 <HStack justify="space-between">

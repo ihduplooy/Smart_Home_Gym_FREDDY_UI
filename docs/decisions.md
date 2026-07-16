@@ -88,3 +88,31 @@ than in the "don't investigate without hardware" bucket since it required no har
 only the "no device" path, to reproduce and fix. Did not touch the stray
 `/usr/local/lib/libusb-1.0.dylib` itself — that's outside the project and could belong
 to other software on this machine.
+
+## Multi-axis UI stripped
+
+Removed: the axis0/1 segmented toggle (`AxisSelector.jsx` + its two render call
+sites), the "Apply to both axes" checkbox in the config wizard's Apply step (and the
+matching duplicate-to-both-axes command-expansion logic in `useConfigWizard.js` +
+"both axes" branch in `ConfirmationModal.jsx`), and axis1's branch in the Inspector's
+property tree (`apiReference.js`'s tree builder now only ever constructs an `axis0`
+section). Reason: axis1 on this board is a ghost node (CAN ID 63 from Phase 2B) —
+only axis0 is ever driven, per spec §5.
+
+Deliberately kept: `useMotorControl.js`'s `saveAndReboot` still idles axis1 alongside
+axis0 before `save_configuration` (a real ODrive firmware constraint: all axes must be
+idle before that call succeeds) — harmless on an unused axis, not worth the risk to
+remove for zero user-facing benefit. Also kept all the `selectedAxis`-threading
+plumbing in hooks (`useMotorControl`, `useCalibration`, `useConfigWizard`, etc.) — it
+now permanently resolves to axis0 since there's no UI left to change it, exactly the
+"keep the backend parameterisation if removing it is invasive" call the spec allows.
+
+## Multi-device UI stripped
+
+The backend never actually supported multiple simultaneous devices —
+`device_manager.discover_and_index()` clears its index and inserts at most the one
+handle `odrive.find_any()` returns, so "multi-device" was frontend-only scaffolding for
+a case the backend couldn't produce. Simplified `DeviceList.jsx` from a
+`.map()`-rendered card grid (built for N devices, always showing 0 or 1) to directly
+rendering the single found device or a "no device" alert. Renamed the sidebar heading
+from "ODrive Devices" to "ODrive Device" to match.

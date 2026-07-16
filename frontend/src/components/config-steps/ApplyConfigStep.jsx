@@ -23,23 +23,22 @@ import CommandList from '../CommandList'
 import ConfirmationModal from '../modals/ConfirmationModal'
 
 /**
- * Apply tab — faithful to the dev FinalConfigStep: "only changed parameters",
- * "enable editing" and "apply to both axes" toggles, an editable command list,
- * and a confirmation before writing + saving.
+ * Apply tab — faithful to the dev FinalConfigStep: "only changed parameters" and
+ * "enable editing" toggles, an editable command list, and a confirmation before
+ * writing + saving. Axis0-only (this board never drives axis1).
  */
 const ApplyConfigStep = ({ wizard }) => {
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [onlyChanged, setOnlyChanged] = useState(true)
   const [enableEditing, setEnableEditing] = useState(false)
-  const [bothAxes, setBothAxes] = useState(false)
   const [customCommands, setCustomCommands] = useState({})
   const [disabledCommands, setDisabledCommands] = useState(() => new Set())
   const [applying, setApplying] = useState(false)
   const [resultToast, setResultToast] = useState(null)
 
   const baseCommands = useMemo(
-    () => wizard.buildCommandStrings({ onlyChanged, bothAxes }),
-    [wizard, onlyChanged, bothAxes]
+    () => wizard.buildCommandStrings({ onlyChanged }),
+    [wizard, onlyChanged]
   )
 
   const finalCommands = useMemo(
@@ -150,17 +149,13 @@ const ApplyConfigStep = ({ wizard }) => {
                   <FormLabel htmlFor="enable-editing" mb="0" color="gray.300" fontSize="sm" mr={0} ml={4}>Enable Editing</FormLabel>
                   <Checkbox id="enable-editing" isChecked={enableEditing} onChange={(e) => setEnableEditing(e.target.checked)} colorScheme="blue" />
                   <Tooltip label="Edit, disable or add commands before applying."><Icon as={InfoIcon} color="gray.400" boxSize={3} /></Tooltip>
-
-                  <FormLabel htmlFor="both-axes" mb="0" color="gray.300" fontSize="sm" mr={0} ml={4}>Apply to both axes</FormLabel>
-                  <Checkbox id="both-axes" isChecked={bothAxes} onChange={(e) => setBothAxes(e.target.checked)} colorScheme="blue" />
-                  <Tooltip label="Apply axis commands to both Axis 0 and Axis 1."><Icon as={InfoIcon} color="gray.400" boxSize={3} /></Tooltip>
                 </HStack>
 
                 <HStack justify="space-between">
                   <VStack align="start" spacing={0}>
                     <Text fontWeight="bold" color="white" fontSize="lg">Configuration Commands</Text>
                     <Text color="gray.400" fontSize="sm">
-                      {finalCommands.length} command(s) for {bothAxes ? 'both axes (0 & 1)' : `Axis ${wizard.selectedAxis}`}
+                      {finalCommands.length} command(s) for Axis 0
                     </Text>
                   </VStack>
                 </HStack>
@@ -211,7 +206,6 @@ const ApplyConfigStep = ({ wizard }) => {
         isLoading={applying}
         commandCount={finalCommands.length}
         customCommandCount={Object.keys(customCommands).length}
-        targetAxis={bothAxes ? 'both' : wizard.selectedAxis}
       />
     </Box>
   )

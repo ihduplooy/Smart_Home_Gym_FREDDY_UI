@@ -27,8 +27,9 @@ function enumOptions(apiRef, valueType) {
  * Build a normalized, *nested* property tree consumed by PropertyTree/PropertyItem.
  *
  * Top-level sections:
- *   - `system`  — every non-axis property (grouped by its path segments)
- *   - `axis0`, `axis1` — per-axis properties (grouped by their sub-paths)
+ *   - `system` — every non-axis property (grouped by its path segments)
+ *   - `axis0`  — axis0 properties (grouped by their sub-paths). This board never
+ *                drives axis1 (a ghost node from Phase 2B), so it's hidden here.
  *
  * Each node has the shape:
  * {
@@ -49,7 +50,7 @@ function enumOptions(apiRef, valueType) {
  *   selectOptions? // for enum types
  * }
  */
-export function buildPropertyTree(apiRef, maxAxes = 2) {
+export function buildPropertyTree(apiRef, maxAxes = 1) {
   const tree = {
     system: { name: 'system', description: 'Device-level properties', properties: {}, children: {} },
   }

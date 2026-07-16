@@ -151,10 +151,10 @@ export function useConfigWizard() {
   }, [serial, changes, pullConfig])
 
   // Build odrivetool-style command strings for the Apply tab.
-  // onlyChanged: only diff vs device (default). bothAxes: duplicate axis-scoped
-  // commands for axis0 and axis1.
+  // onlyChanged: only diff vs device (default); otherwise every field's current
+  // desired value. Axis0-only (this board never drives axis1).
   const buildCommandStrings = useCallback(
-    ({ onlyChanged = true, bothAxes = false } = {}) => {
+    ({ onlyChanged = true } = {}) => {
       let items
       if (onlyChanged) {
         items = changes.map((c) => ({ path: c.path, value: c.value }))
@@ -168,22 +168,6 @@ export function useConfigWizard() {
             if (value !== undefined && value !== null) items.push({ path, value })
           }
         }
-      }
-      if (bothAxes) {
-        const seen = new Set()
-        const expanded = []
-        for (const it of items) {
-          if (/axis\d+/.test(it.path)) {
-            for (const ax of [0, 1]) {
-              const p = it.path.replace(/axis\d+/, `axis${ax}`)
-              if (!seen.has(p)) { seen.add(p); expanded.push({ path: p, value: it.value }) }
-            }
-          } else if (!seen.has(it.path)) {
-            seen.add(it.path)
-            expanded.push(it)
-          }
-        }
-        items = expanded
       }
       return toCommandStrings(items)
     },

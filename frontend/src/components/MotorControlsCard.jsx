@@ -4,7 +4,6 @@ import { getAxisStateName } from '../utils/configEnums'
 import { describeErrors } from '../utils/odriveErrors'
 import { LIVE_INITIAL_STATE } from '../store/slices/liveSlice'
 import MotorControls from './MotorControls'
-import AxisSelector from './AxisSelector'
 
 /**
  * Motor-controls card backed by the shared `live` status slice (populated by the
@@ -15,7 +14,6 @@ import AxisSelector from './AxisSelector'
  * this card while it isn't visible.
  */
 const MotorControlsCard = ({ isActive = true, compact = false }) => {
-  const ax = useSelector((s) => s.ui.selectedAxis)
   const live = useSelector((s) => (isActive ? s.live : LIVE_INITIAL_STATE))
 
   const state = live.axis_state
@@ -30,10 +28,7 @@ const MotorControlsCard = ({ isActive = true, compact = false }) => {
     <Card bg="gray.800" variant="outline" borderColor="gray.700">
       <CardBody p={compact ? 3 : undefined}>
         <HStack justify="space-between" mb={compact ? 2 : 3}>
-          <HStack spacing={3}>
-            <Heading size="sm" color="odrive.300">Motor Controls · Axis:</Heading>
-            <AxisSelector showLabel={false} size="xs" />
-          </HStack>
+          <Heading size="sm" color="odrive.300">Motor Controls</Heading>
           <Badge colorScheme={stateColor}>{getAxisStateName(state)}</Badge>
         </HStack>
         <MotorControls currentState={typeof state === 'number' ? state : null} hasErrors={hasErrors} variant="full" compact={compact} />
