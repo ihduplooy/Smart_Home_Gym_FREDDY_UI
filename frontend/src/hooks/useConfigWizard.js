@@ -6,6 +6,8 @@ import { expandAxisPath } from '../utils/odriveRegistry'
 import { parseConsoleCommand } from '../utils/consoleCommand'
 import { STEPS, resolvePath, stepFields } from '../utils/configSchema'
 import { validateConfig } from '../utils/configValidation'
+import { expandValues } from '../utils/presets/presetsManager'
+import { boardConstantsToTemplateValues } from '../utils/boardDefaults'
 
 /**
  * Engine for the configuration wizard.
@@ -15,6 +17,13 @@ import { validateConfig } from '../utils/configValidation'
  * configDiff so the Apply list only ever contains real, intended changes — the
  * fix for the phantom-command bug. Values are keyed by concrete (axis-expanded)
  * path.
+ *
+ * On pull, `desired` is seeded with this project's board constants
+ * (config/board_constants.py, via GET /api/board-constants) for any field the
+ * device doesn't already report a value for — real device values always win.
+ * This is what makes the wizard "open pre-loaded" instead of blank: it's a
+ * verification/tweak tool against known project defaults, not a from-scratch
+ * setup flow.
  */
 export function useConfigWizard() {
   const { connectedDevice, fw_line, isConnected } = useSelector((s) => s.device)
@@ -28,6 +37,16 @@ export function useConfigWizard() {
   const [unreadable, setUnreadable] = useState([])
   const [loading, setLoading] = useState(false)
   const [loadingPaths, setLoadingPaths] = useState(() => new Set())
+  const [boardDefaults, setBoardDefaults] = useState({})
+
+  // Fetch this project's board constants once; independent of device connection.
+  useEffect(() => {
+    let cancelled = false
+    backend.getBoardConstants()
+      .then((bc) => { if (!cancelled) setBoardDefaults(boardConstantsToTemplateValues(bc)) })
+      .catch(() => {}) // no defaults available -> wizard just falls back to device values
+    return () => { cancelled = true }
+  }, [])
 
   // Resolve a schema field to its concrete device path for the current axis/line.
   const concretePath = useCallback(
@@ -54,20 +73,27 @@ export function useConfigWizard() {
     try {
       const results = await backend.readProperties(serial, allPaths)
       const { snapshot: snap, unreadable: bad } = buildDeviceSnapshot(results)
-      setSnapshot(snap)
+      setSnapshot(snap) // untouched device readback; diffConfig compares desired against this
       setUnreadable(bad)
-      setDesired(snap) // start from real device values; never fabricate
+      // This project's board-constant defaults take priority over whatever the
+      // device currently reports for the small, curated set of fields we have
+      // an opinion on (config/board_constants.py) — that's what makes the
+      // wizard a verification/tweak tool: it shows our target configuration,
+      // and diffConfig highlights anywhere the device doesn't match it yet.
+      // Every other field (measured values, thermal limits, etc.) still shows
+      // the real device value — never fabricated.
+      setDesired({ ...snap, ...expandValues(boardDefaults, selectedAxis) })
       setEditedPaths(new Set())
     } finally {
       setLoading(false)
     }
-  }, [serial, allPaths])
+  }, [serial, allPaths, boardDefaults, selectedAxis])
 
-  // Auto-pull on connect / axis change.
+  // Auto-pull on connect / axis change / once board defaults arrive.
   useEffect(() => {
     if (serial) pullConfig()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serial, selectedAxis, fwLine])
+  }, [serial, selectedAxis, fwLine, boardDefaults])
 
   const setValue = useCallback(
     (field, value) => {

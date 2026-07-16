@@ -1,10 +1,15 @@
+import logging
 import os
 import platform
 import sys
 import threading
 from typing import Any, Dict, List, Iterable
 
+from config import board_constants
+
 from .mock_odrive import mock_enabled, get_mock_device
+
+log = logging.getLogger(__name__)
 
 _device_lock = threading.Lock()
 _device_index: Dict[str, Any] = {}  # serial -> odrive handle
@@ -66,12 +71,20 @@ def serialize_device(odrv: Any) -> Dict[str, Any]:
     fw_minor = getattr(odrv, "fw_version_minor", None)
     fw_rev = getattr(odrv, "fw_version_revision", None)
     ser = getattr(odrv, "serial_number", None)
+
+    firmware_warning = None
+    if fw_major is not None and fw_minor is not None and fw_rev is not None:
+        firmware_warning = board_constants.check_firmware(fw_major, fw_minor, fw_rev)
+        if firmware_warning:
+            log.warning(firmware_warning)
+
     return {
         "serial_number": str(ser) if ser is not None else None,
         "fw_version": f"{fw_major}.{fw_minor}.{fw_rev}",
         "fw_version_major": fw_major,
         "fw_version_minor": fw_minor,
         "fw_version_revision": fw_rev,
+        "firmware_warning": firmware_warning,
     }
 
 

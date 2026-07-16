@@ -125,20 +125,50 @@ subfolder exists in this project). Treated as the same file — logged in decisi
 
 ## (c) Rebrand + wizard defaults (spec §4 rebranding scope, §5 constants)
 
-- [ ] App title/header rebranded to "Smart Gym Control" everywhere (frontend title,
-      package.json name, README)
-- [ ] Strip upstream release/version badges from README; write new project README
-      (context paragraph + dev-mode run instructions)
-- [ ] No UI restyling (explicitly out of scope — functionality only)
-- [ ] Create `config/board_constants.py` — single source of truth for firmware version,
-      motor (pole_pairs=15, MOTOR_TYPE_HIGH_CURRENT), encoder (AS5047P, SPI ABS,
-      abs_spi_cs_gpio_pin=7), axis0-only + axis1 CAN node id=63, `# TODO(2A)` on the
-      torque-mode velocity-limit constant
-- [ ] Move `odrive_config_1B.py` into `config/odrive_config.py` verbatim
-- [ ] Pre-load config wizard defaults from the 1B script's values; verify generated
-      command preview matches 1B script's settings
-- [ ] Ship one preset generated from the 1B script (presets import/export kept)
-- [ ] Backend warns (not crashes) if connected board reports firmware != v0.5.1
+- [x] App title/header rebranded to "Smart Gym Control" everywhere (`frontend/
+      index.html` title, `App.jsx` sidebar heading, `package.json` name/version).
+      Left "ODrive" strings that describe the connected hardware itself (not
+      upstream branding) — see docs/decisions.md.
+- [x] Stripped upstream release/version badges; wrote a new project README from
+      scratch (spec §0 context paragraph, real repo layout, macOS/pyenv dev-mode
+      setup + run instructions, architecture notes). No Windows/standalone
+      instructions, no Contributing/star-solicitation boilerplate.
+- [x] No UI restyling — confirmed no color/theme files touched this session.
+- [x] Created `config/board_constants.py` — single source of truth: firmware
+      (expected v0.5.1, warns not crashes on mismatch), motor (pole_pairs=15,
+      MOTOR_TYPE_HIGH_CURRENT=0, current limits/calibration values from the 1B
+      script), encoder (AS5047P, ENCODER_MODE_SPI_ABS_AMS=257,
+      abs_spi_cs_gpio_pin=7, cpr=16384), controller (position control, trap_traj
+      gains), axis0-only + axis1 CAN node id=63 (recorded per plan, not
+      wizard-reachable — that's a Phase 2B action), bus limits. `# TODO(2A)` on
+      the torque-mode-vel-limit constant per spec §8. Exposed via a new
+      `GET /api/board-constants` backend route (`backend/app/app.py`) — frontend
+      fetches values from there, never duplicates them (see decisions.md for the
+      `sys.path` wiring needed to import `config/` from `backend/`).
+- [x] Moved `odrive_config_1B.py` → `config/odrive_config.py` verbatim (byte-diff
+      confirmed identical), then removed the original from `Phase 1/` per the
+      explicit "move" instruction.
+- [x] Pre-loaded config wizard defaults from board_constants (`useConfigWizard.js`
+      now merges `{...deviceSnapshot, ...boardDefaults}` on pull — project
+      defaults win over the raw snapshot for our curated field set). Found and
+      fixed a real bug during live verification (initial merge order let the
+      device/mock's factory-zero readback silently overwrite our defaults — see
+      decisions.md). Also added a missing `abs_spi_cs_gpio_pin` schema field
+      (was entirely absent from the wizard) and fixed the mock's line-5 seed data
+      to include `can_node_id` (missing from the auto-generated 0.5.x reference,
+      needed for mock-mode fidelity). **Verified end-to-end** via headless
+      Chrome against `ODRIVE_MOCK=1 ODRIVE_MOCK_FW=5`: connected to the mock
+      device, opened Configuration → Apply with "only changed" off, and
+      confirmed all ~20 project fields show the exact 1B values (pole_pairs=15,
+      abs_spi_cs_gpio_pin=7, encoder mode=257, cpr=16384, control_mode=3,
+      vel_limit=2, bus limits 25/8/15/-3/0/2, etc.) with zero console errors.
+- [x] Shipped one factory preset generated from the 1B script
+      (`factoryPresets.js`, "Smart Gym Cable — Hoverboard + AS5047P") — presets
+      import/export mechanism itself untouched (already kept from upstream).
+- [x] Backend warns, doesn't crash, on firmware mismatch — verified live: mock
+      device (reports 0.5.6) triggers a logged warning + a `firmware_warning`
+      field in the `/api/devices` JSON response; connection still succeeds
+      (200, not refused).
 
 ## (d) Re-verify + Definition of Done self-check (spec §7)
 

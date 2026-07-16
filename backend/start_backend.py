@@ -1,4 +1,13 @@
 import logging
+import sys
+from pathlib import Path
+
+# Make the repo-root config/ package importable (config/board_constants.py is the
+# single source of truth for project-specific constants, shared with core/ from
+# Session 2 onward).
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from app.app import create_app
 

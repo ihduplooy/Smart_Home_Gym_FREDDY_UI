@@ -65,6 +65,13 @@ _SEED_BY_LINE: Dict[int, Dict[str, Any]] = {
         "axis1.motor.config.pole_pairs": 7,
         "axis1.motor.config.torque_constant": 0.04,
         "axis1.motor.config.current_lim": 10.0,
+        # Real on 0.5.x hardware (confirmed via config/odrive_config.py) but
+        # missing from the auto-generated 0.5.x API reference the mock's
+        # generic property-walk seeds from (axis{n}.config.can is documented
+        # there only as a non-scalar struct) — seeded explicitly so mock mode
+        # matches real-board behaviour for this project's "ghost axis1" fix.
+        "axis0.config.can_node_id": 0,
+        "axis1.config.can_node_id": 0,
     },
     6: {
         "axis0.config.motor.pole_pairs": 7,

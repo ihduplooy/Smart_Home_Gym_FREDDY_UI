@@ -86,6 +86,106 @@ frontend and backend) are untouched — only the regeneration source/tooling is 
 README's rebrand pass (step c) drops the now-dangling "regenerating the reference"
 section accordingly.
 
+## Rebranding
+
+App title/header changed to "Smart Gym Control" everywhere (`frontend/index.html`
+`<title>`, sidebar `<Heading>` in `App.jsx`). Left literal "ODrive" strings that
+describe the connected *hardware* rather than upstream software branding
+(`DeviceFooter`'s "Device: ODrive" value, the Inspector's "ODrive Properties"
+heading) — those are accurate technical labels, not attribution to strip. Backend
+`VERSION` constant (`backend/app/constants.py`) changed from upstream's
+`Titanium_2.0.0` to `smart-gym-control-1.0.0` (this was only ever consumed by the
+now-deleted `UpdateChecker`; the `/api/backend/version` route itself is harmless to
+keep). `frontend/package.json` name/version updated to match (lockfile
+regenerated). README fully rewritten: spec §0's project context, real repo layout,
+dev-mode setup/run instructions, architecture notes — no upstream release badges, no
+Windows/standalone instructions, no "Contributing"/star solicitation (this is a
+personal one-way fork). Did not restyle the UI (explicitly out of scope per spec §4).
+
+## Config wizard: pre-loaded with project defaults (spec §5)
+
+Added `config/board_constants.py` — the single source of truth for every project-
+specific constant (firmware version, motor, encoder, axis, bus limits), values taken
+verbatim from `config/odrive_config.py` (the moved 1B script). Deliberately plain
+data with zero dependency on the `odrive` package or any hardware, so it's safe to
+import broadly (unlike `odrive_config.py` itself, which is a top-level script that
+calls `odrive.find_any()` at import time — never import that module, only run it).
+
+Wired into the backend:
+- `GET /api/board-constants` (`backend/app/app.py`) serves `board_constants.as_dict()`
+  — per spec §5, these values are never duplicated into frontend code; the frontend
+  fetches them from this one route.
+- `device_manager.serialize_device()` now calls `board_constants.check_firmware()`
+  and attaches a `firmware_warning` string (or `null`) to every device's JSON, plus
+  logs a backend warning — never raises. Verified against the mock device (which
+  reports 0.5.6): warning fires correctly, connection still succeeds
+  (`GET /api/devices` still 200s). Verified against a 0.5.1-matching board (also via
+  mock, `ODRIVE_MOCK_FW=5`... note the mock's own revision is hardcoded to 6 for line
+  5 — see below): the "no warning" path was exercised indirectly by confirming
+  `check_firmware()` returns `None` when major/minor/revision all match via direct
+  reasoning about the function, since the mock always reports revision 6 regardless
+  of line and can't simulate an exact 0.5.1 match. Both branches of the function are
+  simple equality checks; both are covered by code reading + the mismatch-path live
+  test.
+- `backend/start_backend.py` inserts the repo root onto `sys.path` so `config/` (a
+  namespace package, no `__init__.py`, consistent with `backend/app` itself) is
+  importable regardless of the process's working directory.
+
+Wired into the frontend (`frontend/src/hooks/useConfigWizard.js`): on `pullConfig`,
+`desired` is now seeded as `{ ...deviceSnapshot, ...expandValues(boardDefaults,
+selectedAxis) }` — board-constant defaults take priority over the raw device
+snapshot for the small, curated set of fields we have a project opinion on; every
+other field (measured values, thermal limits, etc.) still shows the actual device
+value. `frontend/src/utils/boardDefaults.js` holds only the *structural* mapping
+(which `board_constants` key belongs at which template path) — the numeric values
+themselves always come from the `GET /api/board-constants` fetch, never duplicated
+into this file.
+
+**Bug found and fixed during live verification**: the first version of this merge
+put the device snapshot *after* the defaults (`{...defaults, ...snap}`), so any
+property the mock/device reports *any* value for (which, for a mock or freshly-
+erased board, is nearly every property — the mock seeds a type-appropriate 0/False
+for its entire walked property surface) silently overwrote our defaults. Caught by
+opening the Apply step with "Only changed parameters" off against the mock and
+seeing `pole_pairs=7` / `abs_spi_cs_gpio_pin=0` instead of our `15`/`7`. Fixed by
+flipping the spread order (`{...snap, ...defaults}`) — confirmed via the same
+manual check afterward: all ~20 project fields now show the exact 1B-script values
+(`pole_pairs=15`, `abs_spi_cs_gpio_pin=7`, `encoder.config.mode=257`, `cpr=16384`,
+`control_mode=3`, `vel_limit=2`, bus limits `25/8/15/-3/0/2`, etc.) and three
+previously-spurious validation warnings (CPR=0, vel_gain=0, vel_limit=0 — artifacts
+of the un-seeded mock defaults) disappeared. This intentionally does *not* touch
+`configDiff.js`'s "phantom command" bug-fix rule (never write a value for a field
+whose device value is unknown *and* untouched) — that rule still applies to every
+field we *don't* have a curated default for; we're only ever seeding our own small,
+documented, project-specific set.
+
+**Missing schema field, added**: `configSchema.js`'s encoder step had no field at
+all for `abs_spi_cs_gpio_pin` — one of this project's most important constants (the
+AS5047P's SPI chip-select pin). Without it, the value could never appear in the
+wizard or its command preview no matter what defaults were injected. Added
+`axis{n}.encoder.config.abs_spi_cs_gpio_pin` as a real field (confirmed present in
+`odriveApiReference05x.json` as a `Uint16Property`).
+
+**Mock fidelity fix**: the mock's line-5 (0.5.x) seed data didn't include
+`axis{0,1}.config.can_node_id` at all (that path isn't in the auto-generated 0.5.x
+reference JSON as its own scalar — see the CAN-schema fix above), so reading it
+against the mock returned a non-scalar branch node, not `0`. Since the 1B script
+relies on this exact flat property existing on the real board, added it explicitly
+to `mock_odrive.py`'s `_SEED_BY_LINE[5]` (default `0` for both axes) so mock mode
+matches confirmed real-hardware behaviour for this project.
+
+## Shipped preset generated from the 1B script
+
+Added a 4th factory preset to `frontend/src/utils/presets/factoryPresets.js`
+("Smart Gym Cable — Hoverboard + AS5047P") containing every value above in the
+existing preset JSON shape (template `axis{n}...` paths). Unlike the live
+wizard-defaults injection, presets are static, exportable JSON snapshots by design
+(matching how upstream's existing factory presets already work) — duplicating the
+1B values into this one preset file is the correct, expected shape for "ship one
+preset generated from the 1B script," not a violation of the single-source-of-truth
+rule (which specifically targets the *live default-injection* mechanism, not
+one-time preset generation).
+
 ## Real bug found + fixed: Apple Silicon libusb resolution (not a v0.5.1 issue, a macOS-ARM issue)
 
 While re-verifying the no-device state after the requirements.txt pin change, found

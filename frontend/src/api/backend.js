@@ -2,6 +2,7 @@
 //
 // Backend contract (see backend/app/app.py):
 //   GET  /api/backend/version
+//   GET  /api/board-constants
 //   GET  /api/devices
 //   GET  /api/devices/<serial>/api-metadata[?section=]
 //   POST /api/devices/<serial>/read     { paths: [...] }      -> { path: value | {error} }
@@ -49,6 +50,14 @@ async function trySocket(serial, action, payload) {
 
 export function getBackendVersion() {
   return getJson('/api/backend/version')
+}
+
+/**
+ * This project's board/motor/encoder constants — single source of truth is
+ * config/board_constants.py; never duplicate these values into frontend code.
+ */
+export function getBoardConstants() {
+  return getJson('/api/board-constants')
 }
 
 export function listDevices() {

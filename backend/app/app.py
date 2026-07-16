@@ -10,6 +10,7 @@ from .constants import VERSION  # backend version tag
 from . import device_manager
 from .api_reference import load_api_reference, reference_line
 from .telemetry import telemetry_session
+from config import board_constants
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +36,12 @@ def create_app() -> Flask:
         return jsonify({
             "backend_version": VERSION,
         })
+
+    @app.route("/api/board-constants", methods=["GET"])
+    def get_board_constants():
+        # Single source of truth: config/board_constants.py. Never duplicate
+        # these values into frontend code — it fetches them from here.
+        return jsonify(board_constants.as_dict())
 
     @app.route("/api/devices", methods=["GET"])
     def list_devices():

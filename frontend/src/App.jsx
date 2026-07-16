@@ -59,7 +59,7 @@ function App() {
         {/* Left Sidebar */}
         <Box w="320px" bg="gray.800" borderRight="1px solid" borderColor="gray.600">
           <VStack spacing={3} align="stretch" h="100%" p={4}>
-            <Heading size="md" color="odrive.300">ODrive GUI</Heading>
+            <Heading size="md" color="odrive.300">Smart Gym Control</Heading>
             <Box flex="1" minH={0} overflowY="auto">
               <DeviceList />
             </Box>

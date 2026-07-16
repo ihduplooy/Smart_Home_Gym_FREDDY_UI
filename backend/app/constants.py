@@ -1,1 +1,1 @@
-VERSION = "Titanium_2.0.0"
+VERSION = "smart-gym-control-1.0.0"

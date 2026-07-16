@@ -115,6 +115,7 @@ export const SCHEMA = {
         title: 'Encoder',
         fields: [
           f('axis{n}.encoder.config.mode', 'Encoder Type', { kind: 'enum', enumName: 'ODrive.Encoder.Mode', tooltip: 'Incremental (ABZ), Hall, SinCos or SPI absolute.' }),
+          f('axis{n}.encoder.config.abs_spi_cs_gpio_pin', 'SPI Absolute CS Pin', { kind: 'integer', decimals: 0, step: 1, tooltip: 'GPIO pin used as chip-select for an SPI absolute encoder (e.g. AS5047P). Board-specific — differs between ODrive clones.' }),
           f('axis{n}.encoder.config.cpr', 'CPR (Counts per Rev)', { unit: 'counts', decimals: 0, step: 1, tooltip: 'Encoder counts per mechanical revolution. Hall: pole_pairs × 6.' }),
           f('axis{n}.encoder.config.bandwidth', 'Bandwidth', { unit: 'Hz', decimals: 0, step: 10, tooltip: 'Encoder estimator bandwidth.' }),
           f('axis{n}.encoder.config.direction', 'Direction', { kind: 'integer', decimals: 0, step: 1, tooltip: '+1 or -1; set by calibration.' }),
