@@ -3,18 +3,14 @@ import { useSelector } from 'react-redux'
 import {
   Box,
   VStack,
-  HStack,
   Tabs,
   TabList,
   TabPanels,
   Tab,
   TabPanel,
-  Spacer,
   Spinner,
   Text,
 } from '@chakra-ui/react'
-import UpdateChecker from './UpdateChecker'
-import QuitAppButton from './QuitAppButton'
 
 
 // Lazy-loaded tab components
@@ -159,12 +155,6 @@ const MainTabs = () => {
               {tabConfig.label}
             </Tab>
           ))}
-
-          <Spacer />
-          <HStack spacing={4} pr={4}>
-            <UpdateChecker />
-            <QuitAppButton />
-          </HStack>
         </TabList>
 
         <Suspense fallback={<TabLoadingFallback />}>

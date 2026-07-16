@@ -40,19 +40,50 @@ subfolder exists in this project). Treated as the same file — logged in decisi
 
 ## (b) Restructure + trim (spec §3, §4)
 
-- [ ] Create target top-level layout: `backend/`, `frontend/`, `core/` (placeholder +
-      README stub with the GUI/core split rule), `config/`, `docs/`, README.md
+- [x] Created target top-level layout additions: `core/README.md` (placeholder +
+      split-rule doc), `config/` dir (empty, filled in step c). `backend/`,
+      `frontend/`, `docs/` already existed from the clone/step-a work.
 - [ ] Strip multi-axis UI (axis1), hard-code axis0 in frontend; keep backend
       parameterisation if removing it is invasive
 - [ ] Strip multi-device UI; leave backend discovery returning the first device
-- [ ] Strip Windows packaging: `build.bat`, PyInstaller/tray-exe machinery,
-      anything under `backend/dist`, `install.bat`
-- [ ] Decide fate of `odrive_docs_local/` (or `odrive_api_references/`) — keep only
-      if Inspector actually depends on it for tooltips, else replace with README link
-- [ ] Check for v0.5.6-only property handling that would error against a v0.5.1 board;
-      log any found in decisions.md (don't deep-dive without hardware)
-- [ ] Verify/consolidate ODrive access to a single choke point per spec §6 (prep for
-      step d's grep check)
+- [x] Stripped Windows/standalone packaging. Deleted: `build.bat`, `build.sh`,
+      `install.bat`, `install.sh`, `backend/odrive_gui.spec`,
+      `backend/run_standalone.py`, `backend/requirements-build.txt`,
+      `backend/servo.ico`, `backend/app/lifecycle.py`, `backend/app/paths.py`,
+      `.github/workflows/build.yml` (3-OS standalone-exe CI), and
+      `.github/copilot-instructions.md` (upstream's own outdated AI-agent doc).
+      Removed the code wired to them: `/api/heartbeat` + `/api/shutdown` routes and
+      the static-frontend-serving block in `backend/app/app.py`;
+      `QuitAppButton.jsx`, `UpdateChecker.jsx`, and the `isStandalone`/`heartbeat`/
+      `shutdownApp`/`HeartbeatManager` code in `frontend/src/api/backend.js` +
+      `frontend/src/App.jsx`. Full detail in `docs/decisions.md`. Backend re-verified
+      running clean after each removal round.
+- [x] Fixed real v0.5.1 compatibility issue: `backend/requirements.txt` was pinned to
+      `odrive==0.6.10.post0` (upstream's current default target); changed to
+      `odrive==0.5.1.post0` to match our board's actual firmware, per spec §0 and the
+      1B script's own header. Verified: installs clean, backend still starts and
+      serves `/api/devices`.
+- [x] Found + fixed an unrelated-to-0.5.1, but very real, macOS Apple Silicon bug
+      surfaced by that pin change: every `/api/devices` poll was throwing an uncaught
+      `usb.core.NoBackendError` traceback from a background thread (stale x86_64
+      libusb at `/usr/local/lib` shadowing the correct arm64 build at
+      `/opt/homebrew/lib`). Fixed in `backend/app/device_manager.py` via
+      `_ensure_macos_libusb_path()` (prepends `/opt/homebrew/lib` to
+      `DYLD_LIBRARY_PATH` in-process before the lazy `import odrive`). Verified with
+      3 consecutive clean polls, zero tracebacks. Full writeup in `docs/decisions.md`.
+- [ ] Decide fate of `odrive_api_references/` (spec's `Developer/`-relative old name
+      was `odrive_docs_local/`; actual current dir is `odrive_api_references/` — pure
+      .txt doc-mirror input to `scripts/generate_api_reference.py`, confirmed zero
+      runtime dependency from frontend/backend code)
+- [ ] Check for v0.5.6-only property handling that would error against a v0.5.1 board
+      — real gap already found via Explore-agent research: `configSchema.js`'s CAN
+      Bus wizard fields use 0.6.x-only property paths, silently broken (non-crashing)
+      on 0.5.x; needs a fix pass
+- [x] Verified ODrive access is already a single choke point per spec §6: the *only*
+      call to `odrive.find_any` in the whole backend is inside
+      `device_manager._find_any()` (this upstream version already centralises device
+      access there — no scattered raw `odrive` references in route handlers). Final
+      grep re-confirmation happens in step (d) per spec.
 
 ## (c) Rebrand + wizard defaults (spec §4 rebranding scope, §5 constants)
 

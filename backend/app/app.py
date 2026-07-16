@@ -2,16 +2,14 @@ import json
 import logging
 from typing import Any, Dict, List
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sock import Sock
 
 from .constants import VERSION  # backend version tag
 from . import device_manager
 from .api_reference import load_api_reference, reference_line
-from .paths import frontend_dist
 from .telemetry import telemetry_session
-from . import lifecycle
 
 log = logging.getLogger(__name__)
 
@@ -37,19 +35,6 @@ def create_app() -> Flask:
         return jsonify({
             "backend_version": VERSION,
         })
-
-    if lifecycle.standalone_enabled():
-        @app.route("/api/heartbeat", methods=["POST"])
-        def heartbeat():
-            lifecycle.beat()
-            return jsonify({"ok": True})
-
-    @app.route("/api/shutdown", methods=["POST"])
-    def shutdown():
-        # Reply first, then exit shortly after so the response is delivered.
-        import threading
-        threading.Timer(0.3, lifecycle.stop_process).start()
-        return jsonify({"ok": True})
 
     @app.route("/api/devices", methods=["GET"])
     def list_devices():
@@ -161,22 +146,5 @@ def create_app() -> Flask:
                 ws.send(json.dumps({"error": str(e)}))
             except Exception:
                 pass
-
-    # ---- Static frontend (standalone mode) ----
-    # When a built frontend is available, serve it so the whole app runs from a
-    # single process. In dev this is absent and Vite serves the UI instead.
-    dist = frontend_dist()
-    if dist is not None:
-        @app.route("/", defaults={"path": ""})
-        @app.route("/<path:path>")
-        def serve_frontend(path: str):
-            # Never shadow the API namespace.
-            if path.startswith("api/"):
-                return jsonify({"error": "not found"}), 404
-            target = dist / path
-            if path and target.is_file():
-                return send_from_directory(dist, path)
-            # SPA fallback: unknown routes resolve to index.html.
-            return send_from_directory(dist, "index.html")
 
     return app

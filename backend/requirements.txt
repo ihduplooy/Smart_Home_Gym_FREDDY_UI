@@ -2,5 +2,7 @@ Flask==2.3.3
 Flask-CORS==4.0.0
 flask-sock==0.7.0
 # ODrive Python library. Talks to the controller over USB.
-# Pinned to the last stable release; not required when running with ODRIVE_MOCK=1.
-odrive==0.6.10.post0
+# Pinned to match our board's firmware (v0.5.1 on an MKS ODrive Mini v3.6 clone) per
+# 1B config script (config/odrive_config.py) — the client library version must match
+# firmware for the fibre/USB protocol. Not required when running with ODRIVE_MOCK=1.
+odrive==0.5.1.post0

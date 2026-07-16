@@ -95,18 +95,3 @@ export function telemetryUrl(serial) {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${proto}//${window.location.host}/api/devices/${enc(serial)}/telemetry`
 }
-
-/** True when served by the standalone app (not the Vite dev server on :3000). */
-export function isStandalone() {
-  return window.location.port !== '3000'
-}
-
-/** Tell the standalone backend the UI is still open. No-op in dev. */
-export function heartbeat() {
-  return fetch('/api/heartbeat', { method: 'POST' }).catch(() => {})
-}
-
-/** Ask the standalone backend to shut down. No-op in dev. */
-export function shutdownApp() {
-  return fetch('/api/shutdown', { method: 'POST' }).catch(() => {})
-}

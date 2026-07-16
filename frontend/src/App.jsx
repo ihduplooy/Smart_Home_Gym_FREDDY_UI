@@ -8,13 +8,11 @@ import {
   Text,
   Divider,
 } from '@chakra-ui/react'
-import { useEffect } from 'react'
 import { useSelector } from 'react-redux'
 
 import DeviceList from './components/DeviceList'
 import MainTabs from './components/MainTabs'
 import { useDeviceTelemetry } from './hooks/useDeviceTelemetry'
-import { isStandalone, heartbeat, shutdownApp } from './api/backend'
 import './App.css'
 
 // Mounts the single device telemetry WebSocket (status + charts) for the
@@ -53,28 +51,10 @@ function DeviceFooter() {
   )
 }
 
-// Standalone mode: keep the backend alive while the tab is open, shut it down
-// shortly after the tab closes. No-op when served by the Vite dev server.
-function HeartbeatManager() {
-  useEffect(() => {
-    if (!isStandalone()) return undefined
-    heartbeat()
-    const id = setInterval(heartbeat, 5000)
-    const onClose = () => shutdownApp()
-    window.addEventListener('pagehide', onClose)
-    return () => {
-      clearInterval(id)
-      window.removeEventListener('pagehide', onClose)
-    }
-  }, [])
-  return null
-}
-
 function App() {
   return (
     <Box bg="gray.900" minH="100vh" color="white">
       <TelemetryManager />
-      <HeartbeatManager />
       <Flex h="100vh">
         {/* Left Sidebar */}
         <Box w="320px" bg="gray.800" borderRight="1px solid" borderColor="gray.600">

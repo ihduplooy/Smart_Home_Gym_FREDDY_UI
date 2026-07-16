@@ -1,3 +1,6 @@
+import os
+import platform
+import sys
 import threading
 from typing import Any, Dict, List, Iterable
 
@@ -19,12 +22,33 @@ def io_lock(serial: str) -> threading.RLock:
         return lk
 
 
+def _ensure_macos_libusb_path() -> None:
+    """On Apple Silicon, pyusb resolves libusb via ctypes.util.find_library(),
+    which can return a stale x86_64 build (e.g. a leftover Intel/Rosetta
+    Homebrew install at /usr/local/lib) ahead of the correct arm64 build
+    Homebrew actually installs at /opt/homebrew/lib. Loading the wrong-arch
+    dylib fails, and pyusb surfaces that as NoBackendError from a background
+    discovery thread on every poll — not caught by _find_any()'s try/except
+    since it's a different thread. Prepending Homebrew's lib dir to
+    DYLD_LIBRARY_PATH (read by find_library at call time) fixes resolution
+    order without touching anything outside this process.
+    """
+    if sys.platform == "darwin" and platform.machine() == "arm64":
+        homebrew_lib = "/opt/homebrew/lib"
+        current = os.environ.get("DYLD_LIBRARY_PATH", "")
+        if homebrew_lib not in current.split(":"):
+            os.environ["DYLD_LIBRARY_PATH"] = (
+                f"{homebrew_lib}:{current}" if current else homebrew_lib
+            )
+
+
 def _find_any() -> Any:
     """Return a device handle: the mock when ODRIVE_MOCK is set, else real
     hardware. Returns None when no device is present instead of raising, so
     discovery just reports "no devices" rather than a 500."""
     if mock_enabled():
         return get_mock_device()
+    _ensure_macos_libusb_path()
     import odrive  # lazy import; only needed with real hardware
     try:
         return odrive.find_any(timeout=1.0)
