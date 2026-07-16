@@ -65,6 +65,27 @@ firmware)"). Changed the pin to `odrive==0.5.1.post0`. Verified: installs cleanl
 the pyenv 3.9.18 venv on this Mac, and the backend still starts and serves
 `/api/devices` cleanly with it.
 
+## Removed odrive_api_references/ and scripts/ (regeneration tooling, unneeded)
+
+Spec §4 asked to decide the fate of the (old-named) `odrive_docs_local/` doc mirror —
+the actual current directory is `odrive_api_references/` (three .txt files, ~296K:
+official ODrive API docs for 0.5.6 and 0.6.12, plus a changelog). Confirmed zero
+runtime dependency: nothing in `frontend/src` or `backend/app` reads this directory.
+Its only consumer is `scripts/generate_api_reference.py` (regenerates the runtime
+`odriveApiReference0{5,6}x.json` files from these .txt docs when a new ODrive firmware
+release ships) and `scripts/check_api_reference.py` (a coverage-gap sanity check for
+that regeneration) — both purely manual dev tools, referenced only from README's own
+"how to regenerate" instructions, not from CI or any test/build script.
+
+Removed both `odrive_api_references/` and `scripts/`: this project is permanently
+locked to firmware v0.5.1 (never upgrading — v0.5.6 breaks motor activation on this
+board, per spec §0), so the capability to regenerate references against some future
+ODrive release has no use here. The load-bearing runtime files themselves
+(`frontend/src/utils/odriveApiReference05x.json` / `06x.json`, read directly by both
+frontend and backend) are untouched — only the regeneration source/tooling is gone.
+README's rebrand pass (step c) drops the now-dangling "regenerating the reference"
+section accordingly.
+
 ## Real bug found + fixed: Apple Silicon libusb resolution (not a v0.5.1 issue, a macOS-ARM issue)
 
 While re-verifying the no-device state after the requirements.txt pin change, found
@@ -98,6 +119,40 @@ matching duplicate-to-both-axes command-expansion logic in `useConfigWizard.js` 
 property tree (`apiReference.js`'s tree builder now only ever constructs an `axis0`
 section). Reason: axis1 on this board is a ghost node (CAN ID 63 from Phase 2B) —
 only axis0 is ever driven, per spec §5.
+
+## Real v0.5.1-incompatibility found + fixed: CAN Bus wizard fields
+
+`frontend/src/utils/configSchema.js`'s Interface step had a "CAN Bus" group with
+`axis{n}.config.can.node_id` and `axis{n}.config.can.heartbeat_rate_ms`. Checked both
+against `frontend/src/utils/odriveApiReference05x.json`: `axis{n}.config.can` exists
+there only as a non-scalar `ODrive.Axis.CanConfig` struct — there is no `node_id` or
+`heartbeat_rate_ms` scalar leaf documented under it for 0.5.x (those paths are real on
+0.6.x, per the 0.6.x reference JSON, which is where this schema entry was presumably
+copied from). Effect on a real v0.5.1 board: reads back as unreadable/blank (handled
+gracefully, no crash) but writes would silently no-op (backend catches the
+`AttributeError` and reports a per-path error, doesn't crash) — a dead, misleading pair
+of fields for our board.
+
+Fixed the node ID field: `odrive_config_1B.py` (lines 178, 180) uses a **flat**
+`axis{n}.config.can_node_id` — a real property on this exact board/firmware, straight
+from the working 1B script, which is better evidence for this specific clone board than
+an auto-generated reference JSON with incomplete struct coverage. Changed
+`configSchema.js` to that path (confirmed safe: the wizard's form fields declare their
+own `kind`/`unit` and don't require the path to appear in the reference JSON — only the
+Inspector's dynamic tree-builder does that). This is also exactly the property the 1B
+script uses to silence axis1 (`can_node_id = 63`, "Ghost Axis 1 fix", spec §5) — the
+wizard can now actually apply that setting once a device is connected.
+
+Dropped the heartbeat-rate field entirely rather than fix it: no confirmed 0.5.x
+equivalent exists in the reference data, and it isn't part of this project's needs (the
+1B script never sets one; it only sets `can_node_id` and calls
+`odrv0.can.set_baud_rate(500000)` — a *command*, not a writable property, so it isn't
+representable in this property-write-based schema at all and is out of scope for the
+wizard; it'd be set via the console tab or `config/odrive_config.py` directly in Phase
+2A). Not fixed (out of scope, doesn't affect this board): the 0.6.x path itself has a
+second, independent bug — `configSchema.js` calls the field `heartbeat_rate_ms` but the
+real 0.6.x property is `heartbeat_msg_rate_ms` — logged here per spec §8 rather than
+fixed, since we never connect a 0.6.x device to this board.
 
 Deliberately kept: `useMotorControl.js`'s `saveAndReboot` still idles axis1 alongside
 axis0 before `save_configuration` (a real ODrive firmware constraint: all axes must be

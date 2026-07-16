@@ -96,14 +96,27 @@ subfolder exists in this project). Treated as the same file — logged in decisi
       `_ensure_macos_libusb_path()` (prepends `/opt/homebrew/lib` to
       `DYLD_LIBRARY_PATH` in-process before the lazy `import odrive`). Verified with
       3 consecutive clean polls, zero tracebacks. Full writeup in `docs/decisions.md`.
-- [ ] Decide fate of `odrive_api_references/` (spec's `Developer/`-relative old name
-      was `odrive_docs_local/`; actual current dir is `odrive_api_references/` — pure
-      .txt doc-mirror input to `scripts/generate_api_reference.py`, confirmed zero
-      runtime dependency from frontend/backend code)
-- [ ] Check for v0.5.6-only property handling that would error against a v0.5.1 board
-      — real gap already found via Explore-agent research: `configSchema.js`'s CAN
-      Bus wizard fields use 0.6.x-only property paths, silently broken (non-crashing)
-      on 0.5.x; needs a fix pass
+- [x] Decided fate of `odrive_api_references/` (old planning-doc name was
+      `odrive_docs_local/`; actual dir is `odrive_api_references/`). Confirmed zero
+      runtime dependency (only consumed by the now-also-removed
+      `scripts/generate_api_reference.py` / `check_api_reference.py`, manual dev
+      tools for regenerating the JSON reference against a new firmware release —
+      irrelevant since we're permanently locked to v0.5.1). Removed both
+      directories; left the load-bearing runtime files
+      `frontend/src/utils/odriveApiReference05x.json`/`06x.json` untouched.
+- [x] Checked for v0.5.6/0.6.x-only property handling that would error against a
+      v0.5.1 board. Found and fixed one real gap: `configSchema.js`'s CAN Bus wizard
+      fields used `axis{n}.config.can.node_id` /
+      `axis{n}.config.can.heartbeat_rate_ms` — 0.6.x-only paths (0.5.x's
+      `axis{n}.config.can` is a non-scalar struct with no such leaves in the
+      reference JSON). Fixed the node-ID field to the real flat 0.5.x path
+      (`axis{n}.config.can_node_id`, taken straight from `odrive_config_1B.py`'s own
+      working "Ghost Axis 1 fix" — the wizard can now actually silence axis1 via
+      `can_node_id=63`). Dropped the heartbeat-rate field (no confirmed 0.5.x
+      equivalent, not needed by this project). Verified: eslint clean, 40/40 vitest
+      still passing. Full detail in `docs/decisions.md`. No other 0.6.x-only
+      handling found (backend, mock, and frontend registry/property-tree code are
+      all already correctly fw-line-aware).
 - [x] Verified ODrive access is already a single choke point per spec §6: the *only*
       call to `odrive.find_any` in the whole backend is inside
       `device_manager._find_any()` (this upstream version already centralises device

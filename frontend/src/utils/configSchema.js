@@ -202,10 +202,15 @@ export const SCHEMA = {
     axisScoped: true,
     groups: [
       {
+        // 0.5.x exposes CAN node ID as a flat axis{n}.config.can_node_id scalar,
+        // not the nested axis{n}.config.can.node_id struct field 0.6.x uses (that
+        // nested path resolves to a non-scalar CanConfig struct on 0.5.x and is
+        // silently unwritable). No confirmed 0.5.x heartbeat-rate property exists,
+        // so that field was dropped rather than shipped broken — see
+        // docs/decisions.md.
         title: 'CAN Bus',
         fields: [
-          f('axis{n}.config.can.node_id', 'CAN Node ID', { kind: 'integer', decimals: 0, step: 1, min: 0, max: 127, tooltip: 'Unique node ID for this axis on the CAN bus.' }),
-          f('axis{n}.config.can.heartbeat_rate_ms', 'Heartbeat Rate', { kind: 'integer', unit: 'ms', decimals: 0, step: 10, min: 0, tooltip: 'How often the axis broadcasts a heartbeat (0 to disable).' }),
+          f('axis{n}.config.can_node_id', 'CAN Node ID', { kind: 'integer', decimals: 0, step: 1, min: 0, max: 127, tooltip: 'Unique node ID for this axis on the CAN bus. Axis1 must be 63 to silence this board’s ghost second axis (see config/board_constants.py).' }),
         ],
       },
       {
