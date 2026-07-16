@@ -172,16 +172,60 @@ subfolder exists in this project). Treated as the same file — logged in decisi
 
 ## (d) Re-verify + Definition of Done self-check (spec §7)
 
-- [ ] Re-verify "no device connected" state still works after all changes (no crash
-      loop, no unhandled console errors)
-- [ ] DoD 1: `npm run dev` + backend start work in pyenv 3.9.18 env; GUI loads at
-      localhost with project branding
-- [ ] DoD 2: no-ODrive state clean (see above)
-- [ ] DoD 3: config wizard opens pre-loaded with 1B values; command preview matches
-- [ ] DoD 4: multi-axis/multi-device UI gone, no dead buttons
-- [ ] DoD 5: noted as deferred to Phase 2A (real-hardware verification) — nothing to
-      do now beyond acknowledging it
-- [ ] DoD 6: `docs/decisions.md` lists every stripped feature with a one-line reason
-- [ ] DoD 7: `core/` placeholder exists with split rule written down
-- [ ] §6 choke point: grep for `odrive.find_any` / direct fibre calls in backend —
-      confirm exactly one call site
+- [x] Re-verified "no device connected" state after all Session 1 changes: fresh
+      `pip install -r backend/requirements.txt` in the real project venv (not the
+      throwaway one from step a), backend + frontend started via the actual combined
+      `npm run dev` script (not separately, as in earlier spot-checks) — confirmed
+      via headless Chrome: "Smart Gym Control" branding, "No ODrive device found"
+      sensible empty state, zero console errors. Backend log over an extended
+      multi-poll window showed only clean `200`s on `/api/devices` and
+      `/api/board-constants` — no tracebacks, no crash loop, process stayed alive
+      throughout. Both servers stopped cleanly afterward.
+- [x] **DoD 1** — `npm run dev` (the actual combined script, `concurrently` running
+      both `dev:backend` and `dev:frontend`) works with the pyenv 3.9.18 venv active;
+      GUI loads at `localhost:3000` with "Smart Gym Control" branding. Confirmed above.
+- [x] **DoD 2** — no-ODrive state is clean (see re-verification above): sensible
+      empty state, no crash loop, zero unhandled console errors, confirmed across
+      all 5 tabs (Configuration, Presets, Dashboard, Inspector, Command Console).
+- [x] **DoD 3** — config wizard opens pre-loaded with the 1B values; generated
+      command preview matches the 1B script's settings. Verified end-to-end in step
+      (c) against the mock device (`ODRIVE_MOCK=1 ODRIVE_MOCK_FW=5`): all ~20
+      project-specific fields (pole_pairs, abs_spi_cs_gpio_pin, encoder mode, cpr,
+      control_mode, vel_limit, gains, bus limits, axis0 CAN node ID) show the exact
+      1B-script values in the Apply step's command preview.
+- [x] **DoD 4** — multi-axis and multi-device UI confirmed gone: `AxisSelector`
+      deleted, "Apply to both axes" checkbox gone, Inspector hides axis1, device
+      list shows a single device-or-not-found view instead of a card grid. No dead
+      buttons found in a final repo-wide sweep for references to anything removed
+      this session (QuitAppButton, UpdateChecker, lifecycle/standalone routes, etc.)
+      — all clean except the intentional upstream-attribution link in README.md.
+- [x] **DoD 5** — (deferred to Phase 2A per spec, listed for completeness) Inspector,
+      charts, console, and calibration flows against the real board — acknowledged,
+      nothing to do now; these are exactly the features spec §4 said to *keep
+      as-is*, and Session 1's job was only to confirm they aren't broken by the trim
+      (done via the mock-device pass and the disconnected-state tab sweep above).
+- [x] **DoD 6** — `docs/decisions.md` lists every stripped feature and every
+      incompatibility/bug found during the trim, each with its reasoning: Windows/
+      standalone packaging, multi-axis UI, multi-device UI, the CAN-schema 0.5.x
+      path bug, the odrive pip-package version pin, the Apple Silicon libusb bug,
+      the odrive_api_references/scripts removal, the missing abs_spi_cs_gpio_pin
+      field, the mock's missing can_node_id seed, and the wizard-defaults merge-
+      order bug.
+- [x] **DoD 7** — `core/README.md` exists (empty placeholder package) with the
+      GUI/core split rule explicitly written down ("GUI calls into core/, never the
+      reverse").
+- [x] **§6 choke point** — grepped the whole `backend/` tree for `find_any` and
+      `import odrive`: exactly one call site, `device_manager.py:59` inside the
+      module's own `_find_any()` (the five other `find_any()` hits are in
+      `config/odrive_config.py`, the standalone Phase 1B hardware-bringup script —
+      not part of the GUI backend, never imported by it, run manually by a human in
+      Phase 2A). Also confirmed no route handler in `app.py` holds a raw `odrv`
+      reference of its own — every handler calls `device_manager.attach_or_get(serial)`
+      fresh each request; the only persistent cache lives inside `device_manager`
+      itself. Session 2's mock/real hardware-interface swap has exactly one place
+      to plug into.
+
+**Session 1 complete.** Every Definition of Done item in spec §7 is checked and
+verified above; every item's verification method (grep, headless-Chrome console
+capture, live mock-device pass, or direct code reading) is recorded so a fresh
+session can trust this checklist without re-deriving it.
