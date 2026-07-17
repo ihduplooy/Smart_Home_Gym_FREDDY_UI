@@ -229,3 +229,241 @@ subfolder exists in this project). Treated as the same file — logged in decisi
 verified above; every item's verification method (grep, headless-Chrome console
 capture, live mock-device pass, or direct code reading) is recorded so a fresh
 session can trust this checklist without re-deriving it.
+
+---
+
+# Session 2 progress — core/ + Control modes
+
+Tracks spec §10 ("Definition of Done") from `Phase 1/1C_build_spec_session2.md`.
+Checked items are done AND verified. Rationale for design decisions, the sim J/B
+values, and the websocket-vs-REST outcome are in `docs/decisions.md` (Session 2
+section) — this file tracks completion + verification method only.
+
+## §3 — core/ package layout
+
+- [x] Built exactly the shape in spec §3: `core/hardware/` (`interface.py`,
+      `sim_hw.py`, `odrive_hw.py`, plus a shared `_macos_usb.py` leaf util per
+      §5.1), `core/control/` (`modes.py`, `session.py`), `core/telemetry/`
+      (`csv_logger.py`), `core/tests/`. `core/` imports only
+      `config.board_constants` and (lazily, inside `odrive_hw.py` methods
+      only) the `odrive` package — verified by grep (`grep -rn "backend"
+      core/` — zero matches).
+
+## §4 — Hardware interface contract
+
+- [x] `HardwareInterface` ABC (`core/hardware/interface.py`): `connect()` /
+      `disconnect()` / `is_connected`, `get_state() -> TelemetrySample`,
+      `set_mode()`, `set_velocity_target()` / `set_torque_target()`,
+      `stop()`, `get_errors()`. `TelemetrySample` dataclass with `t`,
+      `position`, `velocity`, `current_iq`, `torque_est`. Torque constant is
+      `config.board_constants.MOTOR_TORQUE_CONSTANT`, a `# TODO(2A)`
+      placeholder (open item #2) — see decisions.md. Units are ODrive 0.5.1
+      native throughout (turns, turns/s, Nm, A) — verified by code reading,
+      no degrees/counts/cable conversions anywhere in `core/`.
+- [x] `test_abc_cannot_be_instantiated` (`core/tests/test_interface_contract.py`)
+      confirms the ABC itself can't be constructed; both concrete
+      implementations verified to satisfy the full contract.
+
+## §5 — odrive_hw.py and sim_hw.py
+
+- [x] `odrive_hw.py`: own `find_any(timeout=...)` call site, does not import
+      `device_manager`. Uses the shared `core/hardware/_macos_usb.py` helper
+      (extracted from `device_manager.py`'s Session-1 fix, now used by both
+      — see decisions.md). Clamps velocity targets to
+      `board_constants.CONTROLLER_VEL_LIMIT` and torque targets to
+      `MOTOR_CURRENT_LIM * MOTOR_TORQUE_CONSTANT`, logging a warning on
+      clamp — verified by code reading (`set_velocity_target`/
+      `set_torque_target`). Never writes config/calibration properties —
+      confirmed: only `requested_state`, `controller.config.control_mode`,
+      `controller.config.input_mode`, `controller.input_vel`/`input_torque`
+      are touched. Two-connection conflict flagged `# TODO(2A)` at
+      `connect()`, logged in decisions.md.
+- [x] `sim_hw.py`: dynamic motor model (`accel = (torque_cmd - b*velocity) /
+      J`, Euler integration on each `get_state()` call using elapsed
+      monotonic time). `SIM_INERTIA_J`/`SIM_DAMPING_B` chosen and reasoning
+      logged in decisions.md. Velocity mode uses a proportional controller
+      reusing the same integrator (`SIM_VELOCITY_KP`). `current_iq` derived
+      back from applied torque via `MOTOR_TORQUE_CONSTANT` so `torque_est`
+      round-trips — verified by
+      `test_torque_est_round_trips_from_current_iq`. No noise/load/cable
+      model, per spec. Verified: `test_positive_torque_makes_velocity_rise`,
+      `test_stop_zeroes_targets_and_idles`,
+      `test_velocity_mode_converges_toward_target` all pass
+      (`core/tests/test_sim_hw.py`).
+- [x] Upstream's `mock_odrive.py` (property-tree mock) untouched this
+      session — confirmed via `git status`/diff, zero changes to that file
+      or its consumers (Inspector/wizard/console).
+- [x] Hardware source selection: `hardware_source ∈ {"sim", "real"}`,
+      default `"sim"`, backend-owned on the single `ControlSession`
+      instance, settable via `GET/POST /api/control/hardware-source` and
+      surfaced in the Control tab UI (Sim/Real buttons + an unmissable
+      colored banner). Refused while running — verified by
+      `test_hardware_source_refused_while_running` and live via curl
+      (`{"error": "Cannot change hardware source while a session is
+      running"}`).
+
+## §6 — Control layer
+
+- [x] `modes.py`: `VelocityMode`/`TorqueMode`, thin, each declares
+      `hardware_mode` + `unit` and validates/forwards its target type
+      (rejects non-numeric with `TypeError` — verified by
+      `test_validate_target_rejects_non_numeric`). `TorqueMode` carries the
+      `# TODO(2A)` for `enable_torque_mode_vel_limit` (open item #8) per
+      spec §11. Kept as classes (a shared `BaseMode` ABC) so Session 3's
+      profile mode can slot in without changing `ControlSession`'s API.
+- [x] `session.py`: `ControlSession` — owns the active `HardwareInterface`,
+      active mode, a 50 Hz background telemetry thread (`TELEMETRY_HZ`, one
+      constant), a 500-sample ring buffer (~10s of history), and the CSV
+      logger lifecycle. API implemented exactly per spec:
+      `start(mode, target)`, `set_target(value)`, `stop()`, `status()`,
+      `set_hardware_source()`. Verified end-to-end via
+      `core/tests/test_control_session.py` (14 tests) AND live via curl
+      against the real Flask app (start/retarget/stop, double-start
+      refusal, Real-with-no-device failure) — see below.
+- [x] **Safety behaviours — all implemented and tested**
+      (`core/tests/test_control_session.py`):
+      - `stop()` reaches hardware even if the telemetry thread is wedged:
+        `test_stop_reaches_hardware_even_if_telemetry_thread_wedged` (a fake
+        hardware whose `get_state()` blocks forever; `stop()` still calls
+        `hardware.stop()` and returns in well under the 2s join-timeout
+        bound).
+      - Telemetry-loop exception → hardware stop + session errored, never a
+        silent dead loop: `test_telemetry_loop_exception_auto_stops_and_marks_errored`.
+      - `get_errors()` non-empty during a run → automatic stop, surfaced in
+        `status()`: `test_hardware_errors_trigger_auto_stop`.
+      - Double-start refused: `test_double_start_refused`.
+      - `atexit` final-stop: `ControlSession.__init__(register_atexit=True)`
+        registers `self._atexit_stop` — verified by code reading (the
+        registration + its try/except-wrapped call to `self.stop()`); not
+        independently re-tested at the process level beyond that, since
+        `atexit` itself is stdlib-guaranteed.
+
+## §7 — Telemetry logger
+
+- [x] `csv_logger.py`: exact columns per spec (`timestamp_iso, t_rel_s,
+      mode, target, position_turns, velocity_turns_s, current_iq_a,
+      torque_est_nm`), one row per tick, files at `logs/` (repo root,
+      already gitignored from Session 1), named
+      `telemetry_YYYYMMDD_HHMMSS_<mode>_<sim|real>.csv`, auto-open on
+      session start / close on stop, flushes at least 1×/s. Plain stdlib
+      `csv`, no pandas. Verified: `core/tests/test_csv_logger.py` (file
+      shape/columns/rows) AND live — CSV files inspected during manual curl
+      testing showed correct headers, mode/target columns, and plausible
+      numeric telemetry (see decisions.md for a sample).
+
+## §8 — Backend + frontend wiring
+
+- [x] `backend/app/control_routes.py`: thin adapter module, zero control
+      logic (argument parsing + `ControlSession` calls + JSON only),
+      registered on the existing Flask app via `control_routes.register(app,
+      sock)`. All five REST routes implemented exactly per spec
+      (`GET /api/control/status`, `POST /api/control/start`,
+      `POST /api/control/target`, `POST /api/control/stop`,
+      `GET/POST /api/control/hardware-source`) plus
+      `GET /api/control/telemetry?since=`. Verified live via curl: status
+      transitions correctly through idle → running → stopped, retarget
+      updates `target` in `status()`, double-start returns a clean 400,
+      Real-with-no-device returns a clean 400 with `"No ODrive device
+      found"` in ~2s (bounded by `OdriveHardware`'s `find_timeout`).
+- [x] `/ws/control-telemetry` websocket built exactly per spec (flask-sock,
+      same pattern as the existing per-device telemetry route) — but the
+      frontend uses the REST fallback instead. Full root-cause writeup in
+      decisions.md: the websocket's *close* path (not its data path) races
+      against `simple_websocket`'s own background per-connection thread
+      under Werkzeug's dev server, corrupting the frame stream — 100%
+      reproducible even bypassing the Vite proxy entirely, so not a proxy
+      issue. `useControlTelemetry.js` polls `GET /api/control/status` +
+      `GET /api/control/telemetry?since=` every 150ms instead. Verified:
+      repeated Control ↔ Inspector ↔ Dashboard tab cycling (5 rounds,
+      headless Chrome) — zero console errors.
+- [x] Frontend Control tab (`frontend/src/components/tabs/control/ControlTab.jsx`):
+      hardware source selector with an unmissable colored banner (yellow
+      "SIM" / red "REAL HARDWARE", switchable only while idle), mode select
+      (Velocity/Torque) + numeric target input with unit shown, Start
+      button (idle only) / "Set target" button (live retarget while
+      running) / STOP button (always visible, red, disabled only while not
+      running), live numeric readout (position/velocity/torque/current),
+      three live mini-charts (position/velocity/torque) reusing the same
+      recharts pattern as the Inspector's `LiveCharts.jsx` (dark card,
+      colored line, seconds X-axis — the declared Session 1→2 chart-reuse
+      touchpoint), error display (both action errors and backend-reported
+      hardware errors), and the active CSV log filename. No restyling —
+      same Chakra dark theme/odrive color scheme as every other tab.
+      Registered in `MainTabs.jsx` alongside the existing five.
+
+## §9 — Verification (all against sim)
+
+- [x] **1. `core/tests/` pytest suite** — 35/35 passing, no Flask, no
+      device (`python -m pytest core/tests`). Covers the interface
+      contract, sim dynamics sanity, `ControlSession` lifecycle + all five
+      safety behaviours, and CSV shape/columns/rows.
+- [x] **2. Headless-Chrome pass, Control tab, source=Sim** — velocity run
+      started, live values moving (position/velocity/torque/current
+      updating), retargeted live (0.5 → 1.0 turns/s, chart and readout
+      updated), stopped; same for torque mode (0.2 Nm, then switched
+      target while running); CSV filename appeared and changed per run
+      (`telemetry_<ts>_velocity_sim.csv`, `telemetry_<ts>_torque_sim.csv`);
+      **zero console errors** across the whole flow (verified via a
+      puppeteer-core script driving a local headless Chrome — scratchpad,
+      not committed, per the Session 1 precedent).
+- [x] **3. Regression — all five existing tabs** — clicked through
+      Configuration, Presets, Dashboard, Inspector, Command Console (plus
+      Control) against `ODRIVE_MOCK=1 ODRIVE_MOCK_FW=5`: **zero console
+      errors on every tab**. `npx eslint .` clean (zero warnings/errors).
+      `npx vitest run`: 40/40 passing, 2 skipped (live-hardware-only,
+      unchanged from Session 1).
+- [x] **4. Choke-point audit refreshed** — `grep -rn "find_any"
+      --include="*.py" backend core config`: exactly the two documented
+      call sites (`backend/app/device_manager.py:37`,
+      `core/hardware/odrive_hw.py:67`) plus the five hits inside the
+      standalone `config/odrive_config.py` 1B script (never imported by the
+      GUI backend or `core/`).
+- [x] **5. "Real" source, no device attached** — selecting Real and
+      pressing Start fails cleanly: visible `"No ODrive device found"`
+      error in the UI, no crash, no hang (bounded ~2s, matching
+      `OdriveHardware`'s default `find_timeout`), source switchable back to
+      Sim, and Sim verified still fully functional afterward (started a
+      session, confirmed CSV log appeared). Verified via a headless-Chrome
+      script driving the actual UI buttons, not just curl.
+
+## §10 — Definition of Done
+
+1. [x] `core/` package exists per §3, importable with no side effects
+       (`import core.hardware.odrive_hw` etc. succeed without a connected
+       device or the `odrive` package being reachable — it's installed in
+       this venv, but nothing in `core/` imports it at module scope, only
+       lazily inside `odrive_hw.py` methods), tests green (35/35).
+2. [x] Control tab works end-to-end against the sim: both modes, live
+       retarget, live chart, stop, CSV written — verified live (§9.2).
+3. [x] All §6 safety behaviours implemented and covered by tests (§6 above).
+4. [x] Mock-vs-real selectable from the GUI; Real fails cleanly with no
+       device (§9.5).
+5. [x] Torque mode reachable programmatically: the 5-line snippet in
+       `core/README.md` verified to actually run (`python3 -c "..."`
+       against the sim, no Flask involved) — printed a live
+       `TelemetrySample` and stopped cleanly.
+6. [x] Existing tabs regression-clean; eslint/vitest green (§9.3).
+7. [x] `docs/progress.md` Session 2 section fully checked with verification
+       notes (this section); `docs/decisions.md` updated — torque constant,
+       macOS usb helper extraction, two-connection flag, sim J/B values,
+       the websocket-vs-REST root cause and outcome, `threaded=True`, and
+       the `/ws` proxy addition.
+
+## §11 — Known follow-ups flagged in-code (not solved, per spec)
+
+- [x] Two-connection conflict (`core/hardware/odrive_hw.py` §5.1) —
+      `# TODO(2A)` at `OdriveHardware.connect()`.
+- [x] `enable_torque_mode_vel_limit` vs. profile-layer velocity behaviour
+      (open item #8) — `# TODO(2A)` at `TorqueMode` in `core/control/modes.py`.
+- [x] Torque constant placeholder (open item #2) — `# TODO(2A)` at
+      `MOTOR_TORQUE_CONSTANT` in `config/board_constants.py`.
+- [x] Sim `J`/`B` placeholders — noted in `core/hardware/sim_hw.py` module
+      docstring and `core/README.md`.
+
+**Session 2 complete.** Every Definition of Done item in spec §10 is checked and
+verified above; every item's verification method (pytest, headless-Chrome console
+capture + live UI interaction, curl against the real Flask app, or direct code
+reading) is recorded so a fresh session can trust this checklist without
+re-deriving it. Out-of-scope items from spec §12 (live hardware, resistance
+profiles, `core/profiles/`, any profile math, phase/rep detection, spool-radius
+conversion, restyling, CAN/Pi, regen) were not touched.
