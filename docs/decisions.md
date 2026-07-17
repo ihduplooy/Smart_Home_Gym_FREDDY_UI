@@ -467,6 +467,49 @@ work as a concrete data point (a fast/no-pause real rep cadence may need this
 constant retuned to actually count reps in practice — flagged as a known limitation
 of the stub math, not fixed here per spec §11).
 
+## base.py: added get_primary_parameter() alongside spec's set_primary_parameter()
+
+Spec §5.2 lists `set_primary_parameter(value)` + `primary_parameter_label` as the
+live-retarget hook, but doesn't specify a getter. Added `get_primary_parameter()` as
+a paired, symmetric method — needed so `ControlSession`/CSV logging can report a
+profile's *current* numeric target without holding a reference to the
+(non-JSON-serializable) `ResistanceProfile` object itself; see the `ProfileMode`
+entry below for how this gets used. Not a spec deviation, just filling a gap the
+spec's ABC section didn't address.
+
+## base.py: IS_WRAPPER class attribute (not literally in spec's ABC list)
+
+Spec §7 needs the backend's `/api/profiles` route to report "whether it's a
+wrapper" per profile, and §5.3 already gives `OverloadWrapper` a structurally
+different constructor (wraps another profile) from the other three. Added
+`ResistanceProfile.IS_WRAPPER = False` (class attribute, overridden `True` on
+`OverloadWrapper`) so the registry (`core/profiles/__init__.py::PROFILE_REGISTRY`)
+can stay literally `dict[str, factory]` as spec'd, with wrapper-ness read off the
+class itself (`factory().describe()["is_wrapper"]`) rather than needing a second,
+separately-maintained "which ones are wrappers" list that could drift out of sync.
+
+## BellCurveProfile: default curve range and injectable curve_factor
+
+Spec §5.3 specifies the raised-cosine shape and injectability but not concrete
+`x_start`/`x_end` defaults (real cable-travel range is unknown pre-2A). Chose
+`x_start=0.0, x_end=1.0` (turns) as an arbitrary placeholder window — matches the
+"# STUB(2A+)" status of everything else in this file. `curve_factor` defaults to a
+bound method computed from `self.x_start/x_end/peak_multiplier`, but the constructor
+accepts any injected callable `position -> multiplier`, verified in
+`test_bell_curve_curve_factor_is_injectable` that the injected callable is actually
+what gets called (not just accepted and ignored).
+
+## OverloadWrapper: zero-arg constructible via a default ConstantProfile
+
+Spec §5.3 says overload "requir[es] a base-profile choice" for real use (the backend
+composes it server-side per §7 over whichever base profile the user picked), but
+`PROFILE_REGISTRY`'s consumers (schema introspection for `/api/profiles`, the
+registry-shape test) need every entry in the registry to be constructible with zero
+arguments. Defaulted `wrapped=None` to a fresh `ConstantProfile()` in that case —
+only matters for introspection; the real runtime path
+(`POST /api/control/start` with `overload: {...}`) always constructs
+`OverloadWrapper(explicit_chosen_base_profile, ratio=..., target_phase=...)`.
+
 ## Vite dev proxy: added a /ws prefix
 
 `frontend/vite.config.js` only proxied `/api/*` to the backend; `/ws/control-telemetry`

@@ -504,12 +504,39 @@ starting. See decisions.md.
       threshold+hysteresis) produces zero phase flicker; a phase sequence with
       no CONCENTRIC ticks produces zero rep counts; reset() on both classes
       verified. Run: `.venv/bin/python -m pytest core/tests/test_detectors.py -v`.
-- [ ] §5.2 `base.py`: `ResistanceProfile` ABC (`compute_torque`, `name`, `describe()`,
-      `primary_parameter_label` + get/set, `reset()`).
-- [ ] §5.3 four stubs: `ConstantProfile`, `BellCurveProfile` (injectable
-      `curve_factor`), `OverloadWrapper` (composition, constructible with either
-      target phase), `VBTProfile` (per-rep auto-regulation). `PROFILE_REGISTRY` in
-      `__init__.py`.
+- [x] §5.2 `base.py`: `ResistanceProfile` ABC — `compute_torque(state)`, `name`,
+      `describe()` (name/is_wrapper/primary_parameter/parameters-with-schema, also
+      the source for the backend's `/api/profiles` route), `primary_parameter_label`
+      property, `set_primary_parameter()` (spec) + `get_primary_parameter()` (added,
+      not in spec text — see decisions.md for why), `reset()`. `IS_WRAPPER` class
+      attr (default False) added so the registry can flag overload without a
+      second hardcoded list. Verified: imports cleanly, exercised indirectly by
+      every §5.3 stub's tests below (an ABC can't be instantiated directly, so
+      there's no standalone base.py test — covered via subclasses).
+- [x] §5.3 four stubs, all carrying `# STUB(2A+)` on their math body:
+      `ConstantProfile` (`force_to_torque(base_force_n)` exactly),
+      `BellCurveProfile` (raised-cosine `curve_factor` bump over
+      `[x_start, x_end]` peaking at `peak_multiplier`, injectable/replaceable
+      callable), `OverloadWrapper` (composition over any wrapped profile,
+      multiplies only in `target_phase`, defaults ECCENTRIC, constructible with
+      `target_phase=Phase.CONCENTRIC`, zero-arg constructible via a default
+      `ConstantProfile`, primary parameter passes through), `VBTProfile`
+      (accumulates mean |v| during CONCENTRIC, adjusts an internal scalar by
+      `adjust_step` exactly once per completed rep — verified not per-tick).
+      `PROFILE_REGISTRY` in `core/profiles/__init__.py` (name -> factory, all four).
+      Verified: `core/tests/test_profiles.py`, 21/21 passing — constant emits
+      `force*radius` exactly; bell-curve equals base force outside range and
+      peaks at the midpoint; the injected `curve_factor` callable is actually
+      called with position; OverloadWrapper multiplies only in its target phase
+      (both ECCENTRIC and CONCENTRIC configs) and never in either hold (4-way
+      parametrized); primary-parameter pass-through confirmed; VBT scales down
+      after a slow rep, up after a fast rep, holds in-band, and — critically —
+      the scalar is provably unchanged across 20 mid-rep ticks and only moves at
+      the rep-boundary tick; every registry entry is a real `ResistanceProfile`
+      with `is_wrapper` correctly `True` only for `"overload"`; a profile whose
+      `compute_torque` raises does raise (session-level auto-stop wiring is
+      §3/session.py's job, tested there). Run:
+      `.venv/bin/python -m pytest core/tests/test_profiles.py -v`.
 
 ## §6 — CSV logger extension
 
