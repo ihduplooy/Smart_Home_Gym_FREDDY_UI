@@ -1,4 +1,4 @@
-from .modes import TorqueMode, VelocityMode
+from .modes import ProfileMode, TorqueMode, VelocityMode
 from .session import ControlSession
 
-__all__ = ["TorqueMode", "VelocityMode", "ControlSession"]
+__all__ = ["TorqueMode", "VelocityMode", "ProfileMode", "ControlSession"]

@@ -538,11 +538,50 @@ starting. See decisions.md.
       §3/session.py's job, tested there). Run:
       `.venv/bin/python -m pytest core/tests/test_profiles.py -v`.
 
+## §3 — ProfileMode + wiring into ControlSession's 50 Hz loop
+
+- [x] `core/control/modes.py`: `BaseMode` gained three concrete default-no-op/
+      identity extension hooks (`tick`, `csv_log_name`, `status_target`) so
+      `ControlSession` stays generic across all three modes with zero isinstance
+      checks. `ProfileMode` added: `hardware_mode=TORQUE`, `validate_target`
+      accepts a `ResistanceProfile` at start / a float on retarget,
+      `apply_target` stores+resets the profile (start) or calls
+      `set_primary_parameter` (retarget), `tick()` runs phase detector + rep
+      counter + `compute_torque` + `hardware.set_torque_target` every tick
+      (same clamp path as Session 2 — no new clamp added, see decisions.md),
+      `csv_log_name`/`status_target` overridden for the profile-name filename
+      and primary-parameter status/CSV target respectively. Registered as
+      `MODES_BY_NAME["profile"]`.
+- [x] `core/control/session.py`: `_telemetry_loop` now calls
+      `mode_handler.tick(hardware, sample)` between `get_state()` and
+      `get_errors()` inside the same try/except that already auto-stops on any
+      exception — a profile's `compute_torque` raising is indistinguishable
+      from a hardware read failure, same auto-stop path. `start()`/
+      `set_target()` route the CSV logger name and `status()`'s `target` field
+      through the new mode hooks. `status()` gained `phase`/`rep_count` fields
+      (None when not running a profile). Verified:
+      `core/tests/test_profile_mode.py`, 8/8 passing — a `ConstantProfile` runs
+      end-to-end through `ControlSession` (status shows phase/rep_count/correct
+      primary-parameter target); retargeting adjusts the same profile object in
+      place (not a new one); CSV filename gains `profile-<name>`; an
+      `OverloadWrapper`-wrapped profile runs end-to-end with its primary
+      parameter passed through; **a profile whose `compute_torque` raises
+      auto-stops the session** (extends all 5 Session-2 safety behaviours to
+      ProfileMode, spec §3's explicit requirement); starting with a non-profile,
+      non-numeric target raises `TypeError` before touching hardware. Full
+      69/69 `core/tests` suite (35 pre-existing + 34 new) still green. Run:
+      `.venv/bin/python -m pytest core/tests -v`.
+
 ## §6 — CSV logger extension
 
-- [ ] `phase`, `rep_count` columns appended after `torque_est_nm`; empty strings for
-      non-profile runs. Filenames gain `profile-<name>`. Amendment noted in
-      decisions.md.
+- [x] `phase`, `rep_count` columns appended after `torque_est_nm`; empty strings
+      for non-profile runs (verified explicitly:
+      `test_velocity_mode_csv_leaves_phase_and_rep_count_columns_empty`).
+      Filenames gain `profile-<name>` (`ControlSession` routes this through
+      `ProfileMode.csv_log_name`, verified
+      `test_profile_mode_csv_filename_includes_profile_name`). Amendment noted
+      in decisions.md. Existing `core/tests/test_csv_logger.py` (Session 2,
+      unmodified) still passes unchanged against the new 10-column schema.
 
 ## §7 — Backend + frontend wiring
 

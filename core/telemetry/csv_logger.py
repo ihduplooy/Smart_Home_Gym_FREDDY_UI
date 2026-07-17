@@ -3,6 +3,11 @@
 One row per telemetry tick while a session runs. Auto-started on
 ControlSession.start(), closed on stop(). Flushes at least once a second so a
 crash doesn't lose the run.
+
+Session 3 amendment (spec §6): two columns appended after `torque_est_nm` —
+`phase`, `rep_count` — populated during profile runs, empty strings for
+velocity/torque runs (this amends Session 2's "exact columns" clause; see
+docs/decisions.md).
 """
 
 import csv
@@ -22,6 +27,8 @@ COLUMNS = [
     "velocity_turns_s",
     "current_iq_a",
     "torque_est_nm",
+    "phase",
+    "rep_count",
 ]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -56,7 +63,14 @@ class CsvLogger:
         self._last_flush = time.monotonic()
         return self.path
 
-    def log_sample(self, sample: TelemetrySample, mode: str, target: float) -> None:
+    def log_sample(
+        self,
+        sample: TelemetrySample,
+        mode: str,
+        target: float,
+        phase: str = "",
+        rep_count=""
+    ) -> None:
         if self._writer is None or self._t0 is None:
             raise RuntimeError("CsvLogger.log_sample() called before open()")
         self._writer.writerow([
@@ -68,6 +82,8 @@ class CsvLogger:
             sample.velocity,
             sample.current_iq,
             sample.torque_est,
+            phase,
+            rep_count,
         ])
         now = time.monotonic()
         if now - self._last_flush >= _FLUSH_INTERVAL_S:

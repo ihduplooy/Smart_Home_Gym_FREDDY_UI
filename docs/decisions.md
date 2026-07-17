@@ -510,6 +510,62 @@ only matters for introspection; the real runtime path
 (`POST /api/control/start` with `overload: {...}`) always constructs
 `OverloadWrapper(explicit_chosen_base_profile, ratio=..., target_phase=...)`.
 
+## ProfileMode: three new BaseMode extension hooks instead of isinstance checks in ControlSession
+
+Spec §3 requires ProfileMode to run an outer loop inside the existing 50 Hz tick
+(sample → detect phase/rep → compute_torque → clamp → set_torque_target → log),
+while VelocityMode/TorqueMode stay set-and-forget. Rather than adding
+`if isinstance(mode_handler, ProfileMode)` branches to `ControlSession`
+(`core/control/session.py`), added three concrete (non-abstract, default no-op/
+identity) methods to `BaseMode` itself (`core/control/modes.py`):
+`tick(hardware, sample) -> dict`, `csv_log_name(mode) -> str`,
+`status_target(validated_value)`. `ControlSession` calls all three unconditionally
+on whichever mode is active — Velocity/Torque's defaults are no-ops/identity, so
+their existing behaviour is provably unchanged (regression-verified: full 35
+pre-Session-3 tests still pass unmodified). This keeps `ControlSession` mode-agnostic
+exactly as it already was for Velocity vs. Torque, rather than teaching it a third
+mode's internals directly.
+
+## ProfileMode's "target" does double duty by design (spec §3), made JSON-safe via status_target()
+
+`ControlSession.start(mode="profile", target=<ResistanceProfile instance>)` — the
+profile instance itself is the "target" at start (spec §3's literal wording).
+`set_target()` afterward takes a plain float (the primary parameter). Both flow
+through the same `validate_target`/`apply_target` pipeline as Velocity/Torque, so
+`ProfileMode.validate_target` accepts either type and `apply_target` branches on
+which one it got. The problem: `ControlSession._target` (used by `status()`/CSV) must
+be JSON/CSV-safe, and a raw `ResistanceProfile` object is neither. Fixed via the
+`status_target()` hook (see above): after `apply_target()`, the session asks the mode
+to describe the *displayable* target rather than storing the validated value
+directly — `ProfileMode.status_target()` returns `self.profile.get_primary_parameter()`
+(a plain float) regardless of whether the just-validated value was the profile
+object (start) or a float (retarget). Verified:
+`test_profile_mode_runs_end_to_end_against_sim` (target is the primary parameter, not
+an object) and `test_profile_mode_retarget_adjusts_primary_parameter_not_the_profile_object`
+(same profile object mutated in place, confirmed via the original reference).
+
+## No new torque clamp added for ProfileMode (spec §3's "same clamp path")
+
+Spec §3 says the tick loop should "clamp (same clamp path as Session 2's torque
+writes)" before `set_torque_target()`. Session 2's torque clamp already lives inside
+`hardware.set_torque_target()` itself, asymmetrically: `OdriveHardware` clamps to
+`MOTOR_CURRENT_LIM * MOTOR_TORQUE_CONSTANT`, `SimHardware` does not clamp at all
+(matches its existing TorqueMode behaviour, unchanged since Session 2). `ProfileMode.
+tick()` calls `hardware.set_torque_target(torque)` with the raw profile output,
+same as `TorqueMode.apply_target()` always has — no second/duplicate clamp added in
+`core/profiles` or `core/control/modes.py`. This is a literal "reuse the same path"
+reading, not a new decision, but flagged here since it's easy to misread the spec
+sentence as "add a clamp function."
+
+## CSV logger: phase/rep_count populated via mode_handler.tick()'s return value, not a new session field
+
+`ProfileMode.tick()` returns `{"phase": ..., "rep_count": ...}`; Velocity/Torque's
+default `tick()` returns `{}`. `ControlSession` stores this in `self._last_extra` and
+threads it into both `status()` (`phase`/`rep_count` keys, `None` when absent) and
+`CsvLogger.log_sample(..., phase=extra.get("phase", ""), rep_count=extra.get("rep_count", ""))`
+— empty string for velocity/torque runs, matching spec §6's amendment exactly, with
+no special-casing beyond the dict lookup.
+
 ## Vite dev proxy: added a /ws prefix
 
 `frontend/vite.config.js` only proxied `/api/*` to the backend; `/ws/control-telemetry`

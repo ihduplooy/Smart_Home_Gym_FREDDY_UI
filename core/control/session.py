@@ -9,11 +9,20 @@ Safety behaviours (non-negotiable, see core/tests/):
     before touching the session lock, so a hung get_state() call never blocks
     the emergency path.
   - Any exception in the telemetry loop stops the hardware and marks the
-    session errored, never a silent dead loop.
+    session errored, never a silent dead loop. This also covers Session 3's
+    ProfileMode: mode_handler.tick() (which calls the active profile's
+    compute_torque()) runs inside the same try/except, so a profile that
+    raises is indistinguishable from a hardware read failure here — same
+    auto-stop path, no special-casing needed.
   - get_errors() returning non-empty during a run triggers an automatic stop,
     surfaced in status().
   - Starting a new session while one is running is refused.
   - Backend process exit (atexit) attempts a final stop().
+
+Session 3 adds resistance profiles as a third mode (core.control.modes.ProfileMode)
+that runs an outer loop *inside* this same tick via BaseMode.tick() — no second
+thread, no second rate (spec §3). See modes.py for the extension-point hooks
+(tick/csv_log_name/status_target) that make this generic across all three modes.
 """
 
 import atexit
@@ -71,6 +80,7 @@ class ControlSession:
 
         self._ring: deque = deque(maxlen=RING_BUFFER_SIZE)
         self._logger: Optional[CsvLogger] = None
+        self._last_extra: Dict = {}
 
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -115,16 +125,17 @@ class ControlSession:
                 hardware.disconnect()
                 raise
 
-            logger = CsvLogger(mode=mode, hardware_source=self._hardware_source)
+            logger = CsvLogger(mode=mode_handler.csv_log_name(mode), hardware_source=self._hardware_source)
             logger.open()
 
             self._hardware = hardware
             self._mode_handler = mode_handler
             self._mode_name = mode
-            self._target = target_value
+            self._target = mode_handler.status_target(target_value)
             self._errored = False
             self._error_message = None
             self._last_errors = []
+            self._last_extra = {}
             self._ring.clear()
             self._logger = logger
 
@@ -140,7 +151,7 @@ class ControlSession:
                 raise RuntimeError("No control session running")
             target_value = self._mode_handler.validate_target(value)
             self._mode_handler.apply_target(self._hardware, target_value)
-            self._target = target_value
+            self._target = self._mode_handler.status_target(target_value)
 
     def stop(self) -> None:
         """Safe to call at any time, from any thread, repeatedly. Reaches the
@@ -193,10 +204,12 @@ class ControlSession:
     def _telemetry_loop(self) -> None:
         while not self._stop_event.is_set():
             hardware = self._hardware
-            if hardware is None:
+            mode_handler = self._mode_handler
+            if hardware is None or mode_handler is None:
                 return
             try:
                 sample = hardware.get_state()
+                extra = mode_handler.tick(hardware, sample)
                 errors = hardware.get_errors()
             except Exception as e:
                 log.exception("Telemetry loop crashed; auto-stopping")
@@ -208,12 +221,19 @@ class ControlSession:
             with self._lock:
                 self._ring.append(sample)
                 self._last_errors = errors
+                self._last_extra = extra
                 mode_name = self._mode_name
                 target = self._target
 
             if self._logger is not None:
                 try:
-                    self._logger.log_sample(sample, mode=mode_name, target=target)
+                    self._logger.log_sample(
+                        sample,
+                        mode=mode_name,
+                        target=target,
+                        phase=extra.get("phase", ""),
+                        rep_count=extra.get("rep_count", ""),
+                    )
                 except Exception:
                     log.exception("CSV logger write failed")
 
@@ -241,6 +261,8 @@ class ControlSession:
                 "errors": list(self._last_errors),
                 "log_path": str(self._logger.path) if self._logger and self._logger.path else None,
                 "latest_sample": asdict(latest) if latest is not None else None,
+                "phase": self._last_extra.get("phase"),
+                "rep_count": self._last_extra.get("rep_count"),
             }
 
     def samples_since(self, since: Optional[float] = None) -> List[TelemetrySample]:
