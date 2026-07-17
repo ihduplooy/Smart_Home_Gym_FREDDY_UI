@@ -585,11 +585,29 @@ starting. See decisions.md.
 
 ## §7 — Backend + frontend wiring
 
-- [ ] `GET /api/profiles` — registry-driven list (name, parameter schema, is-wrapper
-      flag).
-- [ ] `POST /api/control/start` extended for `mode: "profile"` (+ optional
-      `overload`), existing velocity/torque shapes untouched.
-- [ ] `status()`/telemetry gain `phase` + `rep_count` when a profile runs.
+- [x] `GET /api/profiles` — registry-driven list (name, parameter schema with
+      label/value/default/min/max per parameter, `is_wrapper` flag, `wraps` +
+      `target_phase` for the overload entry). `backend/app/control_routes.py`
+      (same thin-adapter module as Control tab routes, per spec §7). Verified
+      live via curl against the real Flask app (`ODRIVE_MOCK=1
+      ODRIVE_MOCK_FW=5 .venv/bin/python backend/start_backend.py`): all 4
+      registry entries returned with correct schemas, `overload.is_wrapper ==
+      true`, others `false`.
+- [x] `POST /api/control/start` extended for `mode: "profile"` (`{profile,
+      params, overload: {enabled, ratio, target_phase} | null}`) — composes
+      `OverloadWrapper` server-side when `overload.enabled` (spec §7: frontend
+      never constructs a wrapper directly). Existing velocity/torque
+      `{mode, target}` shape untouched (regression-verified live: both still
+      start/report the same as before). Rejects an unknown profile name and
+      rejects selecting `"overload"` itself as the base profile (checked via
+      `factory.IS_WRAPPER`, not a hardcoded name) — both verified live via curl
+      returning clean 400s with readable error messages.
+- [x] `status()` gains `phase` + `rep_count` (verified live: `null` when idle,
+      populated string/int while a profile runs). Telemetry REST route
+      (`/api/control/telemetry`) deliberately NOT extended with per-sample
+      phase/rep_count history — see decisions.md for why (status()'s
+      point-in-time values are what the spec's own Profiles-tab description
+      needs: a live badge, not a phase-over-time series).
 - [ ] Frontend Profiles tab: registry-driven picker, schema-driven param inputs,
       overload toggle+ratio, Sim/Real banner, STOP, live phase badge + rep count,
       stub-math notice, reuses `useControlTelemetry`.

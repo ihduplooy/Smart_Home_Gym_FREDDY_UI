@@ -1,6 +1,7 @@
-"""Thin adapter routes for the Control tab. Zero control logic here —
-argument parsing + core.control.session.ControlSession calls + JSON only.
-All actual state/behaviour lives in core/ (see core/README.md's split rule).
+"""Thin adapter routes for the Control tab (and, Session 3, the Profiles tab).
+Zero control logic here — argument parsing + core.control.session.ControlSession
+/ core.profiles calls + JSON only. All actual state/behaviour lives in core/
+(see core/README.md's split rule).
 """
 
 import json
@@ -11,6 +12,7 @@ from dataclasses import asdict
 from flask import jsonify, request
 
 from core.control.session import ControlSession
+from core.profiles import PROFILE_REGISTRY, OverloadWrapper, Phase
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +24,40 @@ control_session = ControlSession(hardware_source="sim")
 _WS_PUSH_INTERVAL_S = 0.1
 
 
+def _build_profile_target(body: dict):
+    """Builds the ResistanceProfile instance for a `mode: "profile"` start
+    request: {profile: <name>, params: {...}, overload: {enabled, ratio,
+    target_phase} | null}. Composes OverloadWrapper server-side when
+    requested (spec §7) — the frontend never constructs a wrapper directly."""
+    profile_name = body.get("profile")
+    factory = PROFILE_REGISTRY.get(profile_name)
+    if factory is None:
+        raise ValueError(f"Unknown profile: {profile_name!r} (expected one of {list(PROFILE_REGISTRY)})")
+    if factory.IS_WRAPPER:
+        raise ValueError(f"{profile_name!r} is a wrapper, not a selectable base profile")
+
+    params = body.get("params") or {}
+    profile = factory(**params)
+
+    overload = body.get("overload")
+    if overload and overload.get("enabled"):
+        wrapper_kwargs = {"wrapped": profile, "target_phase": Phase(overload.get("target_phase", "eccentric"))}
+        if overload.get("ratio") is not None:
+            wrapper_kwargs["ratio"] = overload["ratio"]
+        profile = OverloadWrapper(**wrapper_kwargs)
+
+    return profile
+
+
 def register(app, sock) -> None:
+    @app.route("/api/profiles", methods=["GET"])
+    def list_profiles():
+        """Registry-driven profile list for the Profiles tab picker — name,
+        parameter schema (label/value/default/min/max per parameter, from
+        each profile's own describe()), and whether it's a wrapper. Never
+        hardcoded in the frontend."""
+        return jsonify([factory().describe() for factory in PROFILE_REGISTRY.values()])
+
     @app.route("/api/control/status", methods=["GET"])
     def control_status():
         return jsonify(control_session.status())
@@ -31,10 +66,15 @@ def register(app, sock) -> None:
     def control_start():
         body = request.get_json(silent=True) or {}
         mode = body.get("mode")
-        target = body.get("target")
-        if mode is None or target is None:
-            return jsonify({"error": "mode and target required"}), 400
+        if mode is None:
+            return jsonify({"error": "mode required"}), 400
         try:
+            if mode == "profile":
+                target = _build_profile_target(body)
+            else:
+                target = body.get("target")
+                if target is None:
+                    return jsonify({"error": "mode and target required"}), 400
             control_session.start(mode, target)
             return jsonify(control_session.status())
         except Exception as e:

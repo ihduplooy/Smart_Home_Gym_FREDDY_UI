@@ -566,6 +566,33 @@ threads it into both `status()` (`phase`/`rep_count` keys, `None` when absent) a
 — empty string for velocity/torque runs, matching spec §6's amendment exactly, with
 no special-casing beyond the dict lookup.
 
+## /api/control/telemetry (REST fallback) not extended with per-sample phase/rep_count
+
+Spec §7 says "status()/telemetry responses gain phase and rep_count when a profile is
+running." `status()` does (see above). The ring buffer behind `/api/control/telemetry`
+stores raw `TelemetrySample` objects (position/velocity/current_iq/torque_est/t) with
+no per-sample phase/rep_count history — only the *latest* tick's phase/rep_count is
+tracked (`ControlSession._last_extra`). Adding historical phase/rep_count to every
+buffered sample would mean carrying a second parallel array through the ring buffer
+and CSV-adjacent code paths for comparatively little payoff: spec §7's own frontend
+description only asks for a live badge + rep count (point-in-time values), not a
+phase-over-time chart. Left the REST telemetry route unchanged; `status()`'s
+`phase`/`rep_count` fields are what the Profiles tab polls for the badge — same
+150 ms poll loop the Control tab already uses (`useControlTelemetry`), no changes
+needed there either.
+
+## Overload composed profile's CSV filename doesn't reflect the wrapped base profile's name
+
+`ProfileMode.csv_log_name()` uses `self.profile.name`, which for an `OverloadWrapper`
+is literally `"overload"` — so `telemetry_<ts>_profile-overload_sim.csv` regardless of
+which base profile (constant/bell_curve/vbt) it wraps. Verified live via curl. Not
+fixed: matches the spec's literal filename convention
+(`telemetry_<ts>_profile-<name>_<sim|real>.csv`, one `<name>`), and the run's actual
+parameters (including which base profile was chosen) are still in the CSV's `mode`/
+`target` columns and the backend's own request log — just flagging that multiple
+overload runs over different base profiles won't be distinguishable by filename alone
+if someone's sorting a `logs/` directory later.
+
 ## Vite dev proxy: added a /ws prefix
 
 `frontend/vite.config.js` only proxied `/api/*` to the backend; `/ws/control-telemetry`
