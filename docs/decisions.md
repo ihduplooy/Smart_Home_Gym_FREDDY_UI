@@ -412,6 +412,61 @@ backup, undocumented in Session 2"`) so the tree matches the documented Session 
 end-state before Session 3 work begins. If this turns out to matter (e.g. port 5000
 really is unavailable in this environment), the stash can be popped — not lost.
 
+## Sign convention (spec §5.1)
+
+`core/profiles/detectors.py`: **positive cable velocity = cable paying out =
+concentric (lifting)**. Matches the sim's positive-torque → positive-velocity
+behaviour directly. `CABLE_SIGN = +1` is the documented one-line flip point if
+Phase 2A's real cable rigging inverts this.
+
+## Detector tuning constants chosen (spec §4)
+
+All four (`PHASE_VEL_THRESHOLD_TURNS_S = 0.05`, `PHASE_HYSTERESIS_TURNS_S = 0.02`,
+`REP_EWMA_ALPHA = 0.05`, `REP_PROXIMITY_TURNS = 0.1`) taken verbatim from the spec —
+no tuning done, all `# TODO(2A)`. Chosen only to be self-consistent (hysteresis band
+narrower than the rest threshold) and to work against the sim/synthetic-sequence
+smooth motion, per spec §4's explicit instruction.
+
+## RepCounter design: found and fixed two false-positive modes beyond the literal spec text
+
+Spec §5.1 describes the rep counter as: EWMA of position, count a rep when position
+returns within `REP_PROXIMITY_TURNS` of the EWMA, gated on having passed through a
+CONCENTRIC phase since the last count. Implementing that literally against the
+synthetic 3-rep test sequence (`core/tests/test_detectors.py`) surfaced two real bugs
+in that literal reading, found by tracing actual per-tick state:
+
+1. **Early-concentric false positives.** Right as a concentric phase begins, position
+   and its own slow EWMA are still numerically close (both sitting near the previous
+   rep's baseline) — "within proximity of the EWMA" is trivially true for several
+   ticks before the EWMA has time to lag behind the now-moving position, firing
+   several spurious counts before the rep has gone anywhere (22 counts on one 3-rep
+   test run instead of 3). Fixed by adding a `_left_proximity_since_last_count` gate:
+   position must move *out* of the proximity band by at least `REP_PROXIMITY_TURNS`
+   before a subsequent return into the band can count — turns the check into a real
+   "went away, came back" detector instead of a bare distance threshold.
+2. **Top-of-rep false positives.** An EWMA lagging a smooth position curve is
+   momentarily close to that curve near *any* local extremum of the input, not only
+   the true rest position — confirmed by tracing: near the peak of a rep, the
+   still-rising EWMA transiently comes within `REP_PROXIMITY_TURNS` of the
+   already-descending position (5 counts on the same 3-rep sequence instead of 3, one
+   extra per rep from a false trigger just after the top). Fixed by additionally
+   gating the count on the phase being `Phase.BOTTOM_HOLD` specifically (not merely
+   "distance under proximity"). This also makes the position/EWMA proximity check do
+   real work rather than being redundant with the phase gate: `BOTTOM_HOLD` alone can
+   fire on any mid-range pause after an eccentric movement, and the proximity check
+   confirms that pause is actually near the rep's established baseline, not a partial
+   rep.
+
+Also found: with `REP_EWMA_ALPHA = 0.05` (time constant `1/alpha` = 20 ticks = 0.4s at
+50 Hz) the EWMA takes roughly 35 ticks (~0.7s) to decay from a peak-tracking value back
+within `REP_PROXIMITY_TURNS` of true rest — the synthetic test's inter-rep plateau had
+to be lengthened to 1.5s (from an initial 0.3s) to give the counter enough time to
+settle between reps; this is a test-fixture cadence choice, not a change to the
+spec-given tuning constants, but is worth carrying into Phase 2A's real-cable tuning
+work as a concrete data point (a fast/no-pause real rep cadence may need this
+constant retuned to actually count reps in practice — flagged as a known limitation
+of the stub math, not fixed here per spec §11).
+
 ## Vite dev proxy: added a /ws prefix
 
 `frontend/vite.config.js` only proxied `/api/*` to the backend; `/ws/control-telemetry`

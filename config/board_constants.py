@@ -75,6 +75,28 @@ TRAP_TRAJ_DECEL_LIMIT = 1.0  # turns/s^2
 # velocity-dependent control. Decision waits for real hardware in Phase 2A.
 
 # --------------------------------------------------------------------------
+# Resistance profile layer (Session 3) — tuning placeholders
+# --------------------------------------------------------------------------
+# Cable spool/drum radius: the one number that converts cable-force Newtons
+# (the profiles' public parameter surface, spec §4) into motor torque Nm.
+# Used by exactly one function, core/profiles/units.py::force_to_torque().
+# TODO(2A): placeholder — measure the real spool/drum radius.
+SPOOL_RADIUS_M = 0.05
+
+# Eccentric-overload multiplier default. Charter target band is 1.2-1.5x.
+# TODO(2A): tune against real cable motion / user feedback.
+ECCENTRIC_OVERLOAD_RATIO_DEFAULT = 1.35
+
+# Phase detector / rep counter tuning. All placeholders chosen only to work
+# against the sim's smooth motion — every one of these needs re-tuning
+# against real cable motion in Phase 2A.
+# TODO(2A): tune against real cable motion.
+PHASE_VEL_THRESHOLD_TURNS_S = 0.05  # |v| below this counts as "at rest" (a hold)
+PHASE_HYSTERESIS_TURNS_S = 0.02  # extra margin required to leave a hold/reverse
+REP_EWMA_ALPHA = 0.05  # position EWMA smoothing factor, applied once per 50 Hz tick
+REP_PROXIMITY_TURNS = 0.1  # how close position must return to the EWMA to count a rep
+
+# --------------------------------------------------------------------------
 # Axis — axis0 only; axis1 is a ghost node
 # --------------------------------------------------------------------------
 # This board only ever drives axis0. Axis1's CAN node ID must be set to 63 to

@@ -492,9 +492,18 @@ starting. See decisions.md.
 
 - [ ] Package layout created per §5 (`__init__.py`, `units.py`, `detectors.py`,
       `base.py`, `constant.py`, `bell_curve.py`, `overload.py`, `vbt.py`).
-- [ ] §5.1 `detectors.py`: `Phase` enum (4-state), `CABLE_SIGN` sign convention
-      documented in module docstring, `PhaseDetector` (velocity-sign + hysteresis),
-      `RepCounter` (EWMA + phase-gated proximity), `ProfileState` dataclass.
+- [x] §5.1 `detectors.py`: `Phase` enum (4-state: CONCENTRIC/TOP_HOLD/ECCENTRIC/
+      BOTTOM_HOLD), `CABLE_SIGN = +1` sign convention documented in the module
+      docstring, `PhaseDetector` (velocity-sign with hysteresis on hold-exit and
+      on direct moving-phase reversal), `RepCounter` (EWMA + phase-gated
+      proximity, gated on BOTTOM_HOLD specifically — see decisions.md for why),
+      `ProfileState` dataclass. Verified: `core/tests/test_detectors.py`, 5/5
+      passing — 3-clean-rep synthetic sinusoid produces the exact
+      BOTTOM_HOLD→CONCENTRIC→TOP_HOLD→ECCENTRIC→BOTTOM_HOLD cycle and
+      `rep_count == 3`; noise dithered at 0.9×threshold (never clearing
+      threshold+hysteresis) produces zero phase flicker; a phase sequence with
+      no CONCENTRIC ticks produces zero rep counts; reset() on both classes
+      verified. Run: `.venv/bin/python -m pytest core/tests/test_detectors.py -v`.
 - [ ] §5.2 `base.py`: `ResistanceProfile` ABC (`compute_torque`, `name`, `describe()`,
       `primary_parameter_label` + get/set, `reset()`).
 - [ ] §5.3 four stubs: `ConstantProfile`, `BellCurveProfile` (injectable
