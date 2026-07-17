@@ -1,7 +1,10 @@
 // Typed client for the Control tab's backend routes (backend/app/control_routes.py).
+// The Profiles tab (Session 3) shares this same ControlSession-backed API —
+// see startProfileSession() below — since profiles run as a third mode on the
+// one backend ControlSession instance, not a separate session.
 //
 //   GET  /api/control/status
-//   POST /api/control/start           { mode, target }
+//   POST /api/control/start           { mode, target } | { mode: "profile", profile, params, overload }
 //   POST /api/control/target          { value }
 //   POST /api/control/stop
 //   GET  /api/control/hardware-source
@@ -38,6 +41,12 @@ export function getControlStatus() {
 
 export function startControlSession(mode, target) {
   return postJson('/api/control/start', { mode, target })
+}
+
+// overload: { enabled, ratio, target_phase } | null — composed server-side
+// into an OverloadWrapper; never constructed on the frontend (spec §7).
+export function startProfileSession(profile, params, overload) {
+  return postJson('/api/control/start', { mode: 'profile', profile, params, overload })
 }
 
 export function setControlTarget(value) {

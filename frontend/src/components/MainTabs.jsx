@@ -20,6 +20,7 @@ const DashboardTab = lazy(() => import('./tabs/dashboard/DashboardTab'))
 const PresetsTab = lazy(() => import('./tabs/presets/PresetsTab'))
 const CommandConsoleTab = lazy(() => import('./tabs/command console/CommandConsoleTab'))
 const ControlTab = lazy(() => import('./tabs/control/ControlTab'))
+const ProfilesTab = lazy(() => import('./tabs/profiles/ProfilesTab'))
 
 // Lightweight loading component
 const TabLoadingFallback = () => (
@@ -76,6 +77,12 @@ const TAB_CONFIG = [
     requiresConnection: false
   },
   {
+    id: 'profiles',
+    label: 'Profiles',
+    component: ProfilesTab,
+    requiresConnection: false
+  },
+  {
     id: 'inspector',
     label: 'Inspector',
     component: InspectorTab,
@@ -114,6 +121,7 @@ const MainTabs = () => {
             isActive: activeTab === index
           }
         case 'control':
+        case 'profiles':
           return {
             ...commonProps,
             isActive: activeTab === index

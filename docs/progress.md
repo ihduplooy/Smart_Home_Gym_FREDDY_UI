@@ -608,9 +608,41 @@ starting. See decisions.md.
       phase/rep_count history — see decisions.md for why (status()'s
       point-in-time values are what the spec's own Profiles-tab description
       needs: a live badge, not a phase-over-time series).
-- [ ] Frontend Profiles tab: registry-driven picker, schema-driven param inputs,
-      overload toggle+ratio, Sim/Real banner, STOP, live phase badge + rep count,
-      stub-math notice, reuses `useControlTelemetry`.
+- [x] Frontend Profiles tab (`frontend/src/components/tabs/profiles/ProfilesTab.jsx`,
+      registered in `MainTabs.jsx` between Control and Inspector): registry-driven
+      profile picker (`GET /api/profiles`, `overload` excluded from the base-profile
+      dropdown since it's a modifier, not a fifth profile), schema-driven parameter
+      inputs (labels/min/max straight from `describe()`, primary parameter marked
+      "live"), eccentric-overload toggle + ratio + target-phase select, same
+      unmissable Sim/Real banner + always-visible STOP as the Control tab, live
+      phase badge (color-coded per phase) + rep count, persistent stub-math notice,
+      warns and disables Start if the *other* mode is already running on the shared
+      `ControlSession`. Reuses `useControlTelemetry` (same session/polling as
+      Control, since profiles are a third mode on the one backend session, not a
+      separate one) and the extracted `MiniChart` component (pulled out of
+      `ControlTab.jsx` into `control/MiniChart.jsx` so both tabs share the exact
+      same recharts config — spec §7's explicit "extract shared pieces" ask).
+      `frontend/src/api/profiles.js` (new) + `startProfileSession()` added to
+      `frontend/src/api/control.js`.
+      Verified: `npx eslint .` clean (zero warnings) across the whole frontend;
+      `npx vitest run` 40/40 passing, 2 skipped (unchanged baseline); a headless-
+      Chrome pass (puppeteer-core, scratchpad script, not committed, same
+      precedent as Sessions 1-2) clicked through all 7 tabs (6 original + Profiles)
+      against `ODRIVE_MOCK=1 ODRIVE_MOCK_FW=5` — **zero console errors** (some
+      benign recharts `ResponsiveContainer` "width(0)/height(0)" `warn`-level
+      messages appeared during tab transitions, same category of benign warning
+      as Session 1's vite/DevTools notices — no `error`-level messages at all).
+      Then, still headless: selected `constant`, enabled eccentric overload
+      (ratio 1.35, target phase eccentric), clicked Start — CSV filename
+      `telemetry_..._profile-overload_sim.csv` appeared, phase badge showed
+      CONCENTRIC (sim moves one direction under a positive constant torque, per
+      spec §8.3's own note). Live-retargeted the primary parameter to `-30`
+      (flipping the force sign) via "Set target" — phase badge visibly changed to
+      ECCENTRIC within ~2.5s, confirming the detector runs live end-to-end through
+      the browser, not just in tests. Clicked STOP — CSV filename cleared, zero
+      console errors throughout the whole flow. This is exactly the "drive phase
+      changes by live-retargeting the base force sign" approach spec §8.3
+      pre-authorized, noted here as required.
 
 ## §8 — Verification (all against sim)
 
