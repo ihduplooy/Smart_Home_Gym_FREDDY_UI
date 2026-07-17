@@ -388,6 +388,30 @@ route existed); Session 2 can have two live at once (per-device telemetry + cont
 telemetry, when both the Control tab and a connected-device tab are open). Added it as
 a straightforward correctness fix independent of the close-handling issue above.
 
+---
+
+# Session 3 — resistance profile layer
+
+Per `Phase 1/1C_build_spec_session3.md`. Continues the append-only log above.
+
+## Pre-session: stray uncommitted state found and stashed
+
+Before starting, `git status` showed an uncommitted modification to
+`frontend/vite.config.js` (both `/api` and `/ws` proxy targets changed from
+`http://127.0.0.1:5000` to `http://127.0.0.1:5050`) plus an untracked
+`frontend/vite.config.js.orig` backup file (the unmodified original — evidence of a
+`sed -i .orig`-style edit). Neither is mentioned anywhere in Session 2's `progress.md`
+or `decisions.md`, and `backend/start_backend.py` still hard-codes port 5000, so this
+wasn't a documented, intentional change — most likely leftover manual troubleshooting
+on this machine (e.g. port 5000 conflicting with something else locally) that was never
+committed or cleaned up.
+
+Didn't investigate further or discard it: stashed both files reversibly
+(`git stash push -u -m "pre-session3: stray vite.config.js port-5050 edit + .orig
+backup, undocumented in Session 2"`) so the tree matches the documented Session 2
+end-state before Session 3 work begins. If this turns out to matter (e.g. port 5000
+really is unavailable in this environment), the stash can be popped — not lost.
+
 ## Vite dev proxy: added a /ws prefix
 
 `frontend/vite.config.js` only proxied `/api/*` to the backend; `/ws/control-telemetry`

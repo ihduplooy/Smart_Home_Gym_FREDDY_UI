@@ -467,3 +467,88 @@ reading) is recorded so a fresh session can trust this checklist without
 re-deriving it. Out-of-scope items from spec §12 (live hardware, resistance
 profiles, `core/profiles/`, any profile math, phase/rep detection, spool-radius
 conversion, restyling, CAN/Pi, regen) were not touched.
+
+---
+
+# Session 3 progress — resistance profile layer
+
+Tracks `Phase 1/1C_build_spec_session3.md` §4–§9. Checked items are done AND verified
+(code actually ran). Pre-session note: found an uncommitted, undocumented change to
+`frontend/vite.config.js` (proxy target port 5000 → 5050) plus a stray `.orig` backup
+file, neither mentioned anywhere in Session 2's docs — stashed (not discarded,
+`git stash` "pre-session3: stray vite.config.js..."), tree confirmed clean before
+starting. See decisions.md.
+
+## §4 — New constants (`config/board_constants.py`)
+
+- [ ] `SPOOL_RADIUS_M` placeholder + force↔torque conversion lives in exactly one
+      function (`core/profiles/units.py`).
+- [ ] `ECCENTRIC_OVERLOAD_RATIO_DEFAULT = 1.35`.
+- [ ] Phase-detector tuning constants (`PHASE_VEL_THRESHOLD_TURNS_S`,
+      `PHASE_HYSTERESIS_TURNS_S`, `REP_EWMA_ALPHA`, `REP_PROXIMITY_TURNS`), grouped
+      under a "profile layer tuning" comment block, all `# TODO(2A)`.
+
+## §5 — `core/profiles/` package
+
+- [ ] Package layout created per §5 (`__init__.py`, `units.py`, `detectors.py`,
+      `base.py`, `constant.py`, `bell_curve.py`, `overload.py`, `vbt.py`).
+- [ ] §5.1 `detectors.py`: `Phase` enum (4-state), `CABLE_SIGN` sign convention
+      documented in module docstring, `PhaseDetector` (velocity-sign + hysteresis),
+      `RepCounter` (EWMA + phase-gated proximity), `ProfileState` dataclass.
+- [ ] §5.2 `base.py`: `ResistanceProfile` ABC (`compute_torque`, `name`, `describe()`,
+      `primary_parameter_label` + get/set, `reset()`).
+- [ ] §5.3 four stubs: `ConstantProfile`, `BellCurveProfile` (injectable
+      `curve_factor`), `OverloadWrapper` (composition, constructible with either
+      target phase), `VBTProfile` (per-rep auto-regulation). `PROFILE_REGISTRY` in
+      `__init__.py`.
+
+## §6 — CSV logger extension
+
+- [ ] `phase`, `rep_count` columns appended after `torque_est_nm`; empty strings for
+      non-profile runs. Filenames gain `profile-<name>`. Amendment noted in
+      decisions.md.
+
+## §7 — Backend + frontend wiring
+
+- [ ] `GET /api/profiles` — registry-driven list (name, parameter schema, is-wrapper
+      flag).
+- [ ] `POST /api/control/start` extended for `mode: "profile"` (+ optional
+      `overload`), existing velocity/torque shapes untouched.
+- [ ] `status()`/telemetry gain `phase` + `rep_count` when a profile runs.
+- [ ] Frontend Profiles tab: registry-driven picker, schema-driven param inputs,
+      overload toggle+ratio, Sim/Real banner, STOP, live phase badge + rep count,
+      stub-math notice, reuses `useControlTelemetry`.
+
+## §8 — Verification (all against sim)
+
+- [ ] 1. Detector unit tests: 3-rep synthetic sequence → correct phase cycle +
+      `rep_count == 3`; noise-at-threshold → zero flicker; no-CONCENTRIC → no reps.
+- [ ] 2. Profile unit tests: constant exact `force*radius`; bell-curve peak/edges;
+      OverloadWrapper multiplies only in target phase (both configs, never in
+      holds); VBT steps down/up only on rep boundaries; `compute_torque` raising →
+      session auto-stops.
+- [ ] 3. End-to-end against sim: 5-line-snippet ConstantProfile run (no Flask), CSV
+      gains phase/rep columns; API + headless-Chrome Profiles tab pass (constant +
+      overload, phase badge changes, stop cleanly, zero console errors).
+- [ ] 4. Regression: Control tab unchanged flows pass; all 6 tabs console-clean
+      (`ODRIVE_MOCK=1`); eslint clean; vitest green; full pytest green (35 existing +
+      new).
+- [ ] 5. Choke-point audit: still exactly 2 `find_any` sites + the 1B script.
+
+## §9 — Definition of Done
+
+- [ ] 1. `core/profiles/` exists per §5, importable with no side effects, pytest
+      green.
+- [ ] 2. Phase detector + rep counter pass synthetic-sequence tests incl. no-flicker
+      hysteresis.
+- [ ] 3. All four stubs runnable end-to-end against sim through `ProfileMode`;
+      OverloadWrapper composes over any profile and either moving phase.
+- [ ] 4. Profiles tab works: registry-driven picker, schema-driven params, overload
+      toggle, live phase badge + rep count, stub-math notice, STOP.
+- [ ] 5. `core/README.md` gains a second snippet: ConstantProfile session against
+      sim, no Flask.
+- [ ] 6. Safety behaviours verified to cover ProfileMode (incl. `compute_torque`
+      raising).
+- [ ] 7. CSV extension in place; Session-2 modes' logs unaffected apart from the two
+      new (empty) columns.
+- [ ] 8. Regression + audits per §8.4–8.5; progress.md + decisions.md updated.
