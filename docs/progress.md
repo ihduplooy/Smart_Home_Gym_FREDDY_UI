@@ -481,17 +481,27 @@ starting. See decisions.md.
 
 ## §4 — New constants (`config/board_constants.py`)
 
-- [ ] `SPOOL_RADIUS_M` placeholder + force↔torque conversion lives in exactly one
-      function (`core/profiles/units.py`).
-- [ ] `ECCENTRIC_OVERLOAD_RATIO_DEFAULT = 1.35`.
-- [ ] Phase-detector tuning constants (`PHASE_VEL_THRESHOLD_TURNS_S`,
-      `PHASE_HYSTERESIS_TURNS_S`, `REP_EWMA_ALPHA`, `REP_PROXIMITY_TURNS`), grouped
-      under a "profile layer tuning" comment block, all `# TODO(2A)`.
+- [x] `SPOOL_RADIUS_M = 0.05` placeholder added (`# TODO(2A)`); force↔torque
+      conversion lives in exactly one function,
+      `core/profiles/units.py::force_to_torque()` (+ inverse
+      `torque_to_force()`) — verified by grep (only that one file references
+      `SPOOL_RADIUS_M`) and by `test_force_to_torque_and_back`.
+- [x] `ECCENTRIC_OVERLOAD_RATIO_DEFAULT = 1.35` added, consumed by
+      `OverloadWrapper`'s default `ratio` and surfaced in its `/api/profiles`
+      schema entry — verified live via curl (§7).
+- [x] Phase-detector tuning constants (`PHASE_VEL_THRESHOLD_TURNS_S = 0.05`,
+      `PHASE_HYSTERESIS_TURNS_S = 0.02`, `REP_EWMA_ALPHA = 0.05`,
+      `REP_PROXIMITY_TURNS = 0.1`) added under a "profile layer tuning" comment
+      block, all `# TODO(2A)` — verified imported and used correctly by
+      `core/tests/test_detectors.py` (§5.1 below).
 
 ## §5 — `core/profiles/` package
 
-- [ ] Package layout created per §5 (`__init__.py`, `units.py`, `detectors.py`,
-      `base.py`, `constant.py`, `bell_curve.py`, `overload.py`, `vbt.py`).
+- [x] Package layout created per §5 (`__init__.py`, `units.py`, `detectors.py`,
+      `base.py`, `constant.py`, `bell_curve.py`, `overload.py`, `vbt.py`) —
+      verified: `import core.profiles` and every submodule succeed with no
+      side effects (no Flask/hardware touched at import time), full package
+      exercised by 69/69 passing tests below.
 - [x] §5.1 `detectors.py`: `Phase` enum (4-state: CONCENTRIC/TOP_HOLD/ECCENTRIC/
       BOTTOM_HOLD), `CABLE_SIGN = +1` sign convention documented in the module
       docstring, `PhaseDetector` (velocity-sign with hysteresis on hold-exit and
@@ -646,30 +656,67 @@ starting. See decisions.md.
 
 ## §8 — Verification (all against sim)
 
-- [ ] 1. Detector unit tests: 3-rep synthetic sequence → correct phase cycle +
+- [x] 1. Detector unit tests: 3-rep synthetic sequence → correct phase cycle +
       `rep_count == 3`; noise-at-threshold → zero flicker; no-CONCENTRIC → no reps.
-- [ ] 2. Profile unit tests: constant exact `force*radius`; bell-curve peak/edges;
+      `core/tests/test_detectors.py`, 5/5 passing (§5.1 above).
+- [x] 2. Profile unit tests: constant exact `force*radius`; bell-curve peak/edges;
       OverloadWrapper multiplies only in target phase (both configs, never in
       holds); VBT steps down/up only on rep boundaries; `compute_torque` raising →
-      session auto-stops.
-- [ ] 3. End-to-end against sim: 5-line-snippet ConstantProfile run (no Flask), CSV
-      gains phase/rep columns; API + headless-Chrome Profiles tab pass (constant +
-      overload, phase badge changes, stop cleanly, zero console errors).
-- [ ] 4. Regression: Control tab unchanged flows pass; all 6 tabs console-clean
-      (`ODRIVE_MOCK=1`); eslint clean; vitest green; full pytest green (35 existing +
-      new).
-- [ ] 5. Choke-point audit: still exactly 2 `find_any` sites + the 1B script.
+      raises (session-level auto-stop tested separately, see next item).
+      `core/tests/test_profiles.py`, 21/21 passing (§5.3 above).
+- [x] 3. End-to-end against sim: 5-line-snippet `ConstantProfile` run (no Flask,
+      `core/README.md`) — printed a live sample + phase + rep_count, stopped
+      cleanly. `core/tests/test_profile_mode.py` (8/8) additionally proves via
+      `ControlSession`: end-to-end run, retarget-adjusts-in-place, CSV filename/
+      columns, `OverloadWrapper` composition, **and the safety-behaviour
+      extension** (`compute_torque` raising auto-stops the session, matching
+      Session 2's existing exception-auto-stop path exactly). Then, live: `GET
+      /api/profiles` + `POST /api/control/start` (profile, profile+overload,
+      unknown-profile-400, overload-as-base-400) verified via curl against the
+      real Flask app; headless-Chrome Profiles tab pass — constant + overload
+      selected, started, phase badge shown (CONCENTRIC), live-retargeted the
+      base-force sign to force a direction reversal, phase badge visibly changed
+      to ECCENTRIC within ~2.5s, stopped cleanly, **zero console errors**
+      throughout (see §7 above for the full transcript/how phase transitions
+      were exercised, per spec §8.3's explicit note).
+- [x] 4. Regression: Control tab's actual velocity start → CSV-filename-appears →
+      live-retarget → STOP flow re-verified live via a second headless-Chrome
+      pass after the `MiniChart` extraction (not just "tab loads") — identical
+      behaviour to Session 2, zero console errors. All 7 tabs (6 original +
+      Profiles) console-clean against `ODRIVE_MOCK=1 ODRIVE_MOCK_FW=5` (only
+      benign `warn`-level recharts sizing messages during tab transitions, same
+      category as Session 1's benign vite/DevTools notices — zero `error`-level
+      messages). `npx eslint .`: clean, zero warnings, full frontend tree.
+      `npx vitest run`: 40/40 passing, 2 skipped (unchanged baseline). Full
+      `core/tests` pytest suite: **69/69 passing** (35 pre-Session-3 + 34 new:
+      5 detectors + 21 profiles + 8 ProfileMode/session integration).
+- [x] 5. Choke-point audit: `grep -rn "find_any" --include="*.py" backend core
+      config`: still exactly 2 real call sites (`backend/app/device_manager.py`,
+      `core/hardware/odrive_hw.py`) plus the 5 hits inside the standalone
+      `config/odrive_config.py` 1B script — unchanged from Session 2's audit,
+      confirming `core/profiles/` introduced zero new hardware-access paths.
 
 ## §9 — Definition of Done
 
-- [ ] 1. `core/profiles/` exists per §5, importable with no side effects, pytest
-      green.
-- [ ] 2. Phase detector + rep counter pass synthetic-sequence tests incl. no-flicker
-      hysteresis.
-- [ ] 3. All four stubs runnable end-to-end against sim through `ProfileMode`;
-      OverloadWrapper composes over any profile and either moving phase.
-- [ ] 4. Profiles tab works: registry-driven picker, schema-driven params, overload
-      toggle, live phase badge + rep count, stub-math notice, STOP.
+- [x] 1. `core/profiles/` exists per §5 (`__init__.py`, `units.py`, `detectors.py`,
+      `base.py`, `constant.py`, `bell_curve.py`, `overload.py`, `vbt.py`),
+      importable with no side effects (verified: none of these modules touch
+      hardware or Flask at import time — `units.py`/`base.py`/stubs only import
+      `config.board_constants` and each other), pytest green (69/69, see §8.4).
+- [x] 2. Phase detector + rep counter pass synthetic-sequence tests incl.
+      no-flicker hysteresis (§5.1/§8.1 above).
+- [x] 3. All four stubs runnable end-to-end against sim through `ProfileMode`
+      (§8.3 above — constant proven both programmatically and via the full
+      backend+browser stack; bell_curve/vbt covered at the unit level plus the
+      registry-iteration test that constructs and calls `.describe()` on every
+      one of the four); `OverloadWrapper` composes over any profile and either
+      moving phase (parametrized test matrix: 2 target phases × [2 moving-phase
+      checks + 2 hold checks] = verified never-multiplies-holds and
+      multiplies-only-in-target-phase for both ECCENTRIC and CONCENTRIC
+      configurations).
+- [x] 4. Profiles tab works: registry-driven picker, schema-driven params,
+      overload toggle, live phase badge + rep count, stub-math notice, STOP —
+      all verified live via headless Chrome (§7/§8.3 above).
 - [x] 5. `core/README.md` gains a second snippet: ConstantProfile session against
       sim, no Flask. Verified: ran the exact snippet text (`.venv/bin/python3 -c
       "..."`) — printed a live `TelemetrySample`, `phase='concentric'`,
@@ -678,8 +725,31 @@ starting. See decisions.md.
       reliably prints `latest_sample: None` (a race against the 50 Hz thread's
       first tick) — added a short `time.sleep(0.1)` to the new snippet so it's
       honestly deterministic rather than repeating that same unstated race.
-- [ ] 6. Safety behaviours verified to cover ProfileMode (incl. `compute_torque`
-      raising).
-- [ ] 7. CSV extension in place; Session-2 modes' logs unaffected apart from the two
-      new (empty) columns.
-- [ ] 8. Regression + audits per §8.4–8.5; progress.md + decisions.md updated.
+- [x] 6. Safety behaviours verified to cover ProfileMode: all 5 Session-2
+      behaviours hold structurally unchanged (ProfileMode is just another
+      `BaseMode`), and the profile-specific case — `compute_torque` raising —
+      is explicitly tested
+      (`test_profile_compute_torque_raising_auto_stops_session`) to auto-stop
+      the session exactly like a hardware read failure does.
+- [x] 7. CSV extension in place (`phase`, `rep_count` columns after
+      `torque_est_nm`); Session-2 modes' logs unaffected apart from the two new
+      (empty) columns — verified explicitly
+      (`test_velocity_mode_csv_leaves_phase_and_rep_count_columns_empty`) and
+      the original `core/tests/test_csv_logger.py` (Session 2, untouched this
+      session) still passes unmodified against the new 10-column schema.
+- [x] 8. Regression + audits per §8.4–8.5 (above); `docs/progress.md` (this
+      file) + `docs/decisions.md` updated throughout, not just at the end.
+
+**Session 3 complete.** Every Definition of Done item in spec §9 is checked and
+verified above; every item's verification method (pytest, direct code-reading,
+curl against the real Flask app, or headless-Chrome console capture + live UI
+interaction) is recorded so a fresh session can trust this checklist without
+re-deriving it. Out-of-scope items from spec §11 (live hardware, real profile math
+beyond structural behaviours, m-term/acceleration estimation, filtering beyond the
+EWMA, set/workout-level logic, user accounts/persistence, restyling, websocket
+revisit, CAN/Pi, regen) were not touched. Known follow-ups flagged in-code per
+spec §10 (all detector tuning constants + `SPOOL_RADIUS_M` + overload ratio;
+`enable_torque_mode_vel_limit` now also noted on `ProfileMode`; the two-connection
+conflict, unchanged; VBT per-set/Tonal-Burnout-style set-level control; real
+strength-curve data injection for BellCurve) are all in place as `# TODO(2A)` /
+`# STUB(2A+)` comments in the relevant files.
