@@ -19,6 +19,7 @@ const InspectorTab = lazy(() => import('./tabs/inspector/InspectorTab'))
 const DashboardTab = lazy(() => import('./tabs/dashboard/DashboardTab'))
 const PresetsTab = lazy(() => import('./tabs/presets/PresetsTab'))
 const CommandConsoleTab = lazy(() => import('./tabs/command console/CommandConsoleTab'))
+const ControlTab = lazy(() => import('./tabs/control/ControlTab'))
 
 // Lightweight loading component
 const TabLoadingFallback = () => (
@@ -69,6 +70,12 @@ const TAB_CONFIG = [
     isActive: true // Pass active state for dashboard
   },
   {
+    id: 'control',
+    label: 'Control',
+    component: ControlTab,
+    requiresConnection: false
+  },
+  {
     id: 'inspector',
     label: 'Inspector',
     component: InspectorTab,
@@ -104,6 +111,11 @@ const MainTabs = () => {
           return {
             ...commonProps,
             odriveState,
+            isActive: activeTab === index
+          }
+        case 'control':
+          return {
+            ...commonProps,
             isActive: activeTab === index
           }
         default:
