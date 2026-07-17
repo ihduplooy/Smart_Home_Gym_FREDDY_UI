@@ -1,0 +1,4 @@
+# Dev-only dependency for core/tests/ (plain pytest, no Flask, no hardware).
+# Install into the same venv as backend/requirements.txt:
+#   pip install -r requirements-dev.txt
+pytest

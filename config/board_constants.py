@@ -40,6 +40,11 @@ MOTOR_RESISTANCE_CALIB_MAX_VOLTAGE = 4.0
 MOTOR_CURRENT_CONTROL_BANDWIDTH = 100  # reduced from ODrive's default for stability
                                        # given this motor's higher inductance
 
+# TODO(2A): placeholder pending motor characterisation (open item #2) — a rough
+# ballpark for a hoverboard hub motor, not measured on this specific unit. Used
+# by core/hardware to compute torque_est = MOTOR_TORQUE_CONSTANT * current_iq.
+MOTOR_TORQUE_CONSTANT = 0.06  # Nm/A, placeholder
+
 # --------------------------------------------------------------------------
 # Encoder — onboard AS5047P magnetic encoder (SPI, absolute)
 # --------------------------------------------------------------------------
@@ -127,6 +132,7 @@ def as_dict():
             "calibration_current": MOTOR_CALIBRATION_CURRENT,
             "resistance_calib_max_voltage": MOTOR_RESISTANCE_CALIB_MAX_VOLTAGE,
             "current_control_bandwidth": MOTOR_CURRENT_CONTROL_BANDWIDTH,
+            "torque_constant": MOTOR_TORQUE_CONSTANT,
         },
         "encoder": {
             "mode": ENCODER_MODE_SPI_ABS_AMS,
