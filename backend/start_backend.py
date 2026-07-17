@@ -17,4 +17,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 app = create_app()
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    # threaded=True: flask-sock's docs call this out explicitly — the dev
+    # server can otherwise only serve one connection (HTTP or WebSocket) at a
+    # time. Session 1 never needed this (only one long-lived WebSocket route
+    # existed); Session 2 adds a second concurrent one (/ws/control-telemetry
+    # alongside the per-device telemetry socket), which starves an
+    # unthreaded dev server and can corrupt the WS frame stream.
+    app.run(host="127.0.0.1", port=5000, debug=True, threaded=True)

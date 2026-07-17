@@ -8,6 +8,7 @@ from flask_sock import Sock
 
 from .constants import VERSION  # backend version tag
 from . import device_manager
+from . import control_routes
 from .api_reference import load_api_reference, reference_line
 from .telemetry import telemetry_session
 from config import board_constants
@@ -153,5 +154,7 @@ def create_app() -> Flask:
                 ws.send(json.dumps({"error": str(e)}))
             except Exception:
                 pass
+
+    control_routes.register(app, sock)
 
     return app
