@@ -670,8 +670,14 @@ starting. See decisions.md.
       OverloadWrapper composes over any profile and either moving phase.
 - [ ] 4. Profiles tab works: registry-driven picker, schema-driven params, overload
       toggle, live phase badge + rep count, stub-math notice, STOP.
-- [ ] 5. `core/README.md` gains a second snippet: ConstantProfile session against
-      sim, no Flask.
+- [x] 5. `core/README.md` gains a second snippet: ConstantProfile session against
+      sim, no Flask. Verified: ran the exact snippet text (`.venv/bin/python3 -c
+      "..."`) — printed a live `TelemetrySample`, `phase='concentric'`,
+      `rep_count=0`, stopped cleanly. Also noted (decisions.md) that the
+      *existing* Session 2 snippet, run as literally written with no sleep,
+      reliably prints `latest_sample: None` (a race against the 50 Hz thread's
+      first tick) — added a short `time.sleep(0.1)` to the new snippet so it's
+      honestly deterministic rather than repeating that same unstated race.
 - [ ] 6. Safety behaviours verified to cover ProfileMode (incl. `compute_torque`
       raising).
 - [ ] 7. CSV extension in place; Session-2 modes' logs unaffected apart from the two

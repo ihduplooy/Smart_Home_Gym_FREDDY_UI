@@ -593,6 +593,18 @@ parameters (including which base profile was chosen) are still in the CSV's `mod
 overload runs over different base profiles won't be distinguishable by filename alone
 if someone's sorting a `logs/` directory later.
 
+## Found: Session 2's own README snippet has an unstated race (not fixed there, avoided in the new one)
+
+While verifying Session 3's new `core/README.md` snippet, re-ran Session 2's existing
+one exactly as written (`session.start(...); print(session.status()["latest_sample"])`,
+no sleep) three times: it printed `None` every time — `status()` is called before the
+50 Hz telemetry thread has produced its first sample, a race that has nothing to do
+with Session 3's changes. Session 2's `progress.md` DoD 5 claims it "printed a live
+TelemetrySample," which doesn't reproduce as literally written. Not fixed in Session
+2's snippet (out of this session's scope to rewrite prior claims), but the new Session
+3 snippet added `time.sleep(0.1)` before reading status specifically so it doesn't
+repeat the same unstated race — verified deterministic across multiple runs.
+
 ## Vite dev proxy: added a /ws prefix
 
 `frontend/vite.config.js` only proxied `/api/*` to the backend; `/ws/control-telemetry`
