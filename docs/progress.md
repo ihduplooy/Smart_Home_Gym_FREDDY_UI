@@ -753,3 +753,583 @@ spec §10 (all detector tuning constants + `SPOOL_RADIUS_M` + overload ratio;
 conflict, unchanged; VBT per-set/Tonal-Burnout-style set-level control; real
 strength-curve data injection for BellCurve) are all in place as `# TODO(2A)` /
 `# STUB(2A+)` comments in the relevant files.
+
+---
+
+# Phase 2A hardware bring-up — first live hardware run
+
+`config/odrive_config.py` was run for the first time against the actual, physically
+wired-in board (ODrive Mini + hoverboard motor + AS5047P + brake resistor + bench PSU +
+isolated USB). Motor was never energized; nothing moved before the crash below.
+
+- [x] **Bug caught on this first real run:** crashed with
+      `fibre.protocol.ChannelBrokenException` immediately after the "Erase existing
+      configuration" confirmation prompt. Root cause: `erase_configuration()` reboots
+      this board mid-RPC, severing the USB connection before the call returns — the
+      script's own reconnect line (`odrv0 = odrive.find_any()`) was unreachable because
+      the exception fires first. Full root-cause + fix writeup in `docs/decisions.md`
+      ("Phase 2A hardware bring-up" section).
+- [x] **Fixed** with a reusable `call_and_reconnect()` helper (catches the expected
+      `ChannelBrokenException`, reconnects via `odrive.find_any(timeout=...)`, fails
+      loudly with `sys.exit(1)` and a clear message if the board doesn't reappear —
+      no silent retry). Applied at all four reboot-triggering call sites in the script:
+      the one `erase_configuration()` call and all three `save_configuration()` calls
+      (bus-limits save, static-config save, post-calibration save) — the latter three
+      had the identical unreachable-reconnect bug, not yet hit live only because the
+      script crashed on the first (`erase_configuration`) call before reaching them.
+      Confirmation-gate structure and every existing safety check (`wait_for_idle`,
+      `check_errors`, `check_motor_calibration_sane`) preserved exactly — verified by
+      diff, only the call+reconnect lines changed.
+- [x] **Audited for the same bug elsewhere:** grepped the whole repo (excluding
+      `.venv`) for `erase_configuration`, `save_configuration`, and `.reboot(` — the
+      four sites just fixed are the only Python call sites; no `.reboot()` call exists
+      anywhere. The frontend's own calls to these two methods (Presets tab, calibration
+      hook, config wizard, erase-config modal) go through the Flask backend's
+      `device_manager`, a fresh-handle-per-request architecture unaffected by this bug
+      — confirmed, not a matching issue, logged in decisions.md.
+- [x] **Verified without touching real hardware** (per explicit instruction — board is
+      live on the bench, real-hardware runs stay in the user's own session):
+      `python -m pytest core/tests` still 69/69 passing (fix is isolated to
+      `config/odrive_config.py`, outside `core/`); `python -m py_compile
+      config/odrive_config.py` clean; `call_and_reconnect`'s actual AST node extracted
+      from the real file and exec'd against a fake `odrive` module (scratch script, not
+      committed) to exercise normal reconnect, the board-never-reappears failure path
+      (bounded, non-zero exit, no hang), an unrelated exception propagating instead of
+      being swallowed, and a non-raising call still reconnecting — all 7 checks passed.
+
+Not yet done: re-running the fixed script against the real board (deferred to the
+user's own session).
+
+- [x] **Second bug caught on the same live run**, right after the erase/reconnect fix
+      worked correctly: crashed setting `odrv0.config.enable_brake_resistor = True` —
+      this attribute doesn't exist on this board's firmware (v0.5.1), confirmed live via
+      `dir(odrv0.config)`. On this firmware the brake resistor is enabled implicitly by
+      `brake_resistance` being non-zero; there's no separate boolean flag. Fixed:
+      removed the erroneous line, updated the comment above `brake_resistance` to say so
+      explicitly. Full writeup + the follow-on attribute audit in `docs/decisions.md`
+      ("Phase 2A hardware bring-up" section).
+- [x] **Audited the rest of the script's `.config.` attributes** against the project's
+      bundled `odriveApiReference05x.json` (best available offline proxy — the
+      `ODRIVE_MOCK` Flask mock isn't wired to this standalone script). 26/28 checked out
+      clean. Two items the reference can't confirm either way and were left unchanged:
+      `can_node_id`/`odrv0.can.set_baud_rate` (reference only models the nested 0.6.x-
+      style equivalent; Session 1 already reasoned through this exact gap and chose the
+      flat path from this script's own working-hardware comment — not newly suspicious,
+      but not yet live-verified since the crash happened earlier in Section 1) and the
+      three `trap_traj.config.*` lines (reference has no `trap_traj_config` group at
+      all, so there's nothing to check them against either way). Noted explicitly that
+      this reference file is labeled v0.5.6, not our exact v0.5.1, and had already been
+      caught giving one wrong answer (`enable_brake_resistor`) — so it's a screen for
+      obviously-wrong names, not a substitute for the live board's own `dir()`.
+      Verified: `python -m py_compile config/odrive_config.py` clean,
+      `python -m pytest core/tests` still 69/69.
+
+## Encoder offset calibration bounded auto-retry (21 July 2026, follow-up session)
+
+- [x] **Added a bounded auto-retry loop around `AXIS_STATE_ENCODER_OFFSET_CALIBRATION`**
+      in `config/odrive_config.py`, per the recommendation carried forward in open item
+      #14 (project plan). Up to 5 attempts; success is checked via
+      `axis0.encoder.is_ready` and `axis0.encoder.error == ENCODER_ERROR_NONE` rather
+      than just "no exception," since the failure mode is `ENCODER_ERROR_NO_RESPONSE`
+      without the state transition itself raising. `odrv0.clear_errors()` between
+      attempts (the confirmed top-level RPC per `odriveApiReference05x.json` — clears
+      all device + submodule errors) so a failed attempt doesn't block the next retry.
+      On success: sets `axis0.encoder.config.pre_calibrated = True` and saves
+      immediately (matches the manual workaround already in use, now automated). If all
+      5 attempts fail, exits without saving and points at the next diagnostic step
+      (physical AS5047P chip inspection) rather than retrying indefinitely.
+- [x] **Verified without touching real hardware**: `python -m py_compile
+      config/odrive_config.py` clean. `python -m pytest core/tests` not re-run this
+      pass — venv currently has no `pytest` installed (not present in `requirements-dev.txt`
+      or wasn't installed into this venv); unrelated to this change, this script isn't
+      imported by `core/` either way (same reasoning as the prior verification entry
+      above).
+
+Not yet done: running the updated script against the real board — deferred to the
+user's own live session, since the confirm() gates exist specifically for a human to
+verify physical safety conditions (isolator connected, area clear, wiring intact)
+immediately before each energizing step.
+
+## Encoder offset calibration tier-2 diagnostic attempt (open item #14, second follow-up, 21 July 2026)
+
+- [x] **Added a second retry tier to `config/odrive_config.py`'s encoder offset
+      calibration loop**, gated on the tier-1 5-attempt loop (previous section, still
+      unchanged in logic) exhausting all attempts. New context motivating this: motor
+      calibration always succeeds cleanly, and the SPI link is confirmed alive/correct
+      at idle (`shadow_count`/`pos_estimate` track correctly while hand-spinning with
+      phases unenergized) — the `ENCODER_ERROR_NO_RESPONSE` fault is specific to the
+      one step where phases are actively switching while the encoder is read
+      continuously, pointing at EMI from motor drive current coupling into the SPI
+      lines rather than a dead encoder/CS pin/wiring fault. Tier 2 temporarily lowers
+      `axis0.motor.config.calibration_current` (5.0 → 3.0 A, less phase current → less
+      EMI) and `axis0.encoder.config.bandwidth` (3000 → 1000, less susceptible to
+      noise-induced glitches in the SPI-derived estimate), then runs another 5
+      attempts with the identical `is_ready`/`error` check and per-attempt
+      individual-field error clearing as tier 1 (shared via one extracted
+      `run_encoder_calibration_attempts()` helper, not duplicated). On tier-2 success,
+      the reduced values are kept (not reverted) as the new working baseline and
+      persist through the existing `save_configuration()` call; the script prints
+      exactly which tier succeeded and at which settings. On tier-2 failure (all 5
+      attempts at both tiers exhausted), `calibration_current`/`encoder.config.bandwidth`
+      are explicitly restored to 5.0/3000 before exiting, so a failed low-current
+      experiment doesn't silently become the new default for the next diagnostic step
+      (physical AS5047P inspection). Full writeup in `docs/decisions.md`.
+- [x] **Added matching (non-value-changing) comments** in `config/board_constants.py`
+      near `MOTOR_CALIBRATION_CURRENT` and `ENCODER_BANDWIDTH`, pointing at this
+      tier-2 diagnostic path, so a future reader isn't confused if a live board dump
+      ever shows 3.0/1000 instead of the project defaults 5.0/3000.
+- [x] **Verified without touching real hardware**: `python -m py_compile
+      config/odrive_config.py config/board_constants.py` clean.
+
+Not yet done: running the updated script against the real board to see whether tier 1
+or tier 2 actually succeeds (or neither) — deferred to the user's own live session, to
+be reported back and logged here + in `docs/decisions.md` once known.
+
+## Encoder offset calibration tier-3 diagnostic added — motor-recalibration hypothesis (open item #14, third follow-up, 21 July 2026)
+
+- [x] **Ran the live diagnostic session** referenced by the previous entry: ~15 manual
+      attempts at `AXIS_STATE_ENCODER_OFFSET_CALIBRATION`, exactly one success. That one
+      success immediately followed a fresh `AXIS_STATE_MOTOR_CALIBRATION` in the same
+      session with no reboot in between; every other attempt (encoder calibration alone,
+      motor not freshly re-run) failed. New hypothesis for open item #14 — **explicitly
+      n=1, not yet confirmed**, easily confounded with other time-varying factors.
+- [x] **Added tier 3 to `config/odrive_config.py`'s retry system** (gated behind tiers 1
+      and 2 both exhausting all 5 attempts; tier 1/tier 2 code and behavior verified
+      unchanged). For up to 5 attempts: clear errors, run a fresh motor calibration,
+      check it succeeded by reusing the existing checks (factored `check_errors()` and
+      `check_motor_calibration_sane()`'s core logic into new boolean helpers
+      `axis_has_errors()`/`motor_calibration_is_sane()` rather than duplicating them —
+      original exit-on-failure functions/call sites unchanged in behavior), and on
+      success immediately (no reboot, no extra delay) run encoder offset calibration,
+      then check `is_ready`/`error` after a 0.2s settle delay (added because the live
+      session showed a false-positive "no error" reading immediately after the state
+      transition, before the attempt had actually run). On success: sets
+      `pre_calibrated = True` for both motor and encoder (tier 3 is the first tier that
+      re-runs motor calibration itself) and reports which attempt/tier succeeded. On
+      failure of all 5 tier-3 attempts: exits the same way as tier-2 exhaustion,
+      restores `calibration_current`/`encoder.config.bandwidth` to 5.0/3000 (defensive —
+      tier 2's own failure branch already does this), and the failure message now names
+      all 3 tiers plus flags that an oscilloscope/logic analyzer check on the SPI lines
+      may be the next step once physical inspection is exhausted, since software-side
+      retries are now exhausted too. Full writeup in `docs/decisions.md`.
+- [x] **Verified without touching real hardware**: `python -m py_compile
+      config/odrive_config.py` clean. Control-flow read-through confirmed the
+      tier-2-scoped `orig_calibration_current`/`orig_encoder_bandwidth` names are always
+      in scope by the time tier 3's failure branch references them.
+
+Not yet done: running the updated script against the real board to see whether tier 1,
+2, or 3 actually succeeds (or all three fail), and whether the motor-recalibration
+hypothesis holds beyond its single n=1 data point — deferred to the user's own live
+session, to be reported back and logged here + in `docs/decisions.md` once known.
+
+## New diagnostic script: `config/diagnose_encoder_spi.py` (open item #14, fourth follow-up, 21 July 2026)
+
+- [x] **Added a new standalone diagnostic script** to isolate WHERE the
+      `ENCODER_ERROR_NO_RESPONSE` fault actually is, using ODrive's own diagnostic
+      states/tools, instead of continuing to iterate on the calibration state machine
+      directly (as the three tiers in `config/odrive_config.py` do). Two confirm()-gated
+      tests: **Step 1** enters `AXIS_STATE_LOCKIN_SPIN` (open-loop drive, entirely
+      bypassing the encoder-offset-calibration algorithm) and polls
+      `encoder.spi_error_rate`/`pos_estimate`/`shadow_count`/`vel_estimate` at ~10 Hz for
+      a few seconds, printing a "SPI healthy under drive" vs. "SPI failure under drive
+      confirmed" verdict; **Step 2** runs one `AXIS_STATE_ENCODER_OFFSET_CALIBRATION`
+      attempt with `axis0.config.calibration_lockin`'s vel/accel temporarily slowed
+      in-memory (restored afterward regardless of outcome, nothing saved), testing a
+      timing-budget hypothesis. Ends with a combined summary suggesting the most likely
+      next diagnostic direction based on both verdicts together. Full design reasoning
+      in `docs/decisions.md`.
+- [x] **Read-only with respect to saved config**: no `erase_configuration()`/
+      `save_configuration()` calls, `pre_calibrated` never set on anything. Does not
+      modify `odrive_config.py` or `board_constants.py`. Extracted the small reusable
+      bits (`confirm()`, `wait_for_idle()`, individual-field error clearing) into a new
+      shared module, `config/odrive_diag_common.py`, since `odrive_config.py` can't be
+      imported (top-level script, runs on import) and wasn't to be touched.
+- [x] **Verified without touching real hardware**: `python -m py_compile
+      config/diagnose_encoder_spi.py config/odrive_diag_common.py` clean. Ran the actual
+      script's `main()` end-to-end against a hand-built fake `odrive` module (same
+      fake-module precedent used earlier for `call_and_reconnect()`) — full control flow
+      (Step 0 dump, Step 1 poll loop, Step 2 slow/restore cycle, final summary) completed
+      with no exceptions.
+
+Not yet done: running this script against the real board — deferred to the user's own
+live session, to be reported back and logged here + in `docs/decisions.md` once known
+(per the task's own framing, this entry logs the script's existence/purpose only, not an
+outcome).
+
+---
+
+## Live bring-up session, 21 July 2026 — open items #14 and #7 resolved
+
+- [x] **Open item #14 — Resolved (21 July 2026).** Root cause: the onboard AS5047P can
+      enter a latched fault state matching what the ODrive community forum calls
+      "super-sulk" (frozen `shadow_count`/`pos_estimate`, `spi_error_rate` misleadingly
+      stays `0.0`). Confirmed it does **not** clear via `clear_axis_errors()`,
+      `odrv0.reboot()`, or `save_configuration()`'s implicit reboot — only via a full
+      physical DC-bus power cycle. After a live power cycle, encoder offset calibration
+      succeeded cleanly on the first attempt, was saved
+      (`motor.config.pre_calibrated=True`, `encoder.config.pre_calibrated=True`,
+      `save_configuration()`), and confirmed durable across a subsequent `odrv0.reboot()`
+      (`motor.is_calibrated=True`, `encoder.is_ready=True`, clean `dump_errors()` on both
+      axes). Tiers 1-3 in `config/odrive_config.py`'s retry loop are confirmed to have been
+      testing the wrong layer of the problem (none of them address a hardware-latched
+      fault) — left in place as harmless, but a prominent comment now points straight at
+      the DC-power-cycle fix ahead of them. Full root-cause writeup, forum reference, and
+      isolation method: `docs/decisions.md` ("AS5047P 'super-sulk' latched fault — root
+      cause found").
+- [x] **Open item #7 — Resolved (21 July 2026)**, gains half only. With a working saved
+      calibration, closed-loop control was tested and gains were tuned live at the bench
+      on a free-spinning wheel (no cable load yet): `pos_gain` 1.0→3.0→**6.0**, `vel_gain`
+      0.02→**0.05**, `vel_integrator_gain` 0.0→0.05→**0.1**, `motor.config.current_lim`
+      10.0→**15.0** — each step confirmed smooth (no oscillation/overshoot) before
+      increasing further. Saved live via `save_configuration()`, confirmed to persist.
+      `config/board_constants.py` updated to match. **Not yet resolved**: item #7 as
+      originally scoped in the project plan also bundled the 25V bench-only
+      `dc_bus_overvoltage_trip_level`, which still must be raised before the battery phase
+      (~42V) — untouched this session, tracked separately via the comment on
+      `DC_BUS_OVERVOLTAGE_TRIP_LEVEL` in `config/board_constants.py`. Gains may also need
+      re-tuning once real cable load (not a free-spinning wheel) is introduced in later 2A
+      work. Full writeup: `docs/decisions.md` ("Live gain tuning at the bench").
+
+---
+
+## First real-hardware Freddy (web GUI) session, 22 July 2026
+
+- [x] Backend/frontend route audit against real hardware: clean, no mismatches found.
+- [x] Two real bugs found and fixed live in `backend/app/device_manager.py`: silent
+      exception-swallowing in `_find_any()` (a real USB error looked identical to "no
+      device"), and a self-contention bug (`odrive.find_any()` resets the USB bus every
+      call; nothing prevented two concurrent `/api/devices` polls from colliding). Also
+      fixed `serial_number` being reported as decimal instead of the hex format every
+      other ODrive tool uses. Full writeup: `docs/decisions.md`.
+- [x] **Open item resolved: the `# TODO(2A)` two-connection conflict** flagged since
+      Session 2 in `core/hardware/odrive_hw.py`. `OdriveHardware` now takes optional
+      injected `find_any_fn`/`lock_provider` hooks (default no-op, so `core/tests`/
+      `core/README.md` usage is unchanged); `backend/app/control_routes.py` injects
+      `device_manager.get_shared_handle`/`get_shared_io_lock` so a Control-tab run
+      reuses the sidebar's already-open connection instead of opening a rival one that
+      resets the bus out from under it. `stop()` deliberately stays unlocked to preserve
+      the Session 2 wedge-safety guarantee. `core/tests`: 69/69 still passing. Backend
+      log from the user's own subsequent session shows 3 successful
+      `POST /api/control/start` calls interleaved with normal sidebar `/api/devices`
+      polling and zero bus-reset/USB-error log lines in that window (a sharp contrast to
+      the collision errors logged pre-fix) — good live evidence the fix works, though the
+      specific "sidebar stays accurate through an auto-stop" scenario that originally
+      surfaced the bug wasn't separately, deliberately re-verified. Full design writeup:
+      `docs/decisions.md`.
+- [x] Added `Start Freddy.command` (repo root, replaces the untracked mock-mode
+      `Start UI.command`): one double-click kills any stale backend/frontend, starts both
+      fresh in real-hardware mode, waits for both to respond, opens Safari. Verified live.
+- [x] **Found and fixed a second, more serious bug the same session**: after the board was
+      physically unplugged mid-connection, `device_manager._find_any()` stopped respecting
+      its own timeout and hung indefinitely — confirmed live (`/api/devices` didn't
+      respond even after 20s, while non-USB routes stayed instant) and root-caused (a
+      fresh process's `find_any()` returned cleanly in 2.01s against the same unplugged
+      board — the wedge was specific to accumulated state in the long-running process).
+      Because discovery never completed, the stale cached "connected" handle from before
+      the unplug never got cleared — **this is what made the UI show "connected" with the
+      USB not even plugged in.** Fixed with a hard wall-clock ceiling
+      (`_FIND_ANY_HARD_TIMEOUT_S = 5.0`) around the actual `find_any()` call, run in a
+      daemon thread and joined with a timeout, so a wedge now degrades to a clean "no
+      device found" (correctly clearing the stale cache) instead of hanging the whole
+      backend. `core/tests`: 69/69 still passing. Live: `/api/devices` now responds in
+      ~1-2s post-restart instead of hanging. Full writeup: `docs/decisions.md`.
+
+Not yet done: deliberately re-triggering the auto-stop-with-sidebar-watching scenario that
+first surfaced the two-connection bug, to directly confirm (not just infer from logs) that
+the sidebar stays accurate through it —
+deferred to the user's next session with the board physically connected.
+
+## Same session, immediate follow-up: request pileup + port-5000/AirPlay conflict
+
+- [x] The `_discovery_lock` hang-fix above could itself pile up the whole backend under
+      normal load (real scans with the board present + other USB peripherals can
+      legitimately take a few seconds; strict serialization + a 3s poll interval meant
+      requests could arrive faster than they drained). This is what actually caused the
+      "shows connected with USB unplugged", frozen Dashboard (`0.0V`/`UNDEFINED` despite
+      "Error States: OK"), "Enable Motor" no-op, and Control tab "load failed" symptoms —
+      one root cause, not four. Fixed: `discover_and_index()` now takes `_discovery_lock`
+      non-blocking and falls back to the current cache if a scan's already in flight,
+      instead of queueing.
+- [x] Also found (by accident, while diagnosing): the backend process had actually died,
+      and because macOS's AirPlay Receiver squats on the wildcard `*:5000`, every request
+      silently fell through to it (real HTTP 403s, `Server: AirTunes`) instead of a clean
+      connection error — nearly invisible as a cause. An old, never-applied git stash in
+      this repo shows a previous session hit this exact issue and half-fixed it
+      (`vite.config.js` only) without finishing or documenting it. Properly fixed this
+      time: backend moved to port 5050 everywhere (`start_backend.py`, `vite.config.js`,
+      `Start Freddy.command`, the live-integration test default, README/user manual).
+      `Start Freddy.command` also switched from `&`+`disown` (failed — no job control in
+      that shell context) to `nohup`, so the backend can't be taken down by its own
+      launcher shell exiting.
+- [x] `core/tests`: 69/69 still passing throughout. Live: 8-poll overlap stress test with
+      zero pileup, confirmed the backend survives independently of the launching shell,
+      and a direct property read through the fixed stack came back with real live values
+      (`vbus_voltage: 14.71V`, `axis0.current_state: 1`, `motor.is_calibrated: true`,
+      `encoder.is_ready: true`) — confirming the Dashboard symptom was entirely downstream
+      of the pileup/crash, not a separate bug in property reads. Full writeup:
+      `docs/decisions.md`.
+- [x] **Found the real, deeper cause of a recurring "connected but frozen at zero" Dashboard**
+      even on a genuinely fresh page load: `discover_and_index()` reset the USB bus on
+      *every* poll, unconditionally, even when a device was already connected and
+      healthy — eventually killing whatever else (the telemetry websocket, a Control
+      session) was using that connection (`fibre.protocol.ChannelBrokenException`, 16
+      occurrences in one log). `getattr(obj, name, default)` only swallows
+      `AttributeError`, not that exception, so it crashed the request instead of
+      degrading gracefully. Fixed: `discover_and_index()` now answers from the cache
+      with zero bus access whenever the cache is still alive, only falling through to a
+      real (resetting) scan if nothing's cached or the cached entry is actually dead.
+      `core/tests`: 69/69 still passing. Live: 10 rapid polls against an already-connected
+      device now take ~4ms each (was 1-5s+) with zero channel-broken errors afterward,
+      and a property read immediately after confirms the connection survived. Full
+      writeup: `docs/decisions.md`.
+
+## GUI cleanup: real-only Control/Profiles + live PID gain sliders, 22 July 2026
+
+User feedback after using the app hands-on with real hardware for a while: never uses
+the Control/Profiles tabs' sim option, wants it gone; separately wants to tune the
+controller PID gains from the Control tab itself (sliders), instead of going through
+the Configuration wizard every time.
+
+- [x] **Removed the Sim/Real hardware-source toggle from the GUI.** Deleted the colored
+      banner + Sim/Real button pair from both `ControlTab.jsx` and `ProfilesTab.jsx`
+      (identical blocks in both), along with the now-dead `hardwareSource` state,
+      `handleHardwareSourceChange`, and the `apiSetHardwareSource`/`setHardwareSource`
+      imports in each. Changed `backend/app/control_routes.py`'s `ControlSession`
+      construction from `hardware_source="sim"` to `hardware_source="real"`, so a fresh
+      backend process now boots straight into real-hardware mode with no user action
+      needed — previously it silently defaulted to sim with no GUI way to notice.
+      Deliberately did **not** touch `core/hardware/sim_hw.py`, `ControlSession`'s
+      `set_hardware_source()`, or the `/api/control/hardware-source` GET/POST route —
+      left as working, tested backend/core capability, just no longer surfaced in the
+      GUI (still reachable via curl/tests if ever useful).
+- [x] **Added a "Controller Gains" card to the Control tab** — three sliders (Position
+      Gain, Velocity Gain, Velocity Integrator Gain) reading/writing
+      `axis0.controller.config.{pos_gain,vel_gain,vel_integrator_gain}` directly via the
+      existing generic `readProperties`/`writeProperties`/`invokeCommand` backend client
+      (the same one the config wizard and Inspector use — no new backend route needed).
+      Reads the device's current gains once connected; slider drag updates the displayed
+      number continuously (`onChange`) but only writes to the device on release
+      (`onChangeEnd`), so dragging doesn't flood the connection with writes. A "Save to
+      NVM" button calls `save_configuration` to persist tuned gains across reboots —
+      disabled while a session is running, since that call reboots the board.
+- [x] Verified: `npx eslint .` clean across the whole frontend, `npx vitest run` 40/40
+      passing (2 skipped, unaffected). Live: with the user's real backend/frontend dev
+      servers already running against a connected board (Flask's debug reloader and
+      Vite's HMR picked up the changes automatically — servers were **not** restarted, to
+      avoid disturbing the live session), a separate passive headless-Chrome check (new
+      tab, no interaction with Start/Stop/sliders) confirmed both tabs render with no
+      "SIM"/"REAL HARDWARE" text anywhere, the Controller Gains card appears on Control
+      and correctly shows "no device" in that fresh tab's own (unconnected) session
+      state, and zero console errors.
+- [x] Updated `docs/user_manual.md` and `docs/manual.html` (the styled HTML twin) to
+      match: rewrote the intro framing (hardware is now wired and primary, not "Session
+      3, no hardware yet"), rewrote §2.4 Control (three modes now, no sim/real step, new
+      Controller Gains subsection), trimmed the sim/real line from §2.5 Profiles, noted
+      in §3 that CSV filenames' `_real`/`_sim` suffix is now always `_real` (it reflects
+      which internal hardware factory was used, not whether the device is physically
+      real or the `ODRIVE_MOCK` mock), and replaced §4 "Sim vs Real" with "Running with
+      vs without hardware" — clarifying the two independent sim mechanisms in this
+      codebase (`ODRIVE_MOCK=1`/`mock_dev`, backend-level, untouched by this change; vs.
+      the now-removed per-tab `ControlSession` simulator) so a future reader doesn't
+      conflate them. Did not do a full pass on the rest of either manual's other,
+      unrelated staleness (e.g. the "seven tabs"/"Session 3" framing predates Position
+      mode and the new sidebar Reset/Restart-backend buttons, and §5's
+      two-simultaneous-connection rough edge was actually already fixed per the entries
+      above) — out of scope for this change, flagged here for a future doc pass.
+
+---
+
+# Exercise tab, Layer A (cable-attached positioning & safety), 23 July 2026
+
+Built per `exercise_tab_build_spec_layerA.md` (source WHAT doc:
+`exercise_tab_WHAT_plan.md`). Layer A only — homing, max-extension calibration,
+spool-geometry correction, length-based control, manual reset. Explicitly **not**
+built: force feedback, concentric/eccentric phase logic, isokinetic mode (all
+Layer B, WHAT-planned only). Control and Profiles tabs untouched.
+
+Full architecture-fit analysis, constant-by-constant reasoning, and the
+homing-state-machine design were reported at the session's mid-point
+checkpoint and are recorded permanently in `docs/decisions.md` ("Exercise tab
+Layer A" entry) — this section is the §11 Definition of Done walkthrough.
+
+## §11 Definition of Done
+
+- [x] **`core/cable/` built**: `geometry.py` (spool turns↔length conversion +
+      `k` calibration, zero project-specific imports — pure math), `homing.py`
+      (`HomingStateMachine`), `limits.py` (target clamp + runtime guard + max-
+      extension sanity check), plus `state.py` (`CableState`, a deviation from
+      the spec's suggested 4-module layout — see decisions.md) and
+      `exercise_mode.py` (the `ControlSession` integration). All hardware-free,
+      Flask-free, `ControlSession`-free except `exercise_mode.py` itself.
+      Homing's six required synthetic-sequence cases (§8: clean detection,
+      grace-period transient, sub-debounce transient, travel-bound fault,
+      timeout fault, abort) written and passing *before* anything was built on
+      top of the state machine, per the session's explicit requirement — all
+      ten homing tests passed on the first run, no design issues surfaced
+      there. The synthetic tests **did** catch a real issue elsewhere:
+      `core/tests/test_geometry.py`'s round-trip property test found that the
+      first-guess `SPOOL_CORRECTION_K_BOUNDS = (±0.01)` let a value *within*
+      that bound break the spool model's invertibility within about one turn
+      of travel — tightened to `(±0.0005)`, full reasoning in decisions.md.
+- [x] **Integration into the running control loop**, following the
+      `ProfileMode` precedent (`ExerciseMode(BaseMode)`, runs inside
+      `ControlSession`'s existing 50Hz loop, no second thread). Three
+      deviations from the precedent, all forced by something the spec
+      couldn't see without the codebase in front of it, all logged in
+      decisions.md: (1) home/max live in `CableState`, injected via a new
+      `ControlSession.mode_factories` hook, not owned by the mode instance —
+      `ControlSession.stop()` destroys `_mode_handler`, but spec §3.5 needs a
+      still-valid home to survive a Stop; (2) `ExerciseMode` calls
+      `hardware.set_mode()` itself when the action changes (velocity/torque/
+      position within one session), since `ControlSession` only ever calls it
+      once at `start()`; (3) `calibrate_k`/`reset_position` bypass
+      `ControlSession` entirely (backend-route-level operations directly
+      against `CableState`) since neither needs the motor moving and reset
+      specifically must work while nothing is running.
+- [x] **Backend routes** (`backend/app/exercise_routes.py`, mirroring
+      `control_routes.py`'s structure per spec §2.3 rather than extending its
+      `{mode, target}` shape): `/api/exercise/{start,home,abort_homing,
+      start_max_calibration,confirm_max,cancel_max_calibration,move,stop,
+      reset_position,calibrate_k,status}`. REST polling only, no websocket —
+      matches the Control/Profiles precedent (`useControlTelemetry.js` had
+      already abandoned the websocket for the flask-sock close-path race the
+      spec anticipated). Shares the one `control_session` singleton, so the
+      `find_any()` choke point stays a single call site with zero new code.
+      No dedicated pytest file — this project has no backend-level test
+      infrastructure at all (`control_routes.py` doesn't have one either);
+      verified via the Flask test client end-to-end and, separately, in a
+      real browser (see below).
+- [x] **Exercise tab frontend** (`frontend/src/components/tabs/exercise/
+      ExerciseTab.jsx`, registered in `MainTabs.jsx` alongside Control/
+      Profiles): session start/stop, Home/Abort Homing with a live homing-
+      state badge, max-extension calibration (start/confirm/cancel), length-
+      based Move, confirmation-gated + idle-gated Manual Position Reset. Spool
+      calibration lives in a collapsed "Advanced" `Collapse` section (spec
+      §2.4), not visible by default. `api/exercise.js` +
+      `hooks/useExerciseStatus.js` follow the Control/Profiles precedent
+      exactly (REST polling); the status hook differs in one respect —
+      it keeps polling `/api/exercise/status` even while nothing is running,
+      since `cable.is_homed` must stay visible after a Stop.
+      **Verified in a real browser**: dev servers started against
+      `ODRIVE_MOCK=1` (backend on 127.0.0.1:5050, frontend via Vite on an
+      auto-selected port since the user's own dev server was already running
+      on 3000 — left untouched), driven headlessly via Chrome DevTools
+      Protocol (raw CDP over websocket, not a library — nothing suitable was
+      pre-installed and a full Puppeteer/Chromium download wasn't worth it
+      for one check). Confirmed: the Exercise tab renders with **zero console
+      errors and zero exceptions**; clicking through Start → Home → a live
+      "Reeling in…" badge → Abort → Stop round-trips through the whole real
+      stack (frontend → Flask → `ControlSession` → `ExerciseMode` →
+      `OdriveHardware` → the mock device) with no crashes; the Advanced
+      section toggles open/closed correctly. `ODRIVE_MOCK=1` turned out to
+      provide a live, connectable mock device (not just "no device found"),
+      so this exercised the full happy path, not just error handling.
+- [x] **All eight §4 safety behaviours implemented and individually tested**
+      (`core/tests/test_exercise_mode.py`, `core/tests/test_homing.py`):
+      1. No motion without an explicit user action —
+         `test_construction_does_not_move_anything`,
+         `test_arm_holds_zero_velocity_no_homing_started`.
+      2. Homing cannot latch on a transient — `test_homing.py`'s grace-period
+         and sub-debounce-window transient cases (2 tests).
+      3. Homing always terminates — `test_homing.py`'s travel-bound and
+         timeout-bound fault cases (2 tests).
+      4. Current limit always restored — `test_homing_completes_latches_
+         home_and_restores_current_limit`,
+         `test_homing_fault_restores_current_limit_and_records_reason`,
+         `test_abort_homing_restores_current_limit_and_stops_immediately`
+         (success/fault/abort, all three exit paths individually).
+      5. Length control unavailable without a valid home —
+         `test_move_rejected_when_unhomed`,
+         `test_max_calibration_requires_homed`, plus `limits.py`'s own
+         `test_validate_homed_raises_when_not_homed`.
+      6. Both end stops enforced at runtime, not just command time —
+         `test_move_clamps_target_beyond_max` (mechanism 1: target clamping)
+         and `test_tick_raises_when_position_leaves_range_beyond_tolerance`
+         (mechanism 2: runtime guard, reusing `ControlSession`'s existing
+         raising-mode-auto-stops-the-session path).
+      7. Stop remains available and effective during every state — the
+         Exercise tab's Stop and the sidebar's always-present emergency-stop
+         both call the same `control_session.stop()` already tested
+         extensively in `test_control_session.py`; unchanged by this session.
+      8. Manual reset is idle-gated and confirmation-gated — idle-gating
+         enforced in `exercise_routes.py` (rejected while an Exercise session
+         is running at all); confirmation is a frontend dialog (same pattern
+         as the existing erase-config modal), gated the same way `resetOpen`/
+         `ConfirmationModal`-style dialogs already work elsewhere in this
+         codebase.
+- [x] **All §5 constants in `config/board_constants.py`**, no inline literals
+      — including two not in the spec's own table but needed to make its own
+      requirements concrete (`MAX_EXTENSION_MIN_TRAVEL_TURNS`,
+      `POSITION_GUARD_TOLERANCE_TURNS`) and one more
+      (`SPOOL_CALIBRATION_MIN_THETA_M_RAD`) for the calibration-input guard.
+      Full reasoning per constant in decisions.md.
+- [x] **`MOTOR_TORQUE_CONSTANT` updated to `0.516875`**, commented as a
+      fallback estimate pending the hand-spin KV measurement (open item #13).
+      **Flagged explicitly**: this is not Exercise-tab-local — it raises
+      Control/Profiles' `TorqueMode`/`ProfileMode` clamp ceiling from ~0.9 Nm
+      to ~7.75 Nm and changes every `torque_est` reading. Spec-mandated
+      regardless; no existing test hardcoded the old value, so nothing broke,
+      but this is the one deliberate, visible exception to "Control/Profiles
+      unchanged."
+- [x] **Persistence split per §6** — `k` persists to
+      `config/spool_calibration.json` (gitignored), home/max never touch
+      disk. `core/tests/test_cable_state.py::
+      test_k_persists_across_a_fresh_instance_simulating_backend_restart`
+      constructs a second `CableState` against the same sidecar path and
+      asserts `k` survives while home/max do not — the closest a hardware-
+      free test gets to an actual backend restart. Backend restarts un-homed
+      by construction (a fresh `CableState` simply starts with
+      `home_turns = None`), not via a separate reset-on-boot step that could
+      be forgotten.
+- [x] **Cable length added to telemetry and CSV** — caught mid-DoD-review that
+      the first pass only added `cable_length_m` to the live status "extra"
+      passthrough, not the CSV logger, contradicting spec §7 explicitly.
+      Fixed: `CsvLogger` gains one more trailing column (same additive
+      pattern as the Session 3 `phase`/`rep_count` amendment), populated once
+      homed during Exercise runs, empty string otherwise. Two existing CSV
+      tests that asserted against fixed negative column indices were
+      hardened to look up columns by name instead, since the new trailing
+      column had silently shifted what those indices pointed at (one test
+      would have started checking the wrong columns without failing).
+- [x] **Full regression green**: `pytest core/tests` 172/172 (170 Layer A +
+      2 caught during the CSV fix above), `npx eslint .` clean, `npx vitest
+      run` 40/40 passing (2 skipped, unaffected).
+- [x] **Control and Profiles tabs verified unchanged in behaviour** — neither
+      tab's source files were touched. Their shared dependencies
+      (`core/control/session.py`, `core/hardware/odrive_hw.py`) changed in
+      ways confirmed backward-compatible: `mode_factories` defaults to the
+      unchanged `MODES_BY_NAME`; `status()`'s new `"extra"` field is additive
+      (existing `phase`/`rep_count` fields untouched); `OdriveHardware.
+      connect()`'s new current-limit reassertion is a no-op in the common
+      case (nothing else ever changes it away from `MOTOR_CURRENT_LIM`).
+      Confirmed live against `ODRIVE_MOCK=1`: `POST /api/control/start` with
+      `mode=velocity` and `GET /api/profiles` both behave identically to
+      before. The one intentional, visible exception (`MOTOR_TORQUE_CONSTANT`)
+      is called out above and in decisions.md, not silently absorbed into
+      this checklist item.
+- [x] **Choke-point audit clean** — `grep -rn "find_any("` still finds exactly
+      one real call site (`backend/app/device_manager.py`'s
+      `odrive.find_any(timeout=1.0)`); `core/hardware/odrive_hw.py`'s own
+      fallback is unreachable in the actual backend (always overridden by
+      `_real_hardware_factory`'s injection, which Exercise reuses unchanged);
+      `config/odrive_config.py`/`diagnose_encoder_spi.py` remain standalone
+      scripts outside the Flask app, unaffected.
+- [x] `docs/progress.md` (this entry) and `docs/decisions.md` updated,
+      including every deviation from the spec and the reasoning for each
+      chosen constant.
+- [x] `docs/user_manual.md` and `docs/manual.html` updated for the new tab
+      (see the entry immediately below this one) — did not rabbit-hole into
+      either manual's known pre-existing staleness, per instruction.
+
+## Housekeeping note: pre-existing uncommitted diffs
+
+Several files this session needed to edit (`config/board_constants.py`,
+`core/hardware/odrive_hw.py`, `core/hardware/interface.py`, `core/control/
+modes.py`, `core/tests/test_control_session.py`) already had uncommitted
+changes sitting in them from earlier bench sessions (10A→15A current-limit
+bump, live-tuned controller gains — both already narrated earlier in this
+log, just never committed). Flagged to the user mid-session rather than
+deciding unilaterally how to handle it; chosen: fold together rather than
+surgically split hunks per file. Some of this session's commits therefore
+contain both Layer A work and carried-forward bench-session content, called
+out explicitly in each affected commit message.
