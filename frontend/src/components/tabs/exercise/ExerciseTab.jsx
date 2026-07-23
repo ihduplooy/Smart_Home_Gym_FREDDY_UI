@@ -17,6 +17,7 @@ import {
   Input,
   InputGroup,
   InputRightAddon,
+  Select,
   Alert,
   AlertIcon,
   AlertTitle,
@@ -48,6 +49,14 @@ import {
   resetExercisePosition,
   calibrateSpoolK,
 } from '../../../api/exercise'
+import {
+  startForceSession,
+  engageForce,
+  updateForceParams,
+  disengageForce,
+  resumeForce,
+  stopForce,
+} from '../../../api/force'
 import { getBoardConstants } from '../../../api/backend'
 import MiniChart from '../control/MiniChart'
 
@@ -59,6 +68,22 @@ const HOMING_STATE_LABEL = {
   fault_timeout: 'Fault: timed out',
   aborted: 'Aborted',
 }
+
+const FORCE_STATE_LABEL = {
+  armed: 'Armed',
+  engaged_concentric: 'Engaged',
+  holding: 'Holding',
+  fault: 'FAULT',
+}
+
+const FORCE_STATE_COLOR = {
+  armed: 'gray',
+  engaged_concentric: 'orange',
+  holding: 'yellow',
+  fault: 'red',
+}
+
+const N_PER_KGF = 9.80665
 
 const ExerciseTab = ({ isActive = true }) => {
   const { status, series, connected } = useExerciseStatus(isActive)
@@ -73,21 +98,37 @@ const ExerciseTab = ({ isActive = true }) => {
   const [calibBusy, setCalibBusy] = useState(false)
   const [boardConstants, setBoardConstants] = useState(null)
 
+  const [forceMode, setForceMode] = useState('constant')
+  const [forceText, setForceText] = useState('20')
+  const [velocityCapText, setVelocityCapText] = useState('1.0')
+  const [forceError, setForceError] = useState(null)
+  const [forceBusy, setForceBusy] = useState(false)
+
   const { isOpen: resetOpen, onOpen: openReset, onClose: closeReset } = useDisclosure()
   const { isOpen: advancedOpen, onToggle: toggleAdvanced } = useDisclosure()
+  const { isOpen: resumeOpen, onOpen: openResume, onClose: closeResume } = useDisclosure()
 
   useEffect(() => {
     getBoardConstants().then(setBoardConstants).catch(() => {})
   }, [])
 
   const sessionRunning = Boolean(control?.running && control?.mode === 'exercise')
-  const anotherModeRunning = Boolean(control?.running && control?.mode !== 'exercise')
+  const forceSessionRunning = Boolean(control?.running && control?.mode === 'force')
+  // Exercise and Force are two mutually-exclusive modes sharing this one
+  // tab -- "another mode running" means something OUTSIDE this tab's own
+  // two, not just switching attention between its two sections.
+  const anotherModeRunning = Boolean(control?.running && control?.mode !== 'exercise' && control?.mode !== 'force')
   const action = control?.extra?.action ?? null
   const homingState = control?.extra?.homing_state ?? null
   const busyAction = action === 'homing' || action === 'max_calibrating'
 
   const isHomed = cable?.is_homed ?? false
   const hasMax = cable?.has_max ?? false
+
+  const forceState = forceSessionRunning ? control?.extra?.force_state ?? null : null
+  const forceEngaged = forceState === 'engaged_concentric' || forceState === 'holding'
+  const forceFaulted = forceState === 'fault'
+  const torqueConstantIsEstimate = boardConstants?.force?.torque_constant_is_estimate ?? true
 
   const chartData = useMemo(() => {
     if (!series.length) return { position: [], velocity: [], current: [] }
@@ -144,6 +185,58 @@ const ExerciseTab = ({ isActive = true }) => {
       setActionError(e.message)
     } finally {
       setBusy(false)
+    }
+  }
+
+  const forceNumber = Number(forceText)
+  const forceValid = forceText !== '' && Number.isFinite(forceNumber) && forceNumber >= 0
+  const velocityCapNumber = Number(velocityCapText)
+  const velocityCapValid = velocityCapText !== '' && Number.isFinite(velocityCapNumber) && velocityCapNumber > 0
+  const forceParamsValid = forceValid && (forceMode !== 'isokinetic' || velocityCapValid)
+
+  const runForce = async (fn, ...args) => {
+    setForceError(null)
+    setForceBusy(true)
+    try {
+      await fn(...args)
+    } catch (e) {
+      setForceError(e.message)
+    } finally {
+      setForceBusy(false)
+    }
+  }
+
+  const handleStartForceSession = () => runForce(startForceSession)
+  const handleStopForce = () => runForce(stopForce)
+
+  const handleEngage = () => {
+    if (!forceParamsValid) {
+      setForceError('Force (and velocity cap, for isokinetic) must be valid numbers')
+      return
+    }
+    runForce(engageForce, forceMode, forceNumber, forceMode === 'isokinetic' ? velocityCapNumber : undefined)
+  }
+
+  const handleUpdateForce = () => {
+    if (!forceParamsValid) {
+      setForceError('Force (and velocity cap, for isokinetic) must be valid numbers')
+      return
+    }
+    runForce(updateForceParams, forceMode, forceNumber, forceMode === 'isokinetic' ? velocityCapNumber : undefined)
+  }
+
+  const handleDisengage = () => runForce(disengageForce)
+
+  const handleResumeConfirmed = async () => {
+    setForceError(null)
+    setForceBusy(true)
+    try {
+      await resumeForce()
+      closeResume()
+    } catch (e) {
+      setForceError(e.message)
+    } finally {
+      setForceBusy(false)
     }
   }
 
@@ -212,8 +305,22 @@ const ExerciseTab = ({ isActive = true }) => {
           <Alert status="warning" variant="left-accent">
             <AlertIcon />
             <AlertDescription>
-              A {control?.mode} session is running from another tab — stop it before starting Exercise.
+              A {control?.mode} session is running from another tab — stop it before starting Exercise or Force
+              Feedback.
             </AlertDescription>
+          </Alert>
+        )}
+
+        {forceFaulted && (
+          <Alert status="error" variant="left-accent">
+            <AlertIcon />
+            <Box>
+              <AlertTitle>Force session faulted</AlertTitle>
+              <AlertDescription>
+                {control?.extra?.fault_reason || 'Resistance was hard-stopped.'} Resume to continue, or Stop to end
+                the session.
+              </AlertDescription>
+            </Box>
           </Alert>
         )}
 
@@ -405,6 +512,177 @@ const ExerciseTab = ({ isActive = true }) => {
           </CardBody>
         </Card>
 
+        {/* Force Feedback -- Layer B Session B1, concentric only (exercise_tab_build_spec_layerB.md) */}
+        <Card bg="gray.800" variant="elevated" borderColor="purple.600" borderWidth="1px">
+          <CardHeader>
+            <HStack justify="space-between">
+              <Heading size="md" color="white">Force Feedback</Heading>
+              {forceSessionRunning && (
+                <Badge colorScheme={FORCE_STATE_COLOR[forceState] || 'gray'} variant="solid">
+                  {FORCE_STATE_LABEL[forceState] || forceState}
+                </Badge>
+              )}
+            </HStack>
+          </CardHeader>
+          <CardBody>
+            <VStack align="stretch" spacing={4}>
+              {torqueConstantIsEstimate && (
+                <Alert status="warning" variant="left-accent">
+                  <AlertIcon />
+                  <AlertDescription fontSize="sm">
+                    Displayed forces are <strong>uncalibrated estimates</strong> — the motor's torque constant has
+                    not been bench-measured yet (open item #13). Treat exact Newton values as illustrative, not
+                    exact.
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {forceError && (
+                <Alert status="error" variant="left-accent">
+                  <AlertIcon />
+                  <AlertDescription>{forceError}</AlertDescription>
+                </Alert>
+              )}
+
+              {(!isHomed || !hasMax) && (
+                <Text fontSize="xs" color="orange.300">
+                  {!isHomed ? 'Home the cable' : 'Calibrate max extension'} before starting force feedback.
+                </Text>
+              )}
+
+              <HStack spacing={4} wrap="wrap">
+                {!forceSessionRunning ? (
+                  <Button
+                    size="sm"
+                    colorScheme="green"
+                    onClick={handleStartForceSession}
+                    isDisabled={forceBusy || anotherModeRunning || sessionRunning || !isHomed || !hasMax}
+                  >
+                    Start Force Session
+                  </Button>
+                ) : (
+                  <Button size="sm" colorScheme="red" variant="solid" fontWeight="bold" onClick={handleStopForce}>
+                    STOP
+                  </Button>
+                )}
+              </HStack>
+
+              <Box borderTop="1px solid" borderColor="gray.700" pt={3}>
+                <HStack spacing={4} wrap="wrap" align="flex-end">
+                  <Box>
+                    <Text fontSize="xs" color="gray.400" mb={1}>Mode</Text>
+                    <Select
+                      size="sm"
+                      w="140px"
+                      value={forceMode}
+                      isDisabled={forceEngaged}
+                      onChange={(e) => setForceMode(e.target.value)}
+                    >
+                      <option value="constant">Constant</option>
+                      <option value="isokinetic">Isokinetic</option>
+                    </Select>
+                  </Box>
+                  <Box>
+                    <Text fontSize="xs" color="gray.400" mb={1}>Force</Text>
+                    <InputGroup size="sm" w="140px">
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        fontFamily="mono"
+                        value={forceText}
+                        onChange={(e) => setForceText(e.target.value)}
+                      />
+                      <InputRightAddon px={2} fontSize="xs">N</InputRightAddon>
+                    </InputGroup>
+                    <Text fontSize="0.65rem" color="gray.500" mt={0.5}>
+                      {forceValid ? `≈ ${(forceNumber / N_PER_KGF).toFixed(1)} kgf` : '—'}
+                    </Text>
+                  </Box>
+                  {forceMode === 'isokinetic' && (
+                    <Box>
+                      <Text fontSize="xs" color="gray.400" mb={1}>Velocity cap</Text>
+                      <InputGroup size="sm" w="140px">
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          fontFamily="mono"
+                          value={velocityCapText}
+                          onChange={(e) => setVelocityCapText(e.target.value)}
+                        />
+                        <InputRightAddon px={2} fontSize="xs">turns/s</InputRightAddon>
+                      </InputGroup>
+                    </Box>
+                  )}
+                </HStack>
+
+                {/* Engage/Disengage -- deliberately distinct (colour + placement) from
+                    session Start/STOP above (spec §10.2) */}
+                <HStack spacing={3} mt={4}>
+                  {!forceEngaged ? (
+                    <Button
+                      size="sm"
+                      colorScheme="purple"
+                      onClick={handleEngage}
+                      isDisabled={!forceSessionRunning || forceFaulted || !forceParamsValid || forceBusy}
+                    >
+                      Engage
+                    </Button>
+                  ) : (
+                    <>
+                      <Button size="sm" colorScheme="purple" variant="outline" onClick={handleUpdateForce} isDisabled={forceBusy}>
+                        Update
+                      </Button>
+                      <Button size="sm" colorScheme="purple" onClick={handleDisengage} isDisabled={forceBusy}>
+                        Disengage
+                      </Button>
+                    </>
+                  )}
+                  {forceFaulted && (
+                    <Button size="sm" colorScheme="orange" onClick={openResume} isDisabled={forceBusy}>
+                      Resume
+                    </Button>
+                  )}
+                </HStack>
+              </Box>
+
+              {forceSessionRunning && (
+                <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4}>
+                  <Stat>
+                    <StatLabel color="gray.300">Commanded force</StatLabel>
+                    <StatNumber color="odrive.300" fontSize="xl">
+                      {(control?.extra?.commanded_force_n ?? 0).toFixed(1)}
+                    </StatNumber>
+                    <Text fontSize="xs" color="gray.400">N</Text>
+                  </Stat>
+                  <Stat>
+                    <StatLabel color="gray.300">Estimated force</StatLabel>
+                    <StatNumber color="odrive.300" fontSize="xl">
+                      {(control?.extra?.estimated_force_n ?? 0).toFixed(1)}
+                    </StatNumber>
+                    <Text fontSize="xs" color="gray.400">N</Text>
+                  </Stat>
+                  <Stat>
+                    <StatLabel color="gray.300">Cable velocity</StatLabel>
+                    <StatNumber color="odrive.300" fontSize="xl">
+                      {(control?.extra?.cable_velocity_m_s ?? 0).toFixed(3)}
+                    </StatNumber>
+                    <Text fontSize="xs" color="gray.400">m/s</Text>
+                  </Stat>
+                  <Stat>
+                    <StatLabel color="gray.300">Power limiter</StatLabel>
+                    <Badge colorScheme={control?.extra?.power_limiter_active ? 'orange' : 'gray'} fontSize="sm" mt={1}>
+                      {control?.extra?.power_limiter_active ? 'ACTIVE' : 'idle'}
+                    </Badge>
+                    <Text fontSize="xs" color="gray.400" mt={1}>
+                      {(control?.extra?.regen_power_w ?? 0).toFixed(1)} W est.
+                    </Text>
+                  </Stat>
+                </SimpleGrid>
+              )}
+            </VStack>
+          </CardBody>
+        </Card>
+
         {/* Manual reset -- idle-gated + confirmation-gated (spec §3.5) */}
         <Card bg="gray.800" variant="elevated">
           <CardHeader>
@@ -520,6 +798,26 @@ const ExerciseTab = ({ isActive = true }) => {
             <Button variant="ghost" mr={3} onClick={closeReset}>Cancel</Button>
             <Button colorScheme="red" onClick={handleResetConfirmed} isLoading={busy} loadingText="Resetting…">
               Reset Position
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
+      <Modal isOpen={resumeOpen} onClose={closeResume} isCentered>
+        <ModalOverlay />
+        <ModalContent bg="gray.800">
+          <ModalHeader color="odrive.300">Resume Force Session?</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <Text color="gray.300" fontSize="sm">
+              This clears the fault and returns to Armed (not re-engaged) — resistance stays off until you
+              Engage again. The home reference and max-extension limit are not affected.
+            </Text>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" mr={3} onClick={closeResume}>Cancel</Button>
+            <Button colorScheme="orange" onClick={handleResumeConfirmed} isLoading={forceBusy} loadingText="Resuming…">
+              Resume
             </Button>
           </ModalFooter>
         </ModalContent>
