@@ -36,6 +36,19 @@ def turns_from_radians(theta: float) -> float:
     return theta / TURNS_TO_RADIANS
 
 
+def speed_m_s_from_turns_s(turns_per_s: float, r0: float) -> float:
+    """Cable speed (m/s) from angular speed (turns/s) at a fixed radius --
+    the "one conversion site" for velocity, mirroring force_to_torque()'s
+    role for force (exercise_tab_build_spec_layerB.md §11). Deliberately
+    uses the fixed r0, not the k-corrected effective radius at the current
+    position: force<->torque conversion (core/profiles/units.py) already
+    ignores k entirely (SPOOL_RADIUS_M is the only radius that function
+    ever sees), so velocity does the same for consistency -- k's spool-wrap
+    correction only ever applies to *length* (position), not to the
+    force/velocity/torque conversions this layer's safety math depends on."""
+    return turns_per_s * TURNS_TO_RADIANS * r0
+
+
 def length_from_angle(theta: float, r0: float, k: float) -> float:
     """L(theta) = r0*theta + (k/2)*theta**2. theta may be negative (treated
     as a magnitude via abs()) since cable length is only ever meaningful as a

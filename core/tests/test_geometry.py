@@ -11,6 +11,7 @@ from core.cable.geometry import (
     length_from_angle,
     length_from_turns_delta,
     radians_from_turns,
+    speed_m_s_from_turns_s,
     turns_delta_from_length,
     turns_from_radians,
 )
@@ -24,6 +25,12 @@ def test_radians_from_turns_and_back():
     assert radians_from_turns(1.0) == pytest.approx(2 * math.pi)
     assert turns_from_radians(2 * math.pi) == pytest.approx(1.0)
     assert turns_from_radians(radians_from_turns(3.7)) == pytest.approx(3.7)
+
+
+def test_speed_m_s_from_turns_s():
+    assert speed_m_s_from_turns_s(1.0, R0) == pytest.approx(2 * math.pi * R0)
+    assert speed_m_s_from_turns_s(0.0, R0) == 0.0
+    assert speed_m_s_from_turns_s(-2.0, R0) == pytest.approx(-2 * 2 * math.pi * R0)
 
 
 # ---- round-trip consistency (hard requirement, spec §3.3) ----
