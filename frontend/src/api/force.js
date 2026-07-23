@@ -6,11 +6,16 @@
 // it's generic regardless of which mode is active.
 //
 //   POST /api/force/start           {} -- arms, zero torque
-//   POST /api/force/engage          { mode: "constant"|"isokinetic", force_n, velocity_target_turns_s? }
+//   POST /api/force/engage          { mode: "constant"|"isokinetic", force_n, velocity_target_turns_s?,
+//                                      start_length_m?, end_length_m? }
 //   POST /api/force/update_params   same shape as engage -- live retarget while ENGAGED/HOLDING
 //   POST /api/force/disengage
 //   POST /api/force/resume          -- manual fault recovery, confirm in the UI first
 //   POST /api/force/stop
+//
+// start_length_m/end_length_m (requested 23 July 2026): the sub-range of
+// home->max travel where resistance is active. Either, both, or neither may
+// be given; omitted defaults to the full range server-side.
 
 async function getJson(url, options) {
   const res = await fetch(url, options)
@@ -39,16 +44,20 @@ export function startForceSession() {
   return postJson('/api/force/start')
 }
 
-export function engageForce(mode, forceN, velocityTargetTurnsS) {
+function _forceParamsBody({ mode, forceN, velocityTargetTurnsS, startLengthM, endLengthM }) {
   const body = { mode, force_n: forceN }
   if (velocityTargetTurnsS != null) body.velocity_target_turns_s = velocityTargetTurnsS
-  return postJson('/api/force/engage', body)
+  if (startLengthM != null) body.start_length_m = startLengthM
+  if (endLengthM != null) body.end_length_m = endLengthM
+  return body
 }
 
-export function updateForceParams(mode, forceN, velocityTargetTurnsS) {
-  const body = { mode, force_n: forceN }
-  if (velocityTargetTurnsS != null) body.velocity_target_turns_s = velocityTargetTurnsS
-  return postJson('/api/force/update_params', body)
+export function engageForce(params) {
+  return postJson('/api/force/engage', _forceParamsBody(params))
+}
+
+export function updateForceParams(params) {
+  return postJson('/api/force/update_params', _forceParamsBody(params))
 }
 
 export function disengageForce() {

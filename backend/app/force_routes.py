@@ -52,29 +52,34 @@ def register(app) -> None:
         except Exception as e:
             return jsonify({"error": str(e)}), 400
 
-    @app.route("/api/force/engage", methods=["POST"])
-    def force_engage():
-        body = request.get_json(silent=True) or {}
+    def _force_params_extra(body: dict) -> dict:
         mode = body.get("mode")
         force_n = body.get("force_n")
-        if mode is None or force_n is None:
-            return jsonify({"error": "mode and force_n required"}), 400
         extra = {"mode": mode, "force_n": force_n}
         if body.get("velocity_target_turns_s") is not None:
             extra["velocity_target_turns_s"] = body["velocity_target_turns_s"]
-        return _dispatch_action("engage", extra)
+        # Configurable active sub-range (requested 23 July 2026) -- either,
+        # both, or neither may be given; omitted ones default to the full
+        # home->max range (see ForceMode._resolve_range).
+        if body.get("start_length_m") is not None:
+            extra["start_length_m"] = body["start_length_m"]
+        if body.get("end_length_m") is not None:
+            extra["end_length_m"] = body["end_length_m"]
+        return extra
+
+    @app.route("/api/force/engage", methods=["POST"])
+    def force_engage():
+        body = request.get_json(silent=True) or {}
+        if body.get("mode") is None or body.get("force_n") is None:
+            return jsonify({"error": "mode and force_n required"}), 400
+        return _dispatch_action("engage", _force_params_extra(body))
 
     @app.route("/api/force/update_params", methods=["POST"])
     def force_update_params():
         body = request.get_json(silent=True) or {}
-        mode = body.get("mode")
-        force_n = body.get("force_n")
-        if mode is None or force_n is None:
+        if body.get("mode") is None or body.get("force_n") is None:
             return jsonify({"error": "mode and force_n required"}), 400
-        extra = {"mode": mode, "force_n": force_n}
-        if body.get("velocity_target_turns_s") is not None:
-            extra["velocity_target_turns_s"] = body["velocity_target_turns_s"]
-        return _dispatch_action("update_params", extra)
+        return _dispatch_action("update_params", _force_params_extra(body))
 
     @app.route("/api/force/disengage", methods=["POST"])
     def force_disengage():
