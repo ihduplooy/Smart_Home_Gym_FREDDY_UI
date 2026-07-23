@@ -13,6 +13,7 @@ from .constants import VERSION  # backend version tag
 from . import device_manager
 from . import control_routes
 from . import exercise_routes
+from . import force_routes
 from .api_reference import load_api_reference, reference_line
 from .telemetry import telemetry_session
 from config import board_constants
@@ -205,5 +206,6 @@ def create_app() -> Flask:
 
     control_routes.register(app, sock)
     exercise_routes.register(app)
+    force_routes.register(app)
 
     return app

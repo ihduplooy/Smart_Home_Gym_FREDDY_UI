@@ -11,7 +11,7 @@ from dataclasses import asdict
 
 from flask import jsonify, request
 
-from core.cable import CableState, ExerciseMode
+from core.cable import CableState, ExerciseMode, ForceMode
 from core.control.modes import MODES_BY_NAME
 from core.control.session import ControlSession, DEFAULT_HARDWARE_FACTORIES
 from core.hardware.odrive_hw import OdriveHardware
@@ -49,7 +49,16 @@ cable_state = CableState()
 control_session = ControlSession(
     hardware_source="real",
     hardware_factories={**DEFAULT_HARDWARE_FACTORIES, "real": _real_hardware_factory},
-    mode_factories={**MODES_BY_NAME, "exercise": lambda: ExerciseMode(cable_state)},
+    mode_factories={
+        **MODES_BY_NAME,
+        "exercise": lambda: ExerciseMode(cable_state),
+        # Layer B (force feedback) shares the same CableState as Layer A --
+        # a Force session requires a home/max already established by a
+        # prior Exercise session (see core/cable/force_mode.py's engage
+        # handler). Mutually exclusive with every other mode on this one
+        # ControlSession, exactly like Exercise already is.
+        "force": lambda: ForceMode(cable_state),
+    },
 )
 
 # Telemetry websocket push rate (spec: ~10 Hz batches).
