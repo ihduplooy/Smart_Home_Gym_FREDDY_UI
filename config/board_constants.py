@@ -120,14 +120,14 @@ TRAP_TRAJ_DECEL_LIMIT = 1.0  # turns/s^2
 # last-resort protection against a torque command running away in an
 # unloaded direction -- software now owns that entirely, which is why the
 # let-go detector (core/cable/letgo.py) and the velocity ceiling it enforces
-# are mandatory, not defensive extras. Verified property path:
-# axis{n}.controller.config.enable_torque_mode_vel_limit (BoolProperty, rw)
-# per the bundled odriveApiReference05x.json -- this property has not yet
-# been exercised against the real board by anything in this codebase (no
-# live dir() cross-check exists for it the way brake_resistance/
-# dc_max_negative_current/max_regen_current do); confirm it against
-# dir(axis0.controller.config) during the first live run, same caution
-# already applied elsewhere in this file.
+# are mandatory, not defensive extras. Property path (axis{n}.controller.
+# config.enable_torque_mode_vel_limit, BoolProperty, rw) is corroborated by
+# the bundled odriveApiReference05x.json but UNCONFIRMED against this live
+# board -- see the "LIVE-BOARD PROPERTY VERIFICATION CHECKLIST" at the top
+# of the Layer B Session B1 section below for the full status and the other
+# three properties it belongs alongside. Written in core/hardware/
+# odrive_hw.py's set_mode() TORQUE branch, applied every time torque mode
+# is entered.
 ENABLE_TORQUE_MODE_VEL_LIMIT = False
 
 # --------------------------------------------------------------------------
@@ -281,6 +281,27 @@ SPOOL_CALIBRATION_MIN_THETA_M_RAD = 1.0  # below this, L ~= r0*theta dominates
 # Two rows from the spec's own §9 table are intentionally NOT added as new
 # constants here — see the comments at PHASE_VEL_THRESHOLD_TURNS_S (hold
 # detection) and FORCE_MIN_N (isokinetic force floor default) above/below.
+#
+# LIVE-BOARD PROPERTY VERIFICATION CHECKLIST — required before the first
+# live force test (spec §2.4, §15). Four ODrive property writes this layer
+# depends on; the bundled API reference has already been wrong once on
+# exactly this family of settings (docs/decisions.md, enable_brake_resistor).
+# Status as of this session (23 July 2026), no live hardware access:
+#   [confirmed]     odrv0.config.brake_resistance          -- via
+#                    config/odrive_config.py's own live-run comments
+#   [confirmed]     odrv0.config.dc_max_negative_current    -- ditto
+#   [confirmed]     odrv0.config.max_regen_current          -- ditto
+#   [UNCONFIRMED]   axis0.controller.config.enable_torque_mode_vel_limit
+#                    -- path corroborated only by odriveApiReference05x.json
+#                    (labeled v0.5.6, not this board's exact v0.5.1); no
+#                    live dir() cross-check exists for it anywhere in this
+#                    codebase yet. Written in core/hardware/odrive_hw.py's
+#                    set_mode() TORQUE branch -- if the property name is
+#                    wrong on this firmware, it will raise loudly on the
+#                    very first torque-mode entry (Control tab's Torque
+#                    mode, Profiles, or Layer B force test alike), not
+#                    silently no-op. Confirm against dir(axis0.controller.
+#                    config) before relying on the first three being enough.
 # --------------------------------------------------------------------------
 
 # Force ceiling/floor.

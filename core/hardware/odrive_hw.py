@@ -143,6 +143,20 @@ class OdriveHardware(HardwareInterface):
             elif mode == ControlMode.TORQUE:
                 axis.controller.config.control_mode = enums.CONTROL_MODE_TORQUE_CONTROL
                 axis.controller.config.input_mode = enums.INPUT_MODE_PASSTHROUGH
+                # Open item #8, resolved (Layer B §3.1) -- reasserted on every
+                # torque-mode entry, not a one-time NVM write, so it applies
+                # uniformly to Control's TorqueMode, Profiles' ProfileMode,
+                # and Layer B's ForceMode alike (same relationship connect()
+                # already has with current_lim: the runtime code is the
+                # source of truth, not whatever a prior session happened to
+                # leave saved). See board_constants.py's
+                # ENABLE_TORQUE_MODE_VEL_LIMIT comment for the full
+                # reasoning and the live-verification checklist this
+                # property belongs to -- unconfirmed against a live board as
+                # of this write; if this property name doesn't exist on this
+                # firmware, this raises loudly and immediately on first
+                # torque-mode entry rather than silently no-op-ing.
+                axis.controller.config.enable_torque_mode_vel_limit = board_constants.ENABLE_TORQUE_MODE_VEL_LIMIT
             elif mode == ControlMode.POSITION:
                 # Trapezoidal Trajectory (not Passthrough) so the move is
                 # shaped by trap_traj's vel/accel/decel limits (set via
