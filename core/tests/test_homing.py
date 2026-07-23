@@ -53,6 +53,32 @@ def test_construction_alone_does_not_start_homing(monkeypatch):
     assert hsm.state == HomingState.IDLE
 
 
+# ---- live overrides (velocity_turns_s / current_threshold_a) ----
+
+def test_construction_with_no_overrides_uses_board_constants(monkeypatch):
+    _fast_defaults(monkeypatch, HOMING_VELOCITY_TURNS_S=0.42, HOMING_CURRENT_THRESHOLD_A=1.7)
+    hsm = HomingStateMachine()
+    r = hsm.update(0.0, 0.0, 0.0)
+    assert r.velocity_command_turns_s == -0.42
+
+
+def test_construction_with_velocity_override(monkeypatch):
+    _fast_defaults(monkeypatch, HOMING_VELOCITY_TURNS_S=0.15)
+    hsm = HomingStateMachine(velocity_turns_s=0.9)
+    r = hsm.update(0.0, 0.0, 0.0)
+    assert r.velocity_command_turns_s == -0.9  # override wins, not the board default
+
+
+def test_construction_with_current_threshold_override(monkeypatch):
+    _fast_defaults(monkeypatch, HOMING_CURRENT_THRESHOLD_A=0.8, HOMING_DEBOUNCE_SAMPLES=1, HOMING_STARTUP_GRACE_S=0.0)
+    hsm = HomingStateMachine(current_threshold_a=1.5)
+    # 1.0A would have crossed the board default (0.8) but not the override (1.5).
+    r = hsm.update(0.0, 1.0, 0.0)
+    assert r.state != HomingState.HOMED
+    r2 = hsm.update(DT, 2.0, 0.0)  # crosses the override
+    assert r2.state == HomingState.HOMED
+
+
 # ---- case 1: clean detection ----
 
 def test_clean_detection_latches_home_at_correct_position(monkeypatch):

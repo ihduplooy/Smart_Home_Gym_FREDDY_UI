@@ -135,23 +135,23 @@ class ForceMode(BaseMode):
             self._commanded_force_n = slew_toward(self._commanded_force_n, self._target_force_n, rate * dt)
 
         if self.state in _RESISTING_STATES:
-            cable_velocity_m_s = speed_m_s_from_turns_s(cable_velocity_turns_s, board_constants.SPOOL_RADIUS_M)
+            cable_velocity_m_s = speed_m_s_from_turns_s(cable_velocity_turns_s, self.cable_state.r0)
             limited_force, active = apply_power_limit(
                 self._commanded_force_n,
                 cable_velocity_m_s,
                 board_constants.REGEN_POWER_BUDGET_W,
                 board_constants.MOTOR_TORQUE_CONSTANT,
                 board_constants.MOTOR_PHASE_RESISTANCE_OHM,
-                board_constants.SPOOL_RADIUS_M,
+                self.cable_state.r0,
             )
             self._power_limiter_active = active
             self._last_regen_power_w = estimate_regen_power_w(
                 limited_force, cable_velocity_m_s,
                 board_constants.MOTOR_TORQUE_CONSTANT, board_constants.MOTOR_PHASE_RESISTANCE_OHM,
-                board_constants.SPOOL_RADIUS_M,
+                self.cable_state.r0,
             )
             final_force = limited_force
-            signed_torque = -CABLE_SIGN * force_to_torque(final_force)
+            signed_torque = -CABLE_SIGN * force_to_torque(final_force, r0=self.cable_state.r0)
             hardware.set_torque_target(signed_torque)
         elif self.state == ForceState.ARMED:
             self._power_limiter_active = False
@@ -180,8 +180,8 @@ class ForceMode(BaseMode):
 
         extra["force_state"] = self.state.value
         extra["commanded_force_n"] = final_force
-        extra["estimated_force_n"] = torque_to_force(sample.torque_est)
-        extra["cable_velocity_m_s"] = speed_m_s_from_turns_s(cable_velocity_turns_s, board_constants.SPOOL_RADIUS_M)
+        extra["estimated_force_n"] = torque_to_force(sample.torque_est, r0=self.cable_state.r0)
+        extra["cable_velocity_m_s"] = speed_m_s_from_turns_s(cable_velocity_turns_s, self.cable_state.r0)
         extra["regen_power_w"] = self._last_regen_power_w if self.state in _RESISTING_STATES else 0.0
         extra["power_limiter_active"] = self._power_limiter_active
         extra["fault_reason"] = self._last_fault_reason

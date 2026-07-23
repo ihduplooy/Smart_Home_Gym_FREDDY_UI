@@ -337,6 +337,25 @@ def test_commanded_torque_magnitude_matches_force_to_torque(tmp_path, monkeypatc
     assert abs(hw.torque_target) == pytest.approx(force_to_torque(50.0), rel=0.05)
 
 
+def test_commanded_torque_uses_cable_state_r0_not_board_constants(tmp_path, monkeypatch):
+    # A live-adjusted spool radius (spec: exposed on-screen, 23 July 2026)
+    # must actually change the torque commanded for the same requested
+    # force -- not just be stored for display.
+    _fast_ramp(monkeypatch)
+    mode = _homed_and_maxed_mode(tmp_path)
+    mode.cable_state.set_r0(0.05)  # different from board_constants.SPOOL_RADIUS_M
+    hw = RecordingHardware()
+    _arm(mode, hw)
+    mode.apply_target(hw, mode.validate_target({"action": "engage", "mode": "constant", "force_n": 50.0}))
+    t = 0.0
+    for _ in range(20):
+        t += DT
+        hw.sample = _sample(t, 0.0, 0.0)
+        mode.tick(hw, hw.sample)
+    assert abs(hw.torque_target) == pytest.approx(force_to_torque(50.0, r0=0.05), rel=0.05)
+    assert abs(hw.torque_target) != pytest.approx(force_to_torque(50.0), rel=0.05)
+
+
 # ---- §6 item 6: force clamped by F_max ----
 
 def test_force_clamped_at_force_max(tmp_path):

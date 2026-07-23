@@ -138,10 +138,17 @@ class ExerciseMode(BaseMode):
             raise RuntimeError("Homing is already in progress")
         if self._action == "max_calibrating":
             raise RuntimeError("Cannot start homing while max-extension calibration is in progress")
-        hardware.set_current_limit(board_constants.HOMING_CURRENT_LIMIT_A)
+        # Live-adjustable (CableState, persisted) rather than board_constants
+        # directly -- requested 23 July 2026 after the first live-hardware
+        # session, where the bench-tuned defaults didn't match what the real
+        # board needed closely enough to be useful fixed.
+        hardware.set_current_limit(self.cable_state.homing_current_limit_a)
         hardware.set_mode(ControlMode.VELOCITY)
         hardware.set_velocity_target(0.0)
-        self._homing_sm = HomingStateMachine()
+        self._homing_sm = HomingStateMachine(
+            velocity_turns_s=self.cable_state.homing_velocity_turns_s,
+            current_threshold_a=self.cable_state.homing_current_threshold_a,
+        )
         self._action = "homing"
         self.cable_state.homing_in_progress = True
         self.cable_state.last_homing_fault = None
@@ -163,7 +170,7 @@ class ExerciseMode(BaseMode):
         # Tension pulls toward home (reel-in direction) so the cable stays
         # taut against the user pulling it out -- the one force->torque
         # conversion site (spec §3.2), reusing core/profiles/units.py.
-        hold_torque = force_to_torque(board_constants.CALIB_HOLD_FORCE_N)
+        hold_torque = force_to_torque(board_constants.CALIB_HOLD_FORCE_N, r0=self.cable_state.r0)
         hardware.set_torque_target(-CABLE_SIGN * hold_torque)
         self._action = "max_calibrating"
         self.cable_state.max_calibration_in_progress = True

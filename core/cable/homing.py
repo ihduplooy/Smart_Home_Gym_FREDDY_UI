@@ -64,16 +64,27 @@ class HomingUpdate:
 class HomingStateMachine:
     """One instance per homing attempt. Construction alone must not move
     anything (spec §4 item 1) — motion begins only once update() is first
-    called, which callers must gate behind an explicit user action."""
+    called, which callers must gate behind an explicit user action.
 
-    def __init__(self):
+    `velocity_turns_s`/`current_threshold_a` accept live overrides (None ->
+    board_constants default) -- these two are user-adjustable per-session
+    bench-tuning values (exposed on the Exercise tab, held in CableState),
+    requested live against real hardware 23 July 2026: the live board's
+    homing current draw didn't match the 0.8A starting placeholder closely
+    enough to be useful as a fixed default. The other four (debounce/grace/
+    travel-bound/timeout) stay board_constants-only -- they're safety
+    margins, not calibration values, and weren't asked to be exposed."""
+
+    def __init__(self, velocity_turns_s: Optional[float] = None, current_threshold_a: Optional[float] = None):
         self._state = HomingState.IDLE
         self._start_t: Optional[float] = None
         self._start_position: Optional[float] = None
         self._consecutive_over_threshold = 0
 
-        self._velocity_turns_s = board_constants.HOMING_VELOCITY_TURNS_S
-        self._current_threshold_a = board_constants.HOMING_CURRENT_THRESHOLD_A
+        self._velocity_turns_s = velocity_turns_s if velocity_turns_s is not None else board_constants.HOMING_VELOCITY_TURNS_S
+        self._current_threshold_a = (
+            current_threshold_a if current_threshold_a is not None else board_constants.HOMING_CURRENT_THRESHOLD_A
+        )
         self._debounce_samples = board_constants.HOMING_DEBOUNCE_SAMPLES
         self._grace_s = board_constants.HOMING_STARTUP_GRACE_S
         self._max_travel_turns = board_constants.HOMING_MAX_TRAVEL_TURNS

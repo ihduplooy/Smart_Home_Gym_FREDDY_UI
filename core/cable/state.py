@@ -20,10 +20,20 @@ Persistence split (spec §6), enforced here:
     to disk. A freshly-constructed CableState (i.e. every backend process
     start) is un-homed -- this IS the "backend restart comes up un-homed"
     guarantee, by construction, not by a separate reset-on-boot step.
-  - k: persisted to a small JSON sidecar (config/spool_calibration.json,
-    gitignored -- it's bench/physical-spool-specific state, not source),
-    loaded at construction, written back only on an explicit, successful
-    calibration.
+  - k, r0, and the homing tuning settings below: persisted to a small JSON
+    sidecar (config/spool_calibration.json, gitignored -- it's bench/
+    physical-spool-specific state, not source), loaded at construction,
+    written back only on an explicit change.
+
+Live-adjustable homing settings (velocity/current threshold/current limit)
+and spool radius added 23 July 2026, after the first live-hardware session:
+the bench-tuned board_constants.py defaults didn't match what the real
+board needed closely enough to be useful as fixed values, and the user
+explicitly asked for on-screen control over them rather than editing
+board_constants.py and restarting the backend each time. These are
+per-spool/per-bench properties, the same character as `k`, so they persist
+the same way and through the same sidecar file rather than inventing a
+second mechanism.
 
 This module is still hardware-free/Flask-free (only reads config.
 board_constants and a local JSON file), but it is NOT pure/stateless like
@@ -43,12 +53,28 @@ log = logging.getLogger(__name__)
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_SIDECAR_PATH = _REPO_ROOT / "config" / "spool_calibration.json"
 
+# Settings key -> board_constants default. Single source of truth for what
+# persists in the sidecar file and what each falls back to when the file is
+# absent/corrupt/missing a key (e.g. an older sidecar written before this
+# entry was added).
+_PERSISTED_DEFAULTS = {
+    "k": lambda: board_constants.SPOOL_CORRECTION_K_DEFAULT,
+    "r0": lambda: board_constants.SPOOL_RADIUS_M,
+    "homing_current_threshold_a": lambda: board_constants.HOMING_CURRENT_THRESHOLD_A,
+    "homing_velocity_turns_s": lambda: board_constants.HOMING_VELOCITY_TURNS_S,
+    "homing_current_limit_a": lambda: board_constants.HOMING_CURRENT_LIMIT_A,
+}
+
 
 class CableState:
     def __init__(self, sidecar_path: Optional[Path] = None):
         self._sidecar_path = sidecar_path if sidecar_path is not None else _DEFAULT_SIDECAR_PATH
-        self.r0 = board_constants.SPOOL_RADIUS_M
-        self.k = self._load_k()
+        settings = self._load_settings()
+        self.k = settings["k"]
+        self.r0 = settings["r0"]
+        self.homing_current_threshold_a = settings["homing_current_threshold_a"]
+        self.homing_velocity_turns_s = settings["homing_velocity_turns_s"]
+        self.homing_current_limit_a = settings["homing_current_limit_a"]
 
         # In-memory only -- see module docstring.
         self.home_turns: Optional[float] = None
@@ -83,30 +109,72 @@ class CableState:
 
     def reset(self) -> None:
         """Manual position reset (spec §3.5) -- clears home/max, does NOT
-        touch k (a physical property of the spool, not a session
-        artifact)."""
+        touch k/r0/homing settings (physical/bench properties, not session
+        artifacts)."""
         self.home_turns = None
         self.max_turns = None
         self.marked_max_turns = None
 
     def set_k(self, k: float) -> None:
         self.k = k
-        self._save_k()
+        self._save_settings()
 
-    def _load_k(self) -> float:
+    def set_r0(self, r0: float) -> None:
+        if r0 <= 0:
+            raise ValueError(f"r0 (spool radius) must be positive, got {r0!r}")
+        self.r0 = r0
+        self._save_settings()
+
+    def set_homing_settings(
+        self,
+        current_threshold_a: Optional[float] = None,
+        velocity_turns_s: Optional[float] = None,
+        current_limit_a: Optional[float] = None,
+    ) -> None:
+        """Any subset may be updated at once; omitted ones are left as-is.
+        Validated together so a bad combination (e.g. limit below threshold)
+        is rejected as a whole, not applied partially."""
+        new_threshold = current_threshold_a if current_threshold_a is not None else self.homing_current_threshold_a
+        new_velocity = velocity_turns_s if velocity_turns_s is not None else self.homing_velocity_turns_s
+        new_limit = current_limit_a if current_limit_a is not None else self.homing_current_limit_a
+
+        if new_threshold <= 0:
+            raise ValueError(f"homing current threshold must be positive, got {new_threshold!r}")
+        if new_velocity <= 0:
+            raise ValueError(f"homing velocity must be positive, got {new_velocity!r}")
+        if new_limit <= new_threshold:
+            raise ValueError(
+                f"homing current limit ({new_limit!r}) must be greater than the "
+                f"detection threshold ({new_threshold!r}) -- otherwise the motor "
+                f"can never draw enough current to ever detect the cable going taut."
+            )
+        if new_limit > board_constants.MOTOR_CURRENT_LIM:
+            raise ValueError(
+                f"homing current limit ({new_limit!r}) must not exceed the board's "
+                f"operating current limit ({board_constants.MOTOR_CURRENT_LIM!r})."
+            )
+
+        self.homing_current_threshold_a = new_threshold
+        self.homing_velocity_turns_s = new_velocity
+        self.homing_current_limit_a = new_limit
+        self._save_settings()
+
+    def _load_settings(self) -> dict:
+        data = {}
         try:
             with open(self._sidecar_path) as f:
                 data = json.load(f)
-            return float(data["k"])
         except FileNotFoundError:
-            return board_constants.SPOOL_CORRECTION_K_DEFAULT
+            pass
         except Exception:
-            log.exception("Failed to load %s; using default k", self._sidecar_path)
-            return board_constants.SPOOL_CORRECTION_K_DEFAULT
+            log.exception("Failed to load %s; using board_constants defaults", self._sidecar_path)
+            data = {}
+        return {key: float(data[key]) if key in data else default() for key, default in _PERSISTED_DEFAULTS.items()}
 
-    def _save_k(self) -> None:
+    def _save_settings(self) -> None:
         self._sidecar_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {key: getattr(self, key) for key in _PERSISTED_DEFAULTS}
         tmp = self._sidecar_path.with_suffix(".json.tmp")
         with open(tmp, "w") as f:
-            json.dump({"k": self.k}, f)
+            json.dump(payload, f)
         tmp.replace(self._sidecar_path)
