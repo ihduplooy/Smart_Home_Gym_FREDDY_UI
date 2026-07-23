@@ -23,6 +23,11 @@ dist-ssr
 *.sln
 *.sw?
 
+# Persisted spool correction factor -- bench/physical-spool-specific runtime
+# state (exercise_tab_build_spec_layerA.md §6), not source. board_constants.
+# SPOOL_CORRECTION_K_DEFAULT is the fallback when this file is absent.
+config/spool_calibration.json
+
 #Back-end directories and files (in ../backend/)
 # Ignore venv for python
 .venv/
