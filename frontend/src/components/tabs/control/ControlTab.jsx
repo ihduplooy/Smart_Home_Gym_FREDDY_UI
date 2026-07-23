@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSelector } from 'react-redux'
 import {
   Box,
   VStack,
@@ -18,6 +19,10 @@ import {
   InputGroup,
   InputRightAddon,
   Select,
+  Slider,
+  SliderTrack,
+  SliderFilledTrack,
+  SliderThumb,
   Alert,
   AlertIcon,
   AlertTitle,
@@ -27,38 +32,63 @@ import {
 } from '@chakra-ui/react'
 
 import { useControlTelemetry } from '../../../hooks/useControlTelemetry'
-import {
-  startControlSession,
-  stopControlSession,
-  setControlTarget,
-  setHardwareSource as apiSetHardwareSource,
-} from '../../../api/control'
+import { startControlSession, stopControlSession, setControlTarget } from '../../../api/control'
+import { readProperties, writeProperties, invokeCommand } from '../../../api/backend'
 import MiniChart from './MiniChart'
 
 const UNIT_BY_MODE = { velocity: 'turns/s', torque: 'Nm' }
 
+// Modes this tab's own UI understands (its Select only ever offers these
+// three). The backend's ControlSession is shared with Profiles/Exercise/
+// Force, whose modes ("profile"/"exercise"/"force") this tab has no target
+// shape for -- syncing `mode` to one of those and then submitting whatever
+// this tab's own fields currently hold produced "Exercise target must be a
+// dict, got 0.5"-style errors. Bug found live, 23 July 2026.
+const KNOWN_MODES = ['velocity', 'torque', 'position']
+
+// This board is axis0-only (see config/board_constants.py). Ranges are centered
+// around the live-tuned values there (pos_gain 6.0, vel_gain 0.05,
+// vel_integrator_gain 0.1) with headroom either side for further tuning.
+const GAIN_FIELDS = [
+  { key: 'pos_gain', label: 'Position Gain', unit: '(turns/s)/turn', min: 0, max: 20, step: 0.1, decimals: 2 },
+  { key: 'vel_gain', label: 'Velocity Gain', unit: 'Nm/(turns/s)', min: 0, max: 0.3, step: 0.001, decimals: 4 },
+  { key: 'vel_integrator_gain', label: 'Velocity Integrator Gain', unit: 'Nm·s/(turns/s)', min: 0, max: 0.5, step: 0.005, decimals: 3 },
+]
+const gainPath = (key) => `axis0.controller.config.${key}`
+
 const ControlTab = ({ isActive = true }) => {
   const { status, series, connected } = useControlTelemetry(isActive)
+  const { connectedDevice, isConnected } = useSelector((s) => s.device)
+  const serial = connectedDevice?.serial_number
 
   const [mode, setMode] = useState('velocity')
   const [targetText, setTargetText] = useState('0.5')
-  const [hardwareSource, setHardwareSourceState] = useState('sim')
+  // Position mode's target is a small move spec, not a single number — kept
+  // as separate fields rather than overloading targetText.
+  const [posPositionText, setPosPositionText] = useState('1.0') // relative: turns to move from wherever it is now
+  const [posVelocityText, setPosVelocityText] = useState('1.0')
+  const [posAccelText, setPosAccelText] = useState('1.0')
+  const [posTorqueLimitText, setPosTorqueLimitText] = useState('') // blank = leave configured torque_lim untouched
   const [actionError, setActionError] = useState(null)
   const [busy, setBusy] = useState(false)
 
-  const running = status?.running ?? false
+  const running = Boolean(status?.running && KNOWN_MODES.includes(status?.mode))
+  // A Profiles/Exercise/Force session running on the shared backend session
+  // looks identical to `status.running` -- distinguish it so this tab
+  // doesn't think a mode it can't represent is "its own" run.
+  const anotherModeRunning = Boolean(status?.running && !KNOWN_MODES.includes(status?.mode))
 
-  // Sync local UI state (mode select, source selector) from the backend's
-  // authoritative status once it starts arriving over the websocket.
+  // Sync local UI state (mode select) from the backend's authoritative status
+  // once it starts arriving over the websocket -- only for a mode this tab's
+  // own Select actually offers (see KNOWN_MODES above).
   useEffect(() => {
     if (!status) return
-    setHardwareSourceState(status.hardware_source)
-    if (status.running && status.mode) setMode(status.mode)
+    if (status.running && KNOWN_MODES.includes(status.mode)) setMode(status.mode)
     // Deliberately narrow deps: `status` also carries latest_sample, which
     // changes every tick — depending on the whole object would re-run this
     // sync loop at telemetry rate for no reason.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status?.hardware_source, status?.running, status?.mode])
+  }, [status?.running, status?.mode])
 
   const chartData = useMemo(() => {
     if (!series.length) return { position: [], velocity: [], torque: [] }
@@ -76,17 +106,40 @@ const ControlTab = ({ isActive = true }) => {
   }, [series])
 
   const targetNumber = Number(targetText)
-  const targetValid = targetText !== '' && Number.isFinite(targetNumber)
+
+  const posPositionNumber = Number(posPositionText)
+  const posVelocityNumber = Number(posVelocityText)
+  const posAccelNumber = Number(posAccelText)
+  const posTorqueLimitNumber = posTorqueLimitText === '' ? null : Number(posTorqueLimitText)
+  const posValid =
+    posPositionText !== '' && Number.isFinite(posPositionNumber) &&
+    posVelocityText !== '' && Number.isFinite(posVelocityNumber) && posVelocityNumber > 0 &&
+    posAccelText !== '' && Number.isFinite(posAccelNumber) && posAccelNumber > 0 &&
+    (posTorqueLimitText === '' || (Number.isFinite(posTorqueLimitNumber) && posTorqueLimitNumber >= 0))
+
+  const targetValid = mode === 'position' ? posValid : (targetText !== '' && Number.isFinite(targetNumber))
+
+  const buildTarget = () => {
+    if (mode === 'position') {
+      return {
+        position: posPositionNumber,
+        move_velocity: posVelocityNumber,
+        accel_decel: posAccelNumber,
+        torque_limit: posTorqueLimitText === '' ? null : posTorqueLimitNumber,
+      }
+    }
+    return targetNumber
+  }
 
   const handleStart = async () => {
     if (!targetValid) {
-      setActionError('Target must be a number')
+      setActionError(mode === 'position' ? 'Fill in Move Distance, Velocity and Accel/Decel' : 'Target must be a number')
       return
     }
     setActionError(null)
     setBusy(true)
     try {
-      await startControlSession(mode, targetNumber)
+      await startControlSession(mode, buildTarget())
     } catch (e) {
       setActionError(e.message)
     } finally {
@@ -107,24 +160,74 @@ const ControlTab = ({ isActive = true }) => {
 
   const handleRetarget = async () => {
     if (!targetValid) {
-      setActionError('Target must be a number')
+      setActionError(mode === 'position' ? 'Fill in Move Distance, Velocity and Accel/Decel' : 'Target must be a number')
       return
     }
     setActionError(null)
     try {
-      await setControlTarget(targetNumber)
+      await setControlTarget(buildTarget())
     } catch (e) {
       setActionError(e.message)
     }
   }
 
-  const handleHardwareSourceChange = async (source) => {
-    setActionError(null)
+  // Controller gains — read the live values once a device connects, then
+  // write on every slider release (onChangeEnd), never on every drag tick.
+  const [gains, setGains] = useState({})
+  const [gainsLoaded, setGainsLoaded] = useState(false)
+  const [gainsError, setGainsError] = useState(null)
+  const [gainsSaving, setGainsSaving] = useState(false)
+  const [gainsSaved, setGainsSaved] = useState(false)
+
+  useEffect(() => {
+    setGainsLoaded(false)
+    setGainsSaved(false)
+    if (!serial) return undefined
+    let cancelled = false
+    readProperties(serial, GAIN_FIELDS.map((f) => gainPath(f.key)))
+      .then((res) => {
+        if (cancelled) return
+        const next = {}
+        for (const f of GAIN_FIELDS) {
+          const v = res[gainPath(f.key)]
+          if (typeof v === 'number') next[f.key] = v
+        }
+        setGains(next)
+        setGainsLoaded(true)
+      })
+      .catch((e) => setGainsError(e.message))
+    return () => {
+      cancelled = true
+    }
+  }, [serial])
+
+  const handleGainChange = (key, value) => {
+    setGains((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const handleGainCommit = async (key, value, decimals) => {
+    if (!serial) return
+    const rounded = parseFloat(value.toFixed(decimals))
+    setGainsError(null)
+    setGainsSaved(false)
     try {
-      const res = await apiSetHardwareSource(source)
-      setHardwareSourceState(res.hardware_source)
+      await writeProperties(serial, [{ path: gainPath(key), value: rounded }])
     } catch (e) {
-      setActionError(e.message)
+      setGainsError(e.message)
+    }
+  }
+
+  const handleSaveGains = async () => {
+    if (!serial) return
+    setGainsSaving(true)
+    setGainsError(null)
+    try {
+      await invokeCommand(serial, 'save_configuration', [])
+      setGainsSaved(true)
+    } catch (e) {
+      setGainsError(e.message)
+    } finally {
+      setGainsSaving(false)
     }
   }
 
@@ -135,48 +238,6 @@ const ControlTab = ({ isActive = true }) => {
   return (
     <Box p={4} h="100%" maxW="1400px" mx="auto" overflow="auto">
       <VStack spacing={4} align="stretch">
-        {/* Hardware source — unmistakable so nobody thinks the sim is a real motor */}
-        <Box
-          p={3}
-          borderRadius="md"
-          bg={hardwareSource === 'real' ? 'red.900' : 'yellow.900'}
-          border="2px solid"
-          borderColor={hardwareSource === 'real' ? 'red.400' : 'yellow.400'}
-        >
-          <HStack justify="space-between" wrap="wrap">
-            <HStack spacing={3}>
-              <Badge colorScheme={hardwareSource === 'real' ? 'red' : 'yellow'} fontSize="md" px={3} py={1}>
-                {hardwareSource === 'real' ? 'REAL HARDWARE' : 'SIM'}
-              </Badge>
-              <Text fontWeight="bold" color="white">
-                {hardwareSource === 'real'
-                  ? 'Commands go to a real motor.'
-                  : 'No real motor is moving — dynamics are simulated.'}
-              </Text>
-            </HStack>
-            <HStack>
-              <Button
-                size="sm"
-                colorScheme="yellow"
-                variant={hardwareSource === 'sim' ? 'solid' : 'outline'}
-                isDisabled={running}
-                onClick={() => handleHardwareSourceChange('sim')}
-              >
-                Sim
-              </Button>
-              <Button
-                size="sm"
-                colorScheme="red"
-                variant={hardwareSource === 'real' ? 'solid' : 'outline'}
-                isDisabled={running}
-                onClick={() => handleHardwareSourceChange('real')}
-              >
-                Real
-              </Button>
-            </HStack>
-          </HStack>
-        </Box>
-
         {actionError && (
           <Alert status="error" variant="left-accent">
             <AlertIcon />
@@ -206,6 +267,15 @@ const ControlTab = ({ isActive = true }) => {
           </Alert>
         )}
 
+        {anotherModeRunning && (
+          <Alert status="warning" variant="left-accent">
+            <AlertIcon />
+            <AlertDescription>
+              A {status?.mode} session is running from another tab — stop it before starting Control.
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Mode / target / run controls */}
         <Card bg="gray.800" variant="elevated">
           <CardHeader>
@@ -230,31 +300,91 @@ const ControlTab = ({ isActive = true }) => {
                   >
                     <option value="velocity">Velocity</option>
                     <option value="torque">Torque</option>
+                    <option value="position">Position</option>
                   </Select>
                 </Box>
 
-                <Box>
-                  <Text fontSize="xs" color="gray.400" mb={1}>Target</Text>
-                  <InputGroup size="sm" w="180px">
-                    <Input
-                      type="text"
-                      inputMode="decimal"
-                      fontFamily="mono"
-                      value={targetText}
-                      onChange={(e) => setTargetText(e.target.value)}
-                    />
-                    <InputRightAddon px={2} fontSize="xs">{UNIT_BY_MODE[mode]}</InputRightAddon>
-                  </InputGroup>
-                </Box>
+                {mode === 'position' ? (
+                  <>
+                    <Box>
+                      <Text fontSize="xs" color="gray.400" mb={1}>Move Distance</Text>
+                      <InputGroup size="sm" w="150px">
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          fontFamily="mono"
+                          value={posPositionText}
+                          onChange={(e) => setPosPositionText(e.target.value)}
+                        />
+                        <InputRightAddon px={2} fontSize="xs">turns</InputRightAddon>
+                      </InputGroup>
+                      <Text fontSize="0.65rem" color="gray.500" mt={0.5}>relative to current position</Text>
+                    </Box>
+                    <Box>
+                      <Text fontSize="xs" color="gray.400" mb={1}>Move Velocity</Text>
+                      <InputGroup size="sm" w="150px">
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          fontFamily="mono"
+                          value={posVelocityText}
+                          onChange={(e) => setPosVelocityText(e.target.value)}
+                        />
+                        <InputRightAddon px={2} fontSize="xs">turns/s</InputRightAddon>
+                      </InputGroup>
+                    </Box>
+                    <Box>
+                      <Text fontSize="xs" color="gray.400" mb={1}>Accel / Decel</Text>
+                      <InputGroup size="sm" w="150px">
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          fontFamily="mono"
+                          value={posAccelText}
+                          onChange={(e) => setPosAccelText(e.target.value)}
+                        />
+                        <InputRightAddon px={2} fontSize="xs">turns/s²</InputRightAddon>
+                      </InputGroup>
+                    </Box>
+                    <Box>
+                      <Text fontSize="xs" color="gray.400" mb={1}>Torque Limit (optional)</Text>
+                      <InputGroup size="sm" w="160px">
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          fontFamily="mono"
+                          placeholder="unchanged"
+                          value={posTorqueLimitText}
+                          onChange={(e) => setPosTorqueLimitText(e.target.value)}
+                        />
+                        <InputRightAddon px={2} fontSize="xs">Nm</InputRightAddon>
+                      </InputGroup>
+                    </Box>
+                  </>
+                ) : (
+                  <Box>
+                    <Text fontSize="xs" color="gray.400" mb={1}>Target</Text>
+                    <InputGroup size="sm" w="180px">
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        fontFamily="mono"
+                        value={targetText}
+                        onChange={(e) => setTargetText(e.target.value)}
+                      />
+                      <InputRightAddon px={2} fontSize="xs">{UNIT_BY_MODE[mode]}</InputRightAddon>
+                    </InputGroup>
+                  </Box>
+                )}
 
                 <VStack align="stretch" spacing={1} justify="flex-end">
                   <Text fontSize="xs" color="transparent" userSelect="none">.</Text>
                   {running ? (
                     <Button size="sm" colorScheme="odrive" onClick={handleRetarget} isDisabled={!targetValid}>
-                      Set target
+                      {mode === 'position' ? 'Move again' : 'Set target'}
                     </Button>
                   ) : (
-                    <Button size="sm" colorScheme="green" onClick={handleStart} isDisabled={!targetValid || busy}>
+                    <Button size="sm" colorScheme="green" onClick={handleStart} isDisabled={!targetValid || busy || anotherModeRunning}>
                       Start
                     </Button>
                   )}
@@ -303,6 +433,73 @@ const ControlTab = ({ isActive = true }) => {
                   CSV log: {logFilename ? <Text as="span" fontFamily="mono" color="gray.300">{logFilename}</Text> : '—'}
                 </Text>
               </HStack>
+            </VStack>
+          </CardBody>
+        </Card>
+
+        {/* Controller gains — live tuning, straight to axis0.controller.config */}
+        <Card bg="gray.800" variant="elevated">
+          <CardHeader>
+            <HStack justify="space-between">
+              <Heading size="md" color="white">Controller Gains</Heading>
+              {!isConnected && <Badge colorScheme="gray" variant="outline">no device</Badge>}
+            </HStack>
+          </CardHeader>
+          <CardBody>
+            <VStack align="stretch" spacing={5}>
+              {gainsError && (
+                <Alert status="error" variant="left-accent">
+                  <AlertIcon />
+                  <AlertDescription>{gainsError}</AlertDescription>
+                </Alert>
+              )}
+
+              {!isConnected ? (
+                <Text fontSize="sm" color="gray.400">Connect a device to adjust controller gains.</Text>
+              ) : (
+                GAIN_FIELDS.map((f) => (
+                  <Box key={f.key}>
+                    <HStack justify="space-between" mb={1}>
+                      <Text fontSize="sm" color="gray.300">{f.label}</Text>
+                      <Text fontSize="sm" fontFamily="mono" color="odrive.300">
+                        {gains[f.key] !== undefined ? gains[f.key].toFixed(f.decimals) : '—'} {f.unit}
+                      </Text>
+                    </HStack>
+                    <Slider
+                      min={f.min}
+                      max={f.max}
+                      step={f.step}
+                      value={gains[f.key] ?? f.min}
+                      isDisabled={!gainsLoaded}
+                      onChange={(v) => handleGainChange(f.key, v)}
+                      onChangeEnd={(v) => handleGainCommit(f.key, v, f.decimals)}
+                      colorScheme="odrive"
+                    >
+                      <SliderTrack bg="gray.600"><SliderFilledTrack /></SliderTrack>
+                      <SliderThumb boxSize={4} />
+                    </Slider>
+                  </Box>
+                ))
+              )}
+
+              <HStack justify="flex-end" spacing={3}>
+                {gainsSaved && <Text fontSize="xs" color="green.300">Saved to NVM</Text>}
+                <Button
+                  size="sm"
+                  colorScheme="odrive"
+                  variant="outline"
+                  isDisabled={!isConnected || !gainsLoaded || running}
+                  isLoading={gainsSaving}
+                  onClick={handleSaveGains}
+                >
+                  Save to NVM
+                </Button>
+              </HStack>
+              <Text fontSize="0.65rem" color="gray.500">
+                Slider changes take effect immediately on the live device. "Save to NVM" persists
+                them across reboots — it briefly reboots the board, so it's disabled while a
+                session is running.
+              </Text>
             </VStack>
           </CardBody>
         </Card>

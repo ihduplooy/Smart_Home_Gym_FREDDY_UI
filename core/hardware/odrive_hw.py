@@ -143,20 +143,31 @@ class OdriveHardware(HardwareInterface):
             elif mode == ControlMode.TORQUE:
                 axis.controller.config.control_mode = enums.CONTROL_MODE_TORQUE_CONTROL
                 axis.controller.config.input_mode = enums.INPUT_MODE_PASSTHROUGH
-                # Open item #8, resolved (Layer B §3.1) -- reasserted on every
+                # Open item #8 (Layer B §3.1) -- reasserted on every
                 # torque-mode entry, not a one-time NVM write, so it applies
                 # uniformly to Control's TorqueMode, Profiles' ProfileMode,
-                # and Layer B's ForceMode alike (same relationship connect()
-                # already has with current_lim: the runtime code is the
-                # source of truth, not whatever a prior session happened to
-                # leave saved). See board_constants.py's
-                # ENABLE_TORQUE_MODE_VEL_LIMIT comment for the full
-                # reasoning and the live-verification checklist this
-                # property belongs to -- unconfirmed against a live board as
-                # of this write; if this property name doesn't exist on this
-                # firmware, this raises loudly and immediately on first
-                # torque-mode entry rather than silently no-op-ing.
-                axis.controller.config.enable_torque_mode_vel_limit = board_constants.ENABLE_TORQUE_MODE_VEL_LIMIT
+                # and Layer B's ForceMode alike. CONFIRMED LIVE, 23 July 2026:
+                # this property does not exist on this board/firmware --
+                # AttributeError on the very first real torque-mode entry
+                # (start_max_calibration). Made non-fatal, matching this
+                # file's own established "warn, never crash the caller"
+                # precedent for a firmware property that turns out not to
+                # exist (see decisions.md's enable_brake_resistor entry) --
+                # a wrong/absent property name must not block torque mode
+                # for every mode that uses it. NOTE: this means open item #8
+                # is NOT actually resolved on this board -- ODrive's own
+                # torque-mode velocity limiter may still be live and fighting
+                # the software governor (Layer B) or a resistance profile
+                # (Session 3). Watch for the "pull faster, get less force"
+                # symptom the item was originally about; see decisions.md.
+                try:
+                    axis.controller.config.enable_torque_mode_vel_limit = board_constants.ENABLE_TORQUE_MODE_VEL_LIMIT
+                except AttributeError:
+                    log.warning(
+                        "enable_torque_mode_vel_limit not present on this firmware -- "
+                        "open item #8 not actually resolved; ODrive's own torque-mode "
+                        "velocity limiter may still be active. See docs/decisions.md."
+                    )
             elif mode == ControlMode.POSITION:
                 # Trapezoidal Trajectory (not Passthrough) so the move is
                 # shaped by trap_traj's vel/accel/decel limits (set via

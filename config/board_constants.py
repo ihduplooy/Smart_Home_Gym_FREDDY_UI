@@ -172,15 +172,31 @@ REP_PROXIMITY_TURNS = 0.1  # how close position must return to the EWMA to count
 # --------------------------------------------------------------------------
 
 # Homing — slow current-limited reel-in until the cable goes taut.
-HOMING_CURRENT_THRESHOLD_A = 0.8  # user-specified starting point (spec §5)
-HOMING_CURRENT_LIMIT_A = 3.0  # ~3.75x margin above threshold, 5x below the
-                              # 15A operating limit — a snag during the blind
-                              # reel-in phase can't develop full torque.
-HOMING_VELOCITY_TURNS_S = 0.15  # ~15% of TRAP_TRAJ_VEL_LIMIT; at the measured
-                                # SPOOL_RADIUS_M=0.035m this is ~3.3 cm/s cable
-                                # speed (was ~4.7 cm/s against the old 0.05m
-                                # placeholder) — slow enough to watch and abort
-                                # by hand on the first live run (spec §10).
+HOMING_CURRENT_THRESHOLD_A = 2.0  # Raised from 0.8 (bench re-tune, 23 July
+                                  # 2026) — expect-to-tune-at-the-bench value
+                                  # (spec §5), moved up presumably against
+                                  # real noise/stiction on the live board.
+HOMING_CURRENT_LIMIT_A = 7.5  # Recomputed to track HOMING_CURRENT_THRESHOLD_A
+                              # (raised alongside it, 23 July 2026) — kept at
+                              # the same ~3.75x margin above threshold this
+                              # constant has always used (was 3.0A at the old
+                              # 0.8A threshold; left at 3.0A against the new
+                              # 2.0A threshold, the margin would have dropped
+                              # to only 1.5x, too tight against noise for a
+                              # detection-threshold-relative safety limit).
+                              # Still well below the 15A operating limit
+                              # (2x, down from 5x before) — a snag during the
+                              # blind reel-in phase still can't develop full
+                              # torque, just with less headroom than before.
+HOMING_VELOCITY_TURNS_S = 0.5  # Raised from 0.15 (bench re-tune, 23 July
+                               # 2026). At the measured SPOOL_RADIUS_M=0.035m
+                               # this is ~11.0 cm/s cable speed (was ~3.3
+                               # cm/s) — faster than the original "slow
+                               # enough to watch and abort by hand" framing
+                               # (spec §10) assumed; still watchable, but
+                               # re-attend the first live run at this speed
+                               # rather than assuming the original caution
+                               # still fully applies.
 HOMING_DEBOUNCE_SAMPLES = 5  # 100ms at 50Hz — filters single-sample
                              # transients without meaningfully delaying
                              # detection at HOMING_VELOCITY_TURNS_S.
@@ -192,19 +208,20 @@ HOMING_MAX_TRAVEL_TURNS = 50.0  # ~11.0m of cable at the measured
                                 # backstop bound (real cable machines run
                                 # <3m), not a tight one; the time bound below
                                 # is the practically-relevant one.
-HOMING_TIMEOUT_S = 130.0  # Recomputed for the measured SPOOL_RADIUS_M=0.035m
-                          # (Layer B §2.3) — this is a real value change, not
-                          # just a comment update. At HOMING_VELOCITY_TURNS_S,
-                          # cable speed dropped from ~4.7 to ~3.3 cm/s with the
-                          # radius correction, so the old 90s budget (~64s
-                          # worst-case reel-in from a generous 3m real-world
-                          # max extension, plus ~41% margin) would now cover
-                          # only ~91s of worst-case reel-in with the *new*
-                          # cable speed — essentially zero margin, or an
-                          # outright false timeout fault on a legitimate slow
-                          # homing run. Recomputed: ~91s worst-case at the new
-                          # speed, same ~41% margin factor as before -> ~129s,
-                          # rounded to 130s.
+HOMING_TIMEOUT_S = 130.0  # Originally recomputed for the measured
+                          # SPOOL_RADIUS_M=0.035m (Layer B §2.3): at the
+                          # HOMING_VELOCITY_TURNS_S then in force (0.15
+                          # turns/s, ~3.3 cm/s), a generous 3m real-world
+                          # worst-case reel-in took ~91s, and 130s gave that
+                          # ~41% margin. HOMING_VELOCITY_TURNS_S was since
+                          # raised to 0.5 turns/s (~11.0 cm/s, 23 July 2026),
+                          # dropping the same worst-case reel-in to ~27s —
+                          # 130s is now ~4.8x that, not a tight budget
+                          # anymore. Left unchanged deliberately: a looser
+                          # timeout is still safe (never blocks a legitimate
+                          # homing run), just no longer tightly matched to
+                          # the current speed — tighten later if a faster
+                          # fault-on-genuinely-stuck response is wanted.
 
 # Max-extension calibration — light constant tension while the user pulls.
 CALIB_HOLD_FORCE_N = 3.0  # single-digit N, trivially overcome by hand; enough

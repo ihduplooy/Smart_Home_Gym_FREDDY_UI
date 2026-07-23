@@ -161,10 +161,12 @@ def test_homing_completes_latches_home_and_restores_current_limit(tmp_path, monk
         mode.tick(hw, hw.sample)
         t += dt
         position -= 0.15 * dt
-    # Cross threshold for the debounce window.
+    # Cross threshold for the debounce window (above the live
+    # HOMING_CURRENT_THRESHOLD_A=2.0, not a monkeypatched test value --
+    # this test exercises the real board_constants default deliberately).
     extra = None
     for _ in range(3):
-        hw.sample = TelemetrySample(t=t, position=position, velocity=-0.15, current_iq=1.2, torque_est=0.0)
+        hw.sample = TelemetrySample(t=t, position=position, velocity=-0.15, current_iq=2.5, torque_est=0.0)
         extra = mode.tick(hw, hw.sample)
         t += dt
         position -= 0.15 * dt

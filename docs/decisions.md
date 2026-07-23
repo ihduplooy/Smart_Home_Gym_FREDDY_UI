@@ -2069,3 +2069,55 @@ behaviours individually, including sign correctness (§6 item 10 — asserted
 the sign, not just the magnitude) and an end-to-end `ControlSession` test
 for global Stop mid-`ENGAGED` plus the Layer A current-limit-restore
 backstop surviving it. 242/242 core tests passing throughout.
+
+### First live run against the real board — two bugs found and fixed, 23 July 2026
+
+The user's own first live session (real hardware, Exercise tab) surfaced two
+real bugs, both fixed the same day.
+
+**`enable_torque_mode_vel_limit` confirmed absent on this board's
+firmware.** Exactly the risk flagged as unconfirmed in this file's earlier
+entry — `axis.controller.config.enable_torque_mode_vel_limit` raised
+`AttributeError` on the very first live torque-mode entry
+(`start_max_calibration`). Because the write lived unconditionally inside
+`OdriveHardware.set_mode()`'s `TORQUE` branch, this broke **every** mode
+that enters torque control — not just Layer B, but Control tab's Torque
+mode and Profiles' `ProfileMode` too, both of which the task explicitly
+required to stay unaffected. Root cause of two symptoms the user reported
+that looked separate: (1) "start max extension calibration... nothing
+actually happens" — `axis.controller.config.control_mode`/`input_mode` had
+already been set to torque control by the two lines *before* the crash
+(so the axis did briefly enter torque control, which is why pulling the
+cable felt like something happened), but the exception then aborted
+`_apply_start_max_calibration` before it ever set `self._action =
+"max_calibrating"` or applied the hold torque — so the backend's state
+never advanced and the frontend correctly kept showing "Start Max-Extension
+Calibration" instead of "Set Max Here"/"Cancel"; (2) homing worked
+perfectly throughout, because homing uses `ControlMode.VELOCITY`, which
+never touches this property at all.
+
+**Fix**: the write is now wrapped in `try/except AttributeError`, logging a
+warning and continuing rather than crashing the caller — the same "warn,
+never crash" precedent this file already uses for a firmware property that
+turns out not to exist (see the `enable_brake_resistor` entry above).
+**This means open item #8 is NOT actually resolved on this board** — ODrive's
+own torque-mode velocity limiter may still be live and fighting the
+software governor (Layer B) or a resistance profile (Session 3), the exact
+symptom the item was originally about ("pull faster, get less force").
+Restoring torque mode to a working state took priority over root-causing
+the correct property name/whether v0.5.1 supports this feature at all;
+that remains open.
+
+**`ControlTab.jsx` mode-sync bug**, exposed by (but not caused by) Layer A/B
+adding two new modes to the shared `ControlSession`. Its own `useEffect`
+synced local UI state to *any* `status.mode` the backend reported, including
+`"exercise"`/`"force"` (and, latently, `"profile"` — the same class of bug
+already existed before this session, just never triggered) — modes
+Control's own `<Select>` has no target shape for. Symptom: after running an
+Exercise session and returning to Control tab, clicking Start submitted
+whatever numeric value was in Control's own target field under the wrong
+mode name, producing `"Exercise target must be a dict, got 0.5"`. Fixed by
+scoping the sync (and the tab's own `running` flag) to the three modes
+Control's UI actually understands, with an "another mode running" warning
+banner matching the precedent already used in Profiles/Exercise — the same
+fix class, not new UI.
