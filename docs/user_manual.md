@@ -182,9 +182,19 @@ visible warning, not a silent conflict.
 For once a cable is physically attached to the spool. Control and Profiles
 stay exactly as they are — raw, turns-based, no-cable bench-testing tools;
 Exercise is the tab that makes cable-attached operation safe by giving the
-machine a length reference and hard end stops. This is **Layer A** only:
-positioning and safety. Force feedback / resistance (Layer B) is planned but
-not yet built — Exercise does not resist you, it only positions and limits.
+machine a length reference and hard end stops, and (§2.6.1 below) lets it
+push back against you once that's in place.
+
+Two layers, built in that order because the second is materially more
+dangerous than the first — this hardware has no mechanical fail-safe
+(direct-drive, no clutch):
+
+- **Layer A — positioning & safety** (§2.6, this section): homing, end
+  stops, length-based moves. No resistance.
+- **Layer B, Session B1 — concentric force feedback** (§2.6.1): the motor
+  resists you pulling the cable out. **Eccentric resistance (reeling you
+  in) is not built yet** — Layer B only ever resists your own pull, it
+  never actively pulls back.
 
 1. **Start Exercise Session** — arms the session; the motor does not move
    yet. This is deliberate: nothing in this tab ever moves the cable except
@@ -218,6 +228,49 @@ after a restart, power cycle, or period of the motor sitting idle would mean
 every safety limit is wrong by the same offset). The spool correction factor
 *does* persist, since it's a property of the physical spool, not the current
 session — you shouldn't have to recalibrate it every time.
+
+#### 2.6.1 Force Feedback (Layer B, Session B1 — concentric only)
+
+A second card in the same tab, below Manual Position Reset. **Requires
+Home and Max Extension to already be set** (§2.6) — start an Exercise
+session and do those first if you haven't. Force Feedback is its own
+session on the same underlying motor connection, so it and the Exercise
+session above can't run at the same time; stop one before starting the
+other.
+
+> Displayed forces are labelled **uncalibrated estimates** in the UI, and
+> will be for as long as that label is showing — the motor's actual torque
+> constant hasn't been bench-measured yet. Treat exact Newton numbers as
+> illustrative, not precise, until that label is removed.
+
+1. **Start Force Session** — arms it; zero resistance. Disabled until Home
+   and Max Extension are both set.
+2. Pick a **mode**: **Constant** (a flat resistance) or **Isokinetic** (free
+   below a speed cap, resistance climbs sharply above it — a firm "wall,"
+   not a hard limit). Set the **Force** (Newtons — a kgf estimate is shown
+   alongside for intuition) and, for Isokinetic, the **Velocity cap**.
+3. **Engage** — deliberately a different button, in a different colour,
+   from Start/STOP above it: this is the moment resistance actually
+   becomes live. Force ramps in smoothly, never steps. **Update** retargets
+   live without disengaging; **Disengage** ramps back to zero.
+4. If you hold still for a moment mid-rep, resistance eases to a light
+   holding tension rather than staying at full force — you'll feel this as
+   the "Holding" state.
+5. If the handle is released while resistance is live, the machine detects
+   the sudden reel-in and **hard-stops immediately** (zero torque) — this
+   shows as a **FAULT**. It does not recover on its own. **Resume**
+   (confirmation-gated) clears the fault and returns to Armed — your force
+   settings are kept, and Home/Max Extension are untouched — but resistance
+   stays off until you Engage again.
+6. As the cable nears the max-extension limit under load, resistance eases
+   off on its own rather than cutting out abruptly at the limit.
+7. The live display shows commanded vs. estimated actual force, cable
+   velocity, and whether the **power limiter** is currently reducing force
+   to protect the brake resistor from overheating — this can activate
+   during fast reps and is normal, not a fault.
+
+The always-present **STOP** works in every state here too, including
+mid-rep under full load.
 
 ### 2.7 Inspector
 
@@ -256,9 +309,11 @@ e.g. `telemetry_20260717_143205_profile-overload_real.csv`.
   different code path.
 - Columns: `timestamp_iso, t_rel_s, mode, target, position_turns,
   velocity_turns_s, current_iq_a, torque_est_nm, phase, rep_count,
-  cable_length_m` (`phase`/`rep_count` are blank except on Profiles runs;
-  `cable_length_m` is blank except on Exercise runs, and even then only once
-  homed — an un-homed Exercise run has no length reference yet).
+  cable_length_m, commanded_force_n, estimated_force_n, cable_velocity_m_s,
+  regen_power_w, force_state, power_limiter_active` (`phase`/`rep_count` are
+  blank except on Profiles runs; `cable_length_m` is blank except on
+  Exercise runs, and even then only once homed; the six Force Feedback
+  columns are blank except on Force runs).
 - A new file opens automatically on Start and closes on Stop — you don't
   manage this yourself. The active filename is shown on screen while running.
 - Note: for an **Overload**-wrapped run, the filename only says
@@ -311,6 +366,7 @@ per-tab Sim/Real toggle — has been removed; see §2.4.)
 | Spin the motor at a fixed velocity/torque | **Control** |
 | Train against a dynamic resistance curve / count reps | **Profiles** |
 | Home a cable, set safe end stops, and move it by length | **Exercise** |
+| Resist a cable pull with a set force (concentric only) | **Exercise → Force Feedback** |
 | Read or write one specific raw property | **Inspector** |
 | Run an arbitrary one-off command | **Command Console** |
 | Stop the motor immediately | The red **STOP** button (Control, Profiles, or Exercise tab, always visible while running) |
