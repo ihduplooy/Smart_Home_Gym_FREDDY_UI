@@ -50,6 +50,7 @@ import {
   calibrateSpoolK,
   updateHomingSettings,
   updateSpoolRadius,
+  updateCalibHoldForce,
 } from '../../../api/exercise'
 import {
   startForceSession,
@@ -95,6 +96,8 @@ const ExerciseTab = ({ isActive = true }) => {
   const [actionError, setActionError] = useState(null)
   const [busy, setBusy] = useState(false)
   const [targetLengthText, setTargetLengthText] = useState('0.3')
+  const [moveVelocityText, setMoveVelocityText] = useState('1.0')
+  const [moveAccelText, setMoveAccelText] = useState('1.0')
   const [measuredLengthText, setMeasuredLengthText] = useState('')
   const [calibError, setCalibError] = useState(null)
   const [calibBusy, setCalibBusy] = useState(false)
@@ -103,6 +106,8 @@ const ExerciseTab = ({ isActive = true }) => {
   const [forceMode, setForceMode] = useState('constant')
   const [forceText, setForceText] = useState('20')
   const [velocityCapText, setVelocityCapText] = useState('1.0')
+  const [rangeStartText, setRangeStartText] = useState('')
+  const [rangeEndText, setRangeEndText] = useState('')
   const [forceError, setForceError] = useState(null)
   const [forceBusy, setForceBusy] = useState(false)
 
@@ -115,6 +120,10 @@ const ExerciseTab = ({ isActive = true }) => {
   const [spoolRadiusText, setSpoolRadiusText] = useState('')
   const [spoolRadiusError, setSpoolRadiusError] = useState(null)
   const [spoolRadiusBusy, setSpoolRadiusBusy] = useState(false)
+
+  const [calibHoldForceText, setCalibHoldForceText] = useState('')
+  const [calibHoldForceError, setCalibHoldForceError] = useState(null)
+  const [calibHoldForceBusy, setCalibHoldForceBusy] = useState(false)
 
   const { isOpen: resetOpen, onOpen: openReset, onClose: closeReset } = useDisclosure()
   const { isOpen: advancedOpen, onToggle: toggleAdvanced } = useDisclosure()
@@ -137,6 +146,7 @@ const ExerciseTab = ({ isActive = true }) => {
     setHomingVelocityText(String(c.homing_velocity_turns_s))
     setHomingLimitText(String(c.homing_current_limit_a))
     setSpoolRadiusText(String(c.r0))
+    setCalibHoldForceText(String(c.calib_hold_force_n))
     settingsInitialized.current = true
   }, [status?.cable])
 
@@ -195,12 +205,21 @@ const ExerciseTab = ({ isActive = true }) => {
 
   const targetLengthNumber = Number(targetLengthText)
   const targetLengthValid = targetLengthText !== '' && Number.isFinite(targetLengthNumber) && targetLengthNumber >= 0
+  const moveVelocityNumber = Number(moveVelocityText)
+  const moveVelocityValid = moveVelocityText !== '' && Number.isFinite(moveVelocityNumber) && moveVelocityNumber > 0
+  const moveAccelNumber = Number(moveAccelText)
+  const moveAccelValid = moveAccelText !== '' && Number.isFinite(moveAccelNumber) && moveAccelNumber > 0
+  const moveParamsValid = targetLengthValid && moveVelocityValid && moveAccelValid
+  // r0-only estimate (ignores the k wrap-growth correction, same simplification
+  // as the kgf estimate under Force below) -- informational, not authoritative.
+  const targetLengthTurnsEstimate =
+    targetLengthValid && cable?.r0 ? targetLengthNumber / (2 * Math.PI * cable.r0) : null
   const handleMove = () => {
-    if (!targetLengthValid) {
-      setActionError('Target length must be a non-negative number')
+    if (!moveParamsValid) {
+      setActionError('Target length, velocity, and accel/decel must all be valid numbers')
       return
     }
-    run(moveCable, targetLengthNumber)
+    run(moveCable, targetLengthNumber, moveVelocityNumber, moveAccelNumber)
   }
 
   const homingThresholdNumber = Number(homingThresholdText)
@@ -249,6 +268,25 @@ const ExerciseTab = ({ isActive = true }) => {
     }
   }
 
+  const calibHoldForceNumber = Number(calibHoldForceText)
+  const calibHoldForceValid =
+    calibHoldForceText !== '' && Number.isFinite(calibHoldForceNumber) && calibHoldForceNumber > 0
+  const handleUpdateCalibHoldForce = async () => {
+    if (!calibHoldForceValid) {
+      setCalibHoldForceError('Hold force must be a positive number')
+      return
+    }
+    setCalibHoldForceError(null)
+    setCalibHoldForceBusy(true)
+    try {
+      await updateCalibHoldForce(calibHoldForceNumber)
+    } catch (e) {
+      setCalibHoldForceError(e.message)
+    } finally {
+      setCalibHoldForceBusy(false)
+    }
+  }
+
   const handleResetConfirmed = async () => {
     setActionError(null)
     setBusy(true)
@@ -266,7 +304,14 @@ const ExerciseTab = ({ isActive = true }) => {
   const forceValid = forceText !== '' && Number.isFinite(forceNumber) && forceNumber >= 0
   const velocityCapNumber = Number(velocityCapText)
   const velocityCapValid = velocityCapText !== '' && Number.isFinite(velocityCapNumber) && velocityCapNumber > 0
-  const forceParamsValid = forceValid && (forceMode !== 'isokinetic' || velocityCapValid)
+  // Optional bounded sub-range of home->max travel (requested 23 July 2026)
+  // -- blank on either side means "use the full range", not zero.
+  const rangeStartNumber = rangeStartText !== '' ? Number(rangeStartText) : null
+  const rangeStartValid = rangeStartText === '' || (Number.isFinite(rangeStartNumber) && rangeStartNumber >= 0)
+  const rangeEndNumber = rangeEndText !== '' ? Number(rangeEndText) : null
+  const rangeEndValid = rangeEndText === '' || (Number.isFinite(rangeEndNumber) && rangeEndNumber >= 0)
+  const forceParamsValid =
+    forceValid && (forceMode !== 'isokinetic' || velocityCapValid) && rangeStartValid && rangeEndValid
 
   const runForce = async (fn, ...args) => {
     setForceError(null)
@@ -283,20 +328,28 @@ const ExerciseTab = ({ isActive = true }) => {
   const handleStartForceSession = () => runForce(startForceSession)
   const handleStopForce = () => runForce(stopForce)
 
+  const forceParams = () => ({
+    mode: forceMode,
+    forceN: forceNumber,
+    velocityTargetTurnsS: forceMode === 'isokinetic' ? velocityCapNumber : undefined,
+    startLengthM: rangeStartNumber,
+    endLengthM: rangeEndNumber,
+  })
+
   const handleEngage = () => {
     if (!forceParamsValid) {
-      setForceError('Force (and velocity cap, for isokinetic) must be valid numbers')
+      setForceError('Force, velocity cap (for isokinetic), and range bounds must be valid numbers')
       return
     }
-    runForce(engageForce, forceMode, forceNumber, forceMode === 'isokinetic' ? velocityCapNumber : undefined)
+    runForce(engageForce, forceParams())
   }
 
   const handleUpdateForce = () => {
     if (!forceParamsValid) {
-      setForceError('Force (and velocity cap, for isokinetic) must be valid numbers')
+      setForceError('Force, velocity cap (for isokinetic), and range bounds must be valid numbers')
       return
     }
-    runForce(updateForceParams, forceMode, forceNumber, forceMode === 'isokinetic' ? velocityCapNumber : undefined)
+    runForce(updateForceParams, forceParams())
   }
 
   const handleDisengage = () => runForce(disengageForce)
@@ -627,10 +680,48 @@ const ExerciseTab = ({ isActive = true }) => {
                   Start Max-Extension Calibration
                 </Button>
               )}
+
+              <Box borderTop="1px solid" borderColor="gray.700" pt={3}>
+                <Text fontSize="xs" color="gray.400" mb={2}>
+                  Hold force — live-adjustable, persisted, takes effect on the next calibration start.
+                </Text>
+                {calibHoldForceError && (
+                  <Alert status="error" variant="left-accent" mb={2} py={1}>
+                    <AlertIcon />
+                    <AlertDescription fontSize="xs">{calibHoldForceError}</AlertDescription>
+                  </Alert>
+                )}
+                <HStack>
+                  <InputGroup size="sm" w="130px">
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      fontFamily="mono"
+                      value={calibHoldForceText}
+                      onChange={(e) => setCalibHoldForceText(e.target.value)}
+                    />
+                    <InputRightAddon px={2} fontSize="xs">N</InputRightAddon>
+                  </InputGroup>
+                  <Button
+                    size="sm"
+                    colorScheme="odrive"
+                    variant="outline"
+                    onClick={handleUpdateCalibHoldForce}
+                    isDisabled={!calibHoldForceValid || calibHoldForceBusy}
+                  >
+                    Update
+                  </Button>
+                </HStack>
+              </Box>
             </VStack>
           </CardBody>
         </Card>
 
+        {/* Move + Force Feedback -- side by side (requested 23 July 2026): kept as
+            separate cards rather than merged, since they're mutually-exclusive
+            modes sharing this tab, but used together often enough to want them
+            visually adjacent. */}
+        <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={4}>
         {/* Length-based move */}
         <Card bg="gray.800" variant="elevated">
           <CardHeader>
@@ -643,10 +734,10 @@ const ExerciseTab = ({ isActive = true }) => {
                   {!isHomed ? 'Home the cable' : 'Calibrate max extension'} before commanding moves.
                 </Text>
               )}
-              <HStack spacing={4} align="flex-end">
+              <HStack spacing={4} wrap="wrap" align="flex-end">
                 <Box>
                   <Text fontSize="xs" color="gray.400" mb={1}>Target length</Text>
-                  <InputGroup size="sm" w="160px">
+                  <InputGroup size="sm" w="140px">
                     <Input
                       type="text"
                       inputMode="decimal"
@@ -656,16 +747,46 @@ const ExerciseTab = ({ isActive = true }) => {
                     />
                     <InputRightAddon px={2} fontSize="xs">m</InputRightAddon>
                   </InputGroup>
+                  <Text fontSize="0.65rem" color="gray.500" mt={0.5}>
+                    {targetLengthTurnsEstimate != null ? `≈ ${targetLengthTurnsEstimate.toFixed(2)} turns` : '—'}
+                  </Text>
                 </Box>
-                <Button
-                  size="sm"
-                  colorScheme="odrive"
-                  onClick={handleMove}
-                  isDisabled={!sessionRunning || !isHomed || !hasMax || busyAction || !targetLengthValid || busy}
-                >
-                  Move
-                </Button>
+                <Box>
+                  <Text fontSize="xs" color="gray.400" mb={1}>Move Velocity</Text>
+                  <InputGroup size="sm" w="140px">
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      fontFamily="mono"
+                      value={moveVelocityText}
+                      onChange={(e) => setMoveVelocityText(e.target.value)}
+                    />
+                    <InputRightAddon px={2} fontSize="xs">turns/s</InputRightAddon>
+                  </InputGroup>
+                </Box>
+                <Box>
+                  <Text fontSize="xs" color="gray.400" mb={1}>Accel / Decel</Text>
+                  <InputGroup size="sm" w="140px">
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      fontFamily="mono"
+                      value={moveAccelText}
+                      onChange={(e) => setMoveAccelText(e.target.value)}
+                    />
+                    <InputRightAddon px={2} fontSize="xs">turns/s²</InputRightAddon>
+                  </InputGroup>
+                </Box>
               </HStack>
+              <Button
+                size="sm"
+                colorScheme="odrive"
+                alignSelf="flex-start"
+                onClick={handleMove}
+                isDisabled={!sessionRunning || !isHomed || !hasMax || busyAction || !moveParamsValid || busy}
+              >
+                Move
+              </Button>
             </VStack>
           </CardBody>
         </Card>
@@ -773,6 +894,48 @@ const ExerciseTab = ({ isActive = true }) => {
                   )}
                 </HStack>
 
+                <Box mt={3}>
+                  <Text fontSize="xs" color="gray.400" mb={1}>
+                    Active range (optional) — resistance tapers off near these bounds, like the max-extension
+                    taper. Blank on either side means the full home-to-max travel.
+                  </Text>
+                  <HStack spacing={4} wrap="wrap" align="flex-end">
+                    <Box>
+                      <Text fontSize="xs" color="gray.400" mb={1}>Start</Text>
+                      <InputGroup size="sm" w="140px">
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          fontFamily="mono"
+                          placeholder="home"
+                          value={rangeStartText}
+                          onChange={(e) => setRangeStartText(e.target.value)}
+                        />
+                        <InputRightAddon px={2} fontSize="xs">m</InputRightAddon>
+                      </InputGroup>
+                    </Box>
+                    <Box>
+                      <Text fontSize="xs" color="gray.400" mb={1}>End</Text>
+                      <InputGroup size="sm" w="140px">
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          fontFamily="mono"
+                          placeholder="max"
+                          value={rangeEndText}
+                          onChange={(e) => setRangeEndText(e.target.value)}
+                        />
+                        <InputRightAddon px={2} fontSize="xs">m</InputRightAddon>
+                      </InputGroup>
+                    </Box>
+                  </HStack>
+                  {forceEngaged && control?.extra?.range_start_length_m != null && (
+                    <Text fontSize="0.65rem" color="gray.500" mt={1}>
+                      Active: {control.extra.range_start_length_m.toFixed(2)}m – {control.extra.range_end_length_m.toFixed(2)}m
+                    </Text>
+                  )}
+                </Box>
+
                 {/* Engage/Disengage -- deliberately distinct (colour + placement) from
                     session Start/STOP above (spec §10.2) */}
                 <HStack spacing={3} mt={4}>
@@ -840,6 +1003,7 @@ const ExerciseTab = ({ isActive = true }) => {
             </VStack>
           </CardBody>
         </Card>
+        </SimpleGrid>
 
         {/* Manual reset -- idle-gated + confirmation-gated (spec §3.5) */}
         <Card bg="gray.800" variant="elevated">

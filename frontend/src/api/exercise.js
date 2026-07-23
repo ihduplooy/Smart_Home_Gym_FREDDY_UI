@@ -16,6 +16,7 @@
 //   POST /api/exercise/calibrate_k             { measured_length_m }
 //   POST /api/exercise/update_homing_settings  { current_threshold_a?, velocity_turns_s?, current_limit_a? }
 //   POST /api/exercise/update_spool_radius     { r0 }
+//   POST /api/exercise/update_calib_hold_force { force_n }
 
 async function getJson(url, options) {
   const res = await fetch(url, options)
@@ -97,4 +98,8 @@ export function updateHomingSettings({ currentThresholdA, velocityTurnsS, curren
 
 export function updateSpoolRadius(r0) {
   return postJson('/api/exercise/update_spool_radius', { r0 })
+}
+
+export function updateCalibHoldForce(forceN) {
+  return postJson('/api/exercise/update_calib_hold_force', { force_n: forceN })
 }
