@@ -2,6 +2,7 @@ import { useState, lazy, Suspense } from 'react'
 import { useSelector } from 'react-redux'
 import {
   Box,
+  HStack,
   VStack,
   Tabs,
   TabList,
@@ -10,7 +11,17 @@ import {
   TabPanel,
   Spinner,
   Text,
+  IconButton,
+  Tooltip,
+  Drawer,
+  DrawerOverlay,
+  DrawerContent,
+  DrawerCloseButton,
+  DrawerHeader,
+  DrawerBody,
+  useDisclosure,
 } from '@chakra-ui/react'
+import { SettingsIcon } from '@chakra-ui/icons'
 
 
 // Lazy-loaded tab components
@@ -21,6 +32,7 @@ const PresetsTab = lazy(() => import('./tabs/presets/PresetsTab'))
 const CommandConsoleTab = lazy(() => import('./tabs/command console/CommandConsoleTab'))
 const ControlTab = lazy(() => import('./tabs/control/ControlTab'))
 const ProfilesTab = lazy(() => import('./tabs/profiles/ProfilesTab'))
+const ExerciseTab = lazy(() => import('./tabs/exercise/ExerciseTab'))
 
 // Lightweight loading component
 const TabLoadingFallback = () => (
@@ -58,12 +70,6 @@ const TAB_CONFIG = [
     requiresConnection: false
   },
   {
-    id: 'presets',
-    label: 'Presets',
-    component: PresetsTab,
-    requiresConnection: false
-  },
-  {
     id: 'dashboard',
     label: 'Dashboard',
     component: DashboardTab,
@@ -83,6 +89,12 @@ const TAB_CONFIG = [
     requiresConnection: false
   },
   {
+    id: 'exercise',
+    label: 'Exercise',
+    component: ExerciseTab,
+    requiresConnection: false
+  },
+  {
     id: 'inspector',
     label: 'Inspector',
     component: InspectorTab,
@@ -99,6 +111,7 @@ const TAB_CONFIG = [
 const MainTabs = () => {
   const { isConnected, odriveState } = useSelector(state => state.device)
   const [activeTab, setActiveTab] = useState(0)
+  const { isOpen: presetsOpen, onOpen: openPresets, onClose: closePresets } = useDisclosure()
 
 
   const renderTabContent = (tabConfig, index) => {
@@ -122,6 +135,7 @@ const MainTabs = () => {
           }
         case 'control':
         case 'profiles':
+        case 'exercise':
           return {
             ...commonProps,
             isActive: activeTab === index
@@ -155,27 +169,39 @@ const MainTabs = () => {
         // high-frequency telemetry subscribers are gated by `isActive` so hidden
         // tabs cost nothing.
       >
-        <TabList bg="gray.800" borderBottom="1px solid" borderColor="gray.600" px={6}>
-          {TAB_CONFIG.map((tabConfig) => (
-            <Tab
-              key={tabConfig.id}
-              bg="gray.700"
+        <HStack bg="gray.800" borderBottom="1px solid" borderColor="gray.600" pr={4} justify="space-between">
+          <TabList border="none" px={6}>
+            {TAB_CONFIG.map((tabConfig) => (
+              <Tab
+                key={tabConfig.id}
+                bg="gray.700"
+                color="gray.300"
+                borderRadius="md"
+                _hover={{ bg: 'gray.800' }}
+                _selected={{
+                  bg: 'gray.900',
+                  color: 'odrive.300',
+                  borderBottom: '3px solid',
+                  borderBottomColor: 'odrive.300',
+                  borderBottomLeftRadius: '0px',
+                  borderBottomRightRadius: '0px',
+                }}
+              >
+                {tabConfig.label}
+              </Tab>
+            ))}
+          </TabList>
+          <Tooltip label="Presets">
+            <IconButton
+              aria-label="Presets"
+              icon={<SettingsIcon />}
+              size="sm"
+              variant="ghost"
               color="gray.300"
-              borderRadius="md"
-              _hover={{ bg: 'gray.800' }}
-              _selected={{
-                bg: 'gray.900',
-                color: 'odrive.300',
-                borderBottom: '3px solid',
-                borderBottomColor: 'odrive.300',
-                borderBottomLeftRadius: '0px',
-                borderBottomRightRadius: '0px',
-              }}
-            >
-              {tabConfig.label}
-            </Tab>
-          ))}
-        </TabList>
+              onClick={openPresets}
+            />
+          </Tooltip>
+        </HStack>
 
         <Suspense fallback={<TabLoadingFallback />}>
           <TabPanels flex="1" minH="0" bg="gray.900">
@@ -195,6 +221,19 @@ const MainTabs = () => {
           </TabPanels>
         </Suspense>
       </Tabs>
+
+      <Drawer isOpen={presetsOpen} placement="right" onClose={closePresets} size="xl">
+        <DrawerOverlay />
+        <DrawerContent bg="gray.900">
+          <DrawerCloseButton />
+          <DrawerHeader borderBottom="1px solid" borderColor="gray.600">Presets</DrawerHeader>
+          <DrawerBody p={0}>
+            <Suspense fallback={<TabLoadingFallback />}>
+              {presetsOpen && <PresetsTab />}
+            </Suspense>
+          </DrawerBody>
+        </DrawerContent>
+      </Drawer>
     </Box>
   )
 }
