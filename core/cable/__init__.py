@@ -1,3 +1,4 @@
+from .exercise_mode import ExerciseMode
 from .geometry import SpoolGeometry
 from .homing import HomingState, HomingStateMachine, HomingUpdate
 from .limits import (
@@ -18,4 +19,5 @@ __all__ = [
     "validate_homed",
     "validate_max_extension_candidate",
     "CableState",
+    "ExerciseMode",
 ]

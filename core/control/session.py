@@ -272,6 +272,14 @@ class ControlSession:
                 "latest_sample": asdict(latest) if latest is not None else None,
                 "phase": self._last_extra.get("phase"),
                 "rep_count": self._last_extra.get("rep_count"),
+                # Generic passthrough of whatever the active mode's tick()
+                # returned (spec exercise_tab_build_spec_layerA.md §7 wants
+                # e.g. homing_state/is_homed/cable_length_m surfaced here for
+                # the Exercise tab, without ControlSession needing to know
+                # what those fields mean -- same mechanism phase/rep_count
+                # above already use, generalised rather than duplicated
+                # per new mode).
+                "extra": dict(self._last_extra),
             }
 
     def samples_since(self, since: Optional[float] = None) -> List[TelemetrySample]:
