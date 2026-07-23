@@ -109,8 +109,14 @@ TRAP_TRAJ_DECEL_LIMIT = 1.0  # turns/s^2
 # Cable spool/drum radius: the one number that converts cable-force Newtons
 # (the profiles' public parameter surface, spec §4) into motor torque Nm.
 # Used by exactly one function, core/profiles/units.py::force_to_torque().
-# TODO(2A): placeholder — measure the real spool/drum radius.
-SPOOL_RADIUS_M = 0.05
+# Measured with a ruler against the physical spool, 23 July 2026 (Layer B
+# §2.3) — no longer a placeholder. Was 0.05 (placeholder) through Layer A;
+# several Layer A comments below still show numbers computed against the old
+# value where only the comment (not the enforced behaviour) is stale — see
+# docs/decisions.md ("Exercise tab Layer B" entry) for which ones needed a
+# real recompute (HOMING_TIMEOUT_S, SPOOL_CORRECTION_K_BOUNDS) vs. just a
+# comment update.
+SPOOL_RADIUS_M = 0.035
 
 # Eccentric-overload multiplier default. Charter target band is 1.2-1.5x.
 # TODO(2A): tune against real cable motion / user feedback.
@@ -139,67 +145,96 @@ HOMING_CURRENT_THRESHOLD_A = 0.8  # user-specified starting point (spec §5)
 HOMING_CURRENT_LIMIT_A = 3.0  # ~3.75x margin above threshold, 5x below the
                               # 15A operating limit — a snag during the blind
                               # reel-in phase can't develop full torque.
-HOMING_VELOCITY_TURNS_S = 0.15  # ~15% of TRAP_TRAJ_VEL_LIMIT; at
-                                # SPOOL_RADIUS_M=0.05m this is ~4.7 cm/s cable
-                                # speed — slow enough to watch and abort by
-                                # hand on the first live run (spec §10).
+HOMING_VELOCITY_TURNS_S = 0.15  # ~15% of TRAP_TRAJ_VEL_LIMIT; at the measured
+                                # SPOOL_RADIUS_M=0.035m this is ~3.3 cm/s cable
+                                # speed (was ~4.7 cm/s against the old 0.05m
+                                # placeholder) — slow enough to watch and abort
+                                # by hand on the first live run (spec §10).
 HOMING_DEBOUNCE_SAMPLES = 5  # 100ms at 50Hz — filters single-sample
                              # transients without meaningfully delaying
                              # detection at HOMING_VELOCITY_TURNS_S.
 HOMING_STARTUP_GRACE_S = 0.3  # 15 ticks at 50Hz; generous margin over typical
                               # BLDC current inrush settling time.
-HOMING_MAX_TRAVEL_TURNS = 50.0  # ~15.7m of cable at SPOOL_RADIUS_M=0.05m —
-                                # a generous backstop bound (real cable
-                                # machines run <3m), not a tight one; the time
-                                # bound below is the practically-relevant one.
-HOMING_TIMEOUT_S = 90.0  # ~64s worst-case reel-in from a generous 3m
-                         # real-world max extension at HOMING_VELOCITY_TURNS_S,
-                         # plus margin.
+HOMING_MAX_TRAVEL_TURNS = 50.0  # ~11.0m of cable at the measured
+                                # SPOOL_RADIUS_M=0.035m (was ~15.7m against the
+                                # old 0.05m placeholder) — still a generous
+                                # backstop bound (real cable machines run
+                                # <3m), not a tight one; the time bound below
+                                # is the practically-relevant one.
+HOMING_TIMEOUT_S = 130.0  # Recomputed for the measured SPOOL_RADIUS_M=0.035m
+                          # (Layer B §2.3) — this is a real value change, not
+                          # just a comment update. At HOMING_VELOCITY_TURNS_S,
+                          # cable speed dropped from ~4.7 to ~3.3 cm/s with the
+                          # radius correction, so the old 90s budget (~64s
+                          # worst-case reel-in from a generous 3m real-world
+                          # max extension, plus ~41% margin) would now cover
+                          # only ~91s of worst-case reel-in with the *new*
+                          # cable speed — essentially zero margin, or an
+                          # outright false timeout fault on a legitimate slow
+                          # homing run. Recomputed: ~91s worst-case at the new
+                          # speed, same ~41% margin factor as before -> ~129s,
+                          # rounded to 130s.
 
 # Max-extension calibration — light constant tension while the user pulls.
 CALIB_HOLD_FORCE_N = 3.0  # single-digit N, trivially overcome by hand; enough
                           # to keep a lightweight cable/webbing taut.
 MAX_EXTENSION_SAFETY_MARGIN_M = 0.05  # 5cm inside the physically marked point.
-MAX_EXTENSION_MIN_TRAVEL_TURNS = 0.5  # ~15.7cm of cable at SPOOL_RADIUS_M --
+MAX_EXTENSION_MIN_TRAVEL_TURNS = 0.5  # ~11.0cm of cable at the measured
+                                      # SPOOL_RADIUS_M=0.035m (was ~15.7cm
+                                      # against the old 0.05m placeholder) --
                                       # below this, a marked max is rejected
                                       # as implausibly close to home (spec
                                       # §3.2) rather than stored as a
                                       # degenerate/inverted travel range.
 
 # Length-based control — runtime out-of-range guard (spec §3.4 mechanism 2).
-POSITION_GUARD_TOLERANCE_TURNS = 0.05  # ~1.57cm of cable at SPOOL_RADIUS_M —
+POSITION_GUARD_TOLERANCE_TURNS = 0.05  # ~1.1cm of cable at the measured
+                                       # SPOOL_RADIUS_M=0.035m (was ~1.57cm
+                                       # against the old 0.05m placeholder) —
                                        # small enough to catch real problems
                                        # quickly, larger than ordinary
                                        # position-control settling/overshoot.
 
 # Spool geometry correction factor k (r_eff(theta) = r0 + k*theta).
 SPOOL_CORRECTION_K_DEFAULT = 0.0  # un-calibrated default = fixed-radius model
-SPOOL_CORRECTION_K_BOUNDS = (-0.0005, 0.0005)  # m/rad. Two constraints set
-                                               # this: (1) physical plausibility
-                                               # -- a several-mm cable/webbing
-                                               # thickness spread over a full
-                                               # wrap (2*pi rad) implies |k| on
-                                               # the order of 1e-4-1e-3 m/rad;
-                                               # (2) the r_eff=r0+k*theta model
-                                               # must stay non-degenerate
-                                               # (r_eff > 0) across the whole
-                                               # plausible operating range, not
-                                               # just near home -- at this
-                                               # bound, r0=0.05m stays positive
-                                               # out to theta =
-                                               # r0/0.0005 ~= 100 rad (~16
-                                               # turns, ~5m of cable at
-                                               # SPOOL_RADIUS_M), comfortably
-                                               # beyond any realistic cable
-                                               # machine's travel. A looser
-                                               # bound (originally +-0.01) let
-                                               # a legitimately-in-range k
-                                               # break the model within a
-                                               # single turn of travel --
-                                               # caught by core/tests/
-                                               # test_geometry.py's round-trip
-                                               # property test, not by
-                                               # inspection.
+SPOOL_CORRECTION_K_BOUNDS = (-0.00035, 0.00035)  # m/rad. Recomputed for the
+                                                 # measured SPOOL_RADIUS_M=
+                                                 # 0.035m (Layer B §2.3) — a
+                                                 # real value change, not just
+                                                 # a comment update. Two
+                                                 # constraints set this: (1)
+                                                 # physical plausibility -- a
+                                                 # several-mm cable/webbing
+                                                 # thickness spread over a
+                                                 # full wrap (2*pi rad)
+                                                 # implies |k| on the order of
+                                                 # 1e-4-1e-3 m/rad, still true
+                                                 # at the corrected radius; (2)
+                                                 # the r_eff=r0+k*theta model
+                                                 # must stay non-degenerate
+                                                 # (r_eff > 0) across the whole
+                                                 # plausible operating range --
+                                                 # at the OLD r0=0.05m and the
+                                                 # old +-0.0005 bound, that
+                                                 # margin was theta =
+                                                 # r0/0.0005 ~= 100 rad; left
+                                                 # unchanged, the new, smaller
+                                                 # r0=0.035m would only reach
+                                                 # ~70 rad (~2.4m of cable) at
+                                                 # the same bound -- tightened
+                                                 # to +-0.00035 to restore the
+                                                 # same ~100 rad (~3.5m)
+                                                 # margin. (A looser bound
+                                                 # originally, +-0.01, let a
+                                                 # legitimately-in-range k
+                                                 # break the model within a
+                                                 # single turn of travel --
+                                                 # caught by core/tests/
+                                                 # test_geometry.py's
+                                                 # round-trip property test,
+                                                 # not by inspection; same
+                                                 # class of error this
+                                                 # recompute avoids repeating.)
 SPOOL_CALIBRATION_MIN_THETA_M_RAD = 1.0  # below this, L ~= r0*theta dominates
                                          # and k's contribution is too small
                                          # relative to measurement error to
@@ -218,13 +253,37 @@ CAN_BAUD_RATE = 500000
 # --------------------------------------------------------------------------
 # Bus-level limits
 # --------------------------------------------------------------------------
-BRAKE_RESISTANCE = 2.0  # ohm
+BRAKE_RESISTANCE = 2.0  # ohm — confirmed against the physical resistor, 50W
+                        # rated (Layer B §2.4, 23 July 2026). No longer a
+                        # placeholder value that happened to match; this is
+                        # the actual, measured/rated component.
 DC_BUS_UNDERVOLTAGE_TRIP_LEVEL = 8.0
 DC_BUS_OVERVOLTAGE_TRIP_LEVEL = 25.0  # capped for bench PSU testing; raise before
                                       # battery phase (~42V)
 DC_MAX_POSITIVE_CURRENT = 15.0
-DC_MAX_NEGATIVE_CURRENT = -3.0  # conservative: brake resistor wattage tbc
-MAX_REGEN_CURRENT = 0  # conservative: brake resistor wattage tbc
+# Tightened from -3.0 (Layer B §2.4, 23 July 2026) — the old value was an
+# unjustified placeholder ("brake resistor wattage tbc"), not derived from
+# what the supply can actually absorb. The Manson HCS-3202 bench PSU is a
+# switching supply, treated as unable to sink any reverse current at all.
+# This property is the ODrive-side backstop (faults with
+# DC_BUS_OVER_REGEN_CURRENT before real current reaches the supply) — it is
+# NOT the primary defense; MAX_REGEN_CURRENT=0 below is, by routing regen
+# through the brake resistor before it ever reaches the bus. Chosen at the
+# tight/conservative end of a justified -0.5 to -1.0A range: at this bench's
+# ~13-15V bus, -0.5A bounds any reverse-current excursion to <=7.5W before
+# faulting — small enough to be a real backstop (not a formality), wide
+# enough above typical current-sense noise/quantization on this hardware to
+# avoid nuisance faults during normal, correctly-braked operation. If this
+# proves too tight in practice (nuisance faults with the brake resistor
+# genuinely absorbing regen correctly), loosen toward -1.0A, not the reverse
+# — the philosophy here is "assume the PSU can't sink current," so any
+# widening should stay inside the originally-justified range.
+DC_MAX_NEGATIVE_CURRENT = -0.5
+MAX_REGEN_CURRENT = 0  # Confirmed correct as-is (Layer B §2.4): this is the
+                       # primary defense — the brake resistor is configured
+                       # to shunt regen before it reaches the bus at all, so
+                       # zero bus-side regen current is the intended, correct
+                       # value, not an unresolved placeholder.
 
 
 def check_firmware(fw_major, fw_minor, fw_revision):

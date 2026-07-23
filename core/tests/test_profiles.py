@@ -1,5 +1,6 @@
 import pytest
 
+from config import board_constants
 from core.hardware.interface import TelemetrySample
 from core.profiles import (
     BellCurveProfile,
@@ -22,7 +23,7 @@ def _state(position=0.0, velocity=0.0, phase=Phase.CONCENTRIC, rep_count=0, t=0.
 # ---- units ----
 
 def test_force_to_torque_and_back():
-    assert force_to_torque(100.0) == pytest.approx(100.0 * 0.05)
+    assert force_to_torque(100.0) == pytest.approx(100.0 * board_constants.SPOOL_RADIUS_M)
     assert torque_to_force(force_to_torque(37.0)) == pytest.approx(37.0)
 
 
