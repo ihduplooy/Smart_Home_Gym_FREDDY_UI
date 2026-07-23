@@ -236,12 +236,17 @@ class ControlSession:
 
             if self._logger is not None:
                 try:
+                    # cable_length_m is None (not absent) while un-homed
+                    # (ExerciseMode.tick()) -- distinct from "" (every other
+                    # mode, key absent), both written as an empty CSV cell.
+                    cable_length_m = extra.get("cable_length_m")
                     self._logger.log_sample(
                         sample,
                         mode=mode_name,
                         target=target,
                         phase=extra.get("phase", ""),
                         rep_count=extra.get("rep_count", ""),
+                        cable_length_m="" if cable_length_m is None else cable_length_m,
                     )
                 except Exception:
                     log.exception("CSV logger write failed")

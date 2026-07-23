@@ -404,6 +404,50 @@ def test_cable_length_matches_geometry_once_homed(tmp_path):
 
 # ---- end-to-end via the real ControlSession + mode_factories injection ----
 
+def test_exercise_csv_gains_cable_length_column(tmp_path):
+    import csv as csv_module
+
+    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json")
+    session = ControlSession(
+        hardware_source="sim",
+        mode_factories={**MODES_BY_NAME, "exercise": lambda: ExerciseMode(cable_state)},
+    )
+    session.start(mode="exercise", target={"action": "arm"})
+    time.sleep(0.1)
+    log_path = session.status()["log_path"]
+    session.stop()
+
+    with open(log_path, newline="") as f:
+        rows = list(csv_module.reader(f))
+    header = rows[0]
+    assert "cable_length_m" in header
+    data_row = rows[1]
+    assert data_row[header.index("cable_length_m")] == ""  # un-homed
+
+
+def test_exercise_csv_cable_length_populated_once_homed(tmp_path):
+    import csv as csv_module
+
+    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json")
+    cable_state.latch_home(0.0)  # bypass a full homing run; latch directly
+    session = ControlSession(
+        hardware_source="sim",
+        mode_factories={**MODES_BY_NAME, "exercise": lambda: ExerciseMode(cable_state)},
+    )
+    session.start(mode="exercise", target={"action": "arm"})
+    time.sleep(0.1)
+    log_path = session.status()["log_path"]
+    session.stop()
+
+    with open(log_path, newline="") as f:
+        rows = list(csv_module.reader(f))
+    header = rows[0]
+    data_row = rows[1]
+    cell = data_row[header.index("cable_length_m")]
+    assert cell != ""
+    float(cell)  # must parse as a number
+
+
 def test_exercise_mode_end_to_end_via_control_session(tmp_path):
     cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json")
     session = ControlSession(

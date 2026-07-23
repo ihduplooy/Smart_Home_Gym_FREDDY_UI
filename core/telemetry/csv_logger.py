@@ -8,6 +8,13 @@ Session 3 amendment (spec §6): two columns appended after `torque_est_nm` —
 `phase`, `rep_count` — populated during profile runs, empty strings for
 velocity/torque runs (this amends Session 2's "exact columns" clause; see
 docs/decisions.md).
+
+Exercise tab Layer A amendment (exercise_tab_build_spec_layerA.md §7): one
+more column appended, `cable_length_m` — populated during Exercise runs once
+homed, empty string otherwise (un-homed Exercise runs, and every other
+mode). Same additive pattern as phase/rep_count above; existing logs and the
+CSV reference tables in the manuals stay readable (columns only ever
+appended, never reordered/removed).
 """
 
 import csv
@@ -29,6 +36,7 @@ COLUMNS = [
     "torque_est_nm",
     "phase",
     "rep_count",
+    "cable_length_m",
 ]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -69,7 +77,8 @@ class CsvLogger:
         mode: str,
         target: float,
         phase: str = "",
-        rep_count=""
+        rep_count="",
+        cable_length_m="",
     ) -> None:
         if self._writer is None or self._t0 is None:
             raise RuntimeError("CsvLogger.log_sample() called before open()")
@@ -84,6 +93,7 @@ class CsvLogger:
             sample.torque_est,
             phase,
             rep_count,
+            cable_length_m,
         ])
         now = time.monotonic()
         if now - self._last_flush >= _FLUSH_INTERVAL_S:

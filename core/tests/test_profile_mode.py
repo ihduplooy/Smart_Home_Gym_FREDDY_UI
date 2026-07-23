@@ -88,13 +88,13 @@ def test_profile_mode_csv_gains_phase_and_rep_count_columns():
     with open(log_path, newline="") as f:
         rows = list(csv_module.reader(f))
     header = rows[0]
-    assert header[-2:] == ["phase", "rep_count"]
+    assert "phase" in header and "rep_count" in header
     data_row = rows[1]
-    assert data_row[-2] in {p.value for p in Phase}
-    assert data_row[-1].isdigit()
+    assert data_row[header.index("phase")] in {p.value for p in Phase}
+    assert data_row[header.index("rep_count")].isdigit()
 
 
-def test_velocity_mode_csv_leaves_phase_and_rep_count_columns_empty():
+def test_velocity_mode_csv_leaves_phase_rep_count_and_cable_length_columns_empty():
     import csv as csv_module
 
     session = _sim_session()
@@ -105,9 +105,11 @@ def test_velocity_mode_csv_leaves_phase_and_rep_count_columns_empty():
 
     with open(log_path, newline="") as f:
         rows = list(csv_module.reader(f))
+    header = rows[0]
     data_row = rows[1]
-    assert data_row[-2] == ""
-    assert data_row[-1] == ""
+    assert data_row[header.index("phase")] == ""
+    assert data_row[header.index("rep_count")] == ""
+    assert data_row[header.index("cable_length_m")] == ""
 
 
 def test_profile_with_overload_wrapper_runs_end_to_end():
