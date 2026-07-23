@@ -18,6 +18,7 @@ class ControlMode(Enum):
     IDLE = "idle"
     VELOCITY = "velocity"
     TORQUE = "torque"
+    POSITION = "position"
 
 
 @dataclass
@@ -63,9 +64,41 @@ class HardwareInterface(ABC):
         ...
 
     @abstractmethod
+    def set_position_target(
+        self,
+        turns: float,
+        move_velocity: float,
+        accel_decel: float,
+        torque_limit: float = None,
+    ) -> None:
+        """Command a trapezoidal move to an *absolute* position (turns), at
+        the given cruise velocity (turns/s) and accel/decel rate (turns/s^2,
+        applied symmetrically to both). PositionMode (core/control/modes.py)
+        is responsible for turning a user-facing *relative* move into this
+        absolute target — this layer only ever deals in absolute positions,
+        matching every other HardwareInterface method. `torque_limit`, if
+        given, overrides the currently configured torque limit for the
+        move (None leaves whatever's already configured untouched)."""
+        ...
+
+    @abstractmethod
     def stop(self) -> None:
         """Set target to 0 and request idle. Must be safe to call at any
         time, from any thread, repeatedly — including when not connected."""
+        ...
+
+    @abstractmethod
+    def set_current_limit(self, amps: float) -> None:
+        """Live current limit (A) — added for the Exercise tab's homing mode
+        (exercise_tab_build_spec_layerA.md §3.1/§4 item 4), which needs to
+        temporarily lower this below the board's normal operating limit
+        during a blind reel-in, then restore it. Unlike set_velocity_target/
+        set_torque_target this isn't a per-tick control target — callers set
+        it once before a homing run and once again to restore it. See
+        odrive_hw.py's connect() for the reassert-on-connect backstop that
+        guarantees a skipped restore (e.g. an abort mid-homing that tears
+        the session down before cleanup runs) can never leak a lowered limit
+        into a later session."""
         ...
 
     @abstractmethod

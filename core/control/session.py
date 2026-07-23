@@ -61,12 +61,21 @@ class ControlSession:
         self,
         hardware_source: str = "sim",
         hardware_factories: Optional[Dict[str, Callable[[], HardwareInterface]]] = None,
+        mode_factories: Optional[Dict[str, Callable[[], BaseMode]]] = None,
         register_atexit: bool = True,
     ):
         if hardware_source not in HARDWARE_SOURCES:
             raise ValueError(f"Unknown hardware source: {hardware_source}")
         self._hardware_factories = hardware_factories or DEFAULT_HARDWARE_FACTORIES
         self._hardware_source = hardware_source
+        # Overridable the same way hardware_factories is (Exercise tab, spec
+        # exercise_tab_build_spec_layerA.md §2.2/§6): ExerciseMode needs a
+        # CableState injected at construction to hold home/max across a
+        # start()/stop() cycle (this session destroys _mode_handler on
+        # stop(), but the spec requires "Reset Position" to work on a still-
+        # valid home while idle) -- mode_cls() alone can't do that. See
+        # docs/decisions.md.
+        self._mode_factories = mode_factories or MODES_BY_NAME
 
         self._lock = threading.RLock()
         self._hardware: Optional[HardwareInterface] = None
@@ -108,10 +117,10 @@ class ControlSession:
             if self._running:
                 raise RuntimeError("A control session is already running")
 
-            mode_cls = MODES_BY_NAME.get(mode)
-            if mode_cls is None:
-                raise ValueError(f"Unknown mode: {mode!r} (expected one of {list(MODES_BY_NAME)})")
-            mode_handler = mode_cls()
+            mode_factory = self._mode_factories.get(mode)
+            if mode_factory is None:
+                raise ValueError(f"Unknown mode: {mode!r} (expected one of {list(self._mode_factories)})")
+            mode_handler = mode_factory()
             target_value = mode_handler.validate_target(target)
 
             factory = self._hardware_factories[self._hardware_source]

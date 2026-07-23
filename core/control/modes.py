@@ -86,6 +86,81 @@ class TorqueMode(BaseMode):
         hardware.set_torque_target(value)
 
 
+class PositionMode(BaseMode):
+    """Trapezoidal position moves. Unlike Velocity/Torque, the target is a
+    small dict, not a bare float — {"position", "move_velocity",
+    "accel_decel", "torque_limit"?} — since a move needs more than just a
+    destination (see HardwareInterface.set_position_target's docstring for
+    what each maps to on the hardware).
+
+    "position" is a *relative* move (spec: how far to move from wherever the
+    axis is right now), resolved to an absolute target fresh on every
+    apply_target() call — both the initial start() and any later
+    set_target() retarget — by reading the hardware's current position at
+    that moment. This mode intentionally does not fight ODrive's own
+    closed-loop hold once the move completes: entering position control +
+    reaching the target is *itself* what holds it there, no extra code
+    needed here.
+    """
+
+    hardware_mode = ControlMode.POSITION
+    unit = "turns"
+
+    def __init__(self):
+        self._last_absolute_target = None
+
+    def validate_target(self, value) -> Dict[str, Any]:
+        if not isinstance(value, dict):
+            raise TypeError(f"Position target must be a dict, got {value!r}")
+
+        def _num(key, required=True, default=None):
+            v = value.get(key, default)
+            if v is None:
+                if required:
+                    raise ValueError(f"Position target missing required field '{key}'")
+                return None
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise TypeError(f"Position target field '{key}' must be numeric, got {v!r}")
+            return float(v)
+
+        position = _num("position")
+        move_velocity = _num("move_velocity")
+        if move_velocity <= 0:
+            raise ValueError(f"move_velocity must be positive, got {move_velocity!r}")
+        accel_decel = _num("accel_decel")
+        if accel_decel <= 0:
+            raise ValueError(f"accel_decel must be positive, got {accel_decel!r}")
+        torque_limit = _num("torque_limit", required=False)
+        if torque_limit is not None and torque_limit < 0:
+            raise ValueError(f"torque_limit must be non-negative, got {torque_limit!r}")
+
+        return {
+            "position": position,
+            "move_velocity": move_velocity,
+            "accel_decel": accel_decel,
+            "torque_limit": torque_limit,
+        }
+
+    def apply_target(self, hardware: HardwareInterface, value: Dict[str, Any]) -> None:
+        current_position = hardware.get_state().position
+        absolute = current_position + value["position"]
+        self._last_absolute_target = absolute
+        hardware.set_position_target(
+            absolute,
+            move_velocity=value["move_velocity"],
+            accel_decel=value["accel_decel"],
+            torque_limit=value["torque_limit"],
+        )
+
+    def status_target(self, validated_value: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "position": self._last_absolute_target,
+            "move_velocity": validated_value["move_velocity"],
+            "accel_decel": validated_value["accel_decel"],
+            "torque_limit": validated_value["torque_limit"],
+        }
+
+
 class ProfileMode(BaseMode):
     """Resistance profiles run as a third mode inside the existing 50 Hz
     ControlSession loop, not a new thread (spec §3 — the one real
@@ -172,5 +247,6 @@ class ProfileMode(BaseMode):
 MODES_BY_NAME = {
     "velocity": VelocityMode,
     "torque": TorqueMode,
+    "position": PositionMode,
     "profile": ProfileMode,
 }

@@ -33,17 +33,36 @@ MOTOR_TYPE_HIGH_CURRENT = 0  # odrive.enums.MOTOR_TYPE_HIGH_CURRENT
 # typical hobby aircraft/actuator motors. These values are conservative starting
 # points confirmed against a reference config written specifically for hoverboard
 # motors on ODrive v3.6 (see config/odrive_config.py for full annotations).
-MOTOR_CURRENT_LIM = 10.0  # A, conservative first pass
+MOTOR_CURRENT_LIM = 15.0  # A — live-tuned at the bench 21 July 2026 (was 10.0 conservative
+                          # first pass); still conservative/bench-safe. See docs/decisions.md
+                          # ("Live gain tuning" entry). May need revisiting once real cable
+                          # load (not a free-spinning wheel) is introduced in 2A.
 MOTOR_REQUESTED_CURRENT_RANGE = 25.0
+# NOTE: config/odrive_config.py's encoder offset calibration retry loop (open item
+# #14) has a tier-2 diagnostic path that temporarily lowers the live board's
+# calibration_current to 3.0 if 5 attempts at this default all fail. That's a
+# runtime experiment scoped to that script's retry loop, not a change to this
+# project-wide default — if a live board dump ever shows 3.0 here, that's why.
 MOTOR_CALIBRATION_CURRENT = 5.0
 MOTOR_RESISTANCE_CALIB_MAX_VOLTAGE = 4.0
 MOTOR_CURRENT_CONTROL_BANDWIDTH = 100  # reduced from ODrive's default for stability
                                        # given this motor's higher inductance
 
-# TODO(2A): placeholder pending motor characterisation (open item #2) — a rough
-# ballpark for a hoverboard hub motor, not measured on this specific unit. Used
-# by core/hardware to compute torque_est = MOTOR_TORQUE_CONSTANT * current_iq.
-MOTOR_TORQUE_CONSTANT = 0.06  # Nm/A, placeholder
+# Fallback estimate carried over from Layer B WHAT planning (23 July 2026,
+# exercise_tab_WHAT_plan.md §4.6): 8.27 / 16, using ODrive's published
+# hoverboard-motor KV fallback of ~16. This replaces the old 0.06 placeholder,
+# which was wrong by roughly an order of magnitude. Still a FALLBACK ESTIMATE,
+# NOT a bench-measured value — the hand-spin KV measurement (open item #13) is
+# the trustworthy path before this number is relied on for any reported
+# result. Used by core/hardware to compute torque_est = MOTOR_TORQUE_CONSTANT
+# * current_iq, and (Layer A, exercise_tab_build_spec_layerA.md §3.2) as the
+# one force->torque conversion site alongside SPOOL_RADIUS_M for
+# CALIB_HOLD_FORCE_N. NOTE: raising this also raises OdriveHardware's derived
+# torque clamp ceiling (current_lim * torque_constant) on the Control/Profiles
+# tabs' TorqueMode/ProfileMode — a real, visible, spec-mandated behavior
+# change on those tabs, not just an Exercise-tab-local one (docs/decisions.md,
+# "Exercise tab Layer A" entry).
+MOTOR_TORQUE_CONSTANT = 0.516875  # Nm/A, fallback estimate (8.27 / 16)
 
 # --------------------------------------------------------------------------
 # Encoder — onboard AS5047P magnetic encoder (SPI, absolute)
@@ -53,18 +72,28 @@ ENCODER_MODE_SPI_ABS_AMS = 257  # odrive.enums.ENCODER_MODE_SPI_ABS_AMS
 # from genuine ODrive Pro/S1 pin numbers.
 ENCODER_ABS_SPI_CS_GPIO_PIN = 7
 ENCODER_CPR = 16384  # AS5047P is 14-bit -> 2^14
+# NOTE: same tier-2 diagnostic path as MOTOR_CALIBRATION_CURRENT above (open item
+# #14) temporarily lowers encoder.config.bandwidth to 1000 on the live board if the
+# tier-1 retry loop exhausts all 5 attempts at this default. If a live board dump
+# ever shows 1000 here, see the retry loop in config/odrive_config.py, not this file.
 ENCODER_BANDWIDTH = 3000
 ENCODER_CALIB_RANGE = 10
 
 # --------------------------------------------------------------------------
-# Controller — conservative starting points, not tuned values
+# Controller — live-tuned at the bench, 21 July 2026 (open item #7, resolved)
 # --------------------------------------------------------------------------
+# These are no longer generic placeholders — they were tuned live at the bench
+# with a working saved encoder calibration, starting conservative and stepping
+# up gain-by-gain only once each step was confirmed smooth (no oscillation, no
+# overshoot). Full session writeup: docs/decisions.md ("Live gain tuning" entry,
+# 21 July 2026). Caveat: tuned against a free-spinning wheel with no cable load —
+# may still need re-tuning once real cable load is introduced in later 2A work.
 CONTROL_MODE_POSITION_CONTROL = 3  # odrive.enums.CONTROL_MODE_POSITION_CONTROL
 INPUT_MODE_TRAP_TRAJ = 5  # odrive.enums.INPUT_MODE_TRAP_TRAJ
 CONTROLLER_VEL_LIMIT = 2.0  # turns/s
-CONTROLLER_POS_GAIN = 1.0
-CONTROLLER_VEL_GAIN = 0.02
-CONTROLLER_VEL_INTEGRATOR_GAIN = 0.0
+CONTROLLER_POS_GAIN = 6.0
+CONTROLLER_VEL_GAIN = 0.05
+CONTROLLER_VEL_INTEGRATOR_GAIN = 0.1
 
 TRAP_TRAJ_VEL_LIMIT = 1.0  # turns/s
 TRAP_TRAJ_ACCEL_LIMIT = 1.0  # turns/s^2
@@ -95,6 +124,86 @@ PHASE_VEL_THRESHOLD_TURNS_S = 0.05  # |v| below this counts as "at rest" (a hold
 PHASE_HYSTERESIS_TURNS_S = 0.02  # extra margin required to leave a hold/reverse
 REP_EWMA_ALPHA = 0.05  # position EWMA smoothing factor, applied once per 50 Hz tick
 REP_PROXIMITY_TURNS = 0.1  # how close position must return to the EWMA to count a rep
+
+# --------------------------------------------------------------------------
+# Exercise tab, Layer A (cable-attached positioning & safety) — tuning values.
+# All chosen against this board's live config/gains as of 23 July 2026
+# (CONTROLLER_VEL_LIMIT=2.0 turns/s, TRAP_TRAJ_VEL_LIMIT=1.0 turns/s,
+# MOTOR_CURRENT_LIM=15.0A, SPOOL_RADIUS_M=0.05m). Full reasoning for each in
+# docs/decisions.md ("Exercise tab Layer A" entry) — these are exactly the
+# values the bench will end up re-tuning once a cable is actually attached.
+# --------------------------------------------------------------------------
+
+# Homing — slow current-limited reel-in until the cable goes taut.
+HOMING_CURRENT_THRESHOLD_A = 0.8  # user-specified starting point (spec §5)
+HOMING_CURRENT_LIMIT_A = 3.0  # ~3.75x margin above threshold, 5x below the
+                              # 15A operating limit — a snag during the blind
+                              # reel-in phase can't develop full torque.
+HOMING_VELOCITY_TURNS_S = 0.15  # ~15% of TRAP_TRAJ_VEL_LIMIT; at
+                                # SPOOL_RADIUS_M=0.05m this is ~4.7 cm/s cable
+                                # speed — slow enough to watch and abort by
+                                # hand on the first live run (spec §10).
+HOMING_DEBOUNCE_SAMPLES = 5  # 100ms at 50Hz — filters single-sample
+                             # transients without meaningfully delaying
+                             # detection at HOMING_VELOCITY_TURNS_S.
+HOMING_STARTUP_GRACE_S = 0.3  # 15 ticks at 50Hz; generous margin over typical
+                              # BLDC current inrush settling time.
+HOMING_MAX_TRAVEL_TURNS = 50.0  # ~15.7m of cable at SPOOL_RADIUS_M=0.05m —
+                                # a generous backstop bound (real cable
+                                # machines run <3m), not a tight one; the time
+                                # bound below is the practically-relevant one.
+HOMING_TIMEOUT_S = 90.0  # ~64s worst-case reel-in from a generous 3m
+                         # real-world max extension at HOMING_VELOCITY_TURNS_S,
+                         # plus margin.
+
+# Max-extension calibration — light constant tension while the user pulls.
+CALIB_HOLD_FORCE_N = 3.0  # single-digit N, trivially overcome by hand; enough
+                          # to keep a lightweight cable/webbing taut.
+MAX_EXTENSION_SAFETY_MARGIN_M = 0.05  # 5cm inside the physically marked point.
+MAX_EXTENSION_MIN_TRAVEL_TURNS = 0.5  # ~15.7cm of cable at SPOOL_RADIUS_M --
+                                      # below this, a marked max is rejected
+                                      # as implausibly close to home (spec
+                                      # §3.2) rather than stored as a
+                                      # degenerate/inverted travel range.
+
+# Length-based control — runtime out-of-range guard (spec §3.4 mechanism 2).
+POSITION_GUARD_TOLERANCE_TURNS = 0.05  # ~1.57cm of cable at SPOOL_RADIUS_M —
+                                       # small enough to catch real problems
+                                       # quickly, larger than ordinary
+                                       # position-control settling/overshoot.
+
+# Spool geometry correction factor k (r_eff(theta) = r0 + k*theta).
+SPOOL_CORRECTION_K_DEFAULT = 0.0  # un-calibrated default = fixed-radius model
+SPOOL_CORRECTION_K_BOUNDS = (-0.0005, 0.0005)  # m/rad. Two constraints set
+                                               # this: (1) physical plausibility
+                                               # -- a several-mm cable/webbing
+                                               # thickness spread over a full
+                                               # wrap (2*pi rad) implies |k| on
+                                               # the order of 1e-4-1e-3 m/rad;
+                                               # (2) the r_eff=r0+k*theta model
+                                               # must stay non-degenerate
+                                               # (r_eff > 0) across the whole
+                                               # plausible operating range, not
+                                               # just near home -- at this
+                                               # bound, r0=0.05m stays positive
+                                               # out to theta =
+                                               # r0/0.0005 ~= 100 rad (~16
+                                               # turns, ~5m of cable at
+                                               # SPOOL_RADIUS_M), comfortably
+                                               # beyond any realistic cable
+                                               # machine's travel. A looser
+                                               # bound (originally +-0.01) let
+                                               # a legitimately-in-range k
+                                               # break the model within a
+                                               # single turn of travel --
+                                               # caught by core/tests/
+                                               # test_geometry.py's round-trip
+                                               # property test, not by
+                                               # inspection.
+SPOOL_CALIBRATION_MIN_THETA_M_RAD = 1.0  # below this, L ~= r0*theta dominates
+                                         # and k's contribution is too small
+                                         # relative to measurement error to
+                                         # reliably back out (spec §3.3 guard).
 
 # --------------------------------------------------------------------------
 # Axis — axis0 only; axis1 is a ghost node
@@ -173,6 +282,23 @@ def as_dict():
             "trap_traj_vel_limit": TRAP_TRAJ_VEL_LIMIT,
             "trap_traj_accel_limit": TRAP_TRAJ_ACCEL_LIMIT,
             "trap_traj_decel_limit": TRAP_TRAJ_DECEL_LIMIT,
+        },
+        "exercise": {
+            "homing_current_threshold_a": HOMING_CURRENT_THRESHOLD_A,
+            "homing_current_limit_a": HOMING_CURRENT_LIMIT_A,
+            "homing_velocity_turns_s": HOMING_VELOCITY_TURNS_S,
+            "homing_debounce_samples": HOMING_DEBOUNCE_SAMPLES,
+            "homing_startup_grace_s": HOMING_STARTUP_GRACE_S,
+            "homing_max_travel_turns": HOMING_MAX_TRAVEL_TURNS,
+            "homing_timeout_s": HOMING_TIMEOUT_S,
+            "calib_hold_force_n": CALIB_HOLD_FORCE_N,
+            "max_extension_safety_margin_m": MAX_EXTENSION_SAFETY_MARGIN_M,
+            "max_extension_min_travel_turns": MAX_EXTENSION_MIN_TRAVEL_TURNS,
+            "position_guard_tolerance_turns": POSITION_GUARD_TOLERANCE_TURNS,
+            "spool_correction_k_default": SPOOL_CORRECTION_K_DEFAULT,
+            "spool_correction_k_bounds": list(SPOOL_CORRECTION_K_BOUNDS),
+            "spool_calibration_min_theta_m_rad": SPOOL_CALIBRATION_MIN_THETA_M_RAD,
+            "spool_radius_m": SPOOL_RADIUS_M,
         },
         "axis": {
             "active_axis": ACTIVE_AXIS,

@@ -48,3 +48,16 @@ def test_odrive_hw_stop_is_safe_before_connect():
     hw = OdriveHardware()
     hw.stop()  # must not raise
     assert hw.get_errors() == []
+
+
+def test_sim_set_current_limit_is_stored():
+    hw = SimHardware()
+    hw.connect()
+    hw.set_current_limit(3.0)
+    assert hw._current_limit_a == 3.0
+
+
+def test_odrive_hw_set_current_limit_requires_connection():
+    hw = OdriveHardware()
+    with pytest.raises(RuntimeError):
+        hw.set_current_limit(3.0)

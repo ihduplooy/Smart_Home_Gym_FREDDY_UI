@@ -43,6 +43,12 @@ class _FakeHardwareBase(HardwareInterface):
     def set_torque_target(self, nm):
         pass
 
+    def set_position_target(self, turns, move_velocity, accel_decel, torque_limit=None):
+        pass
+
+    def set_current_limit(self, amps):
+        pass
+
     def stop(self):
         self.stop_calls += 1
 
