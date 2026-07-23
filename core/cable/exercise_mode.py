@@ -170,7 +170,7 @@ class ExerciseMode(BaseMode):
         # Tension pulls toward home (reel-in direction) so the cable stays
         # taut against the user pulling it out -- the one force->torque
         # conversion site (spec §3.2), reusing core/profiles/units.py.
-        hold_torque = force_to_torque(board_constants.CALIB_HOLD_FORCE_N, r0=self.cable_state.r0)
+        hold_torque = force_to_torque(self.cable_state.calib_hold_force_n, r0=self.cable_state.r0)
         hardware.set_torque_target(-CABLE_SIGN * hold_torque)
         self._action = "max_calibrating"
         self.cable_state.max_calibration_in_progress = True

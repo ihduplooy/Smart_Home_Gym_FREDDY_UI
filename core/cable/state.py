@@ -25,8 +25,9 @@ Persistence split (spec §6), enforced here:
     physical-spool-specific state, not source), loaded at construction,
     written back only on an explicit change.
 
-Live-adjustable homing settings (velocity/current threshold/current limit)
-and spool radius added 23 July 2026, after the first live-hardware session:
+Live-adjustable homing settings (velocity/current threshold/current limit),
+spool radius, and max-extension calibration hold force added 23 July 2026,
+after the first live-hardware session:
 the bench-tuned board_constants.py defaults didn't match what the real
 board needed closely enough to be useful as fixed values, and the user
 explicitly asked for on-screen control over them rather than editing
@@ -63,6 +64,7 @@ _PERSISTED_DEFAULTS = {
     "homing_current_threshold_a": lambda: board_constants.HOMING_CURRENT_THRESHOLD_A,
     "homing_velocity_turns_s": lambda: board_constants.HOMING_VELOCITY_TURNS_S,
     "homing_current_limit_a": lambda: board_constants.HOMING_CURRENT_LIMIT_A,
+    "calib_hold_force_n": lambda: board_constants.CALIB_HOLD_FORCE_N,
 }
 
 
@@ -75,6 +77,7 @@ class CableState:
         self.homing_current_threshold_a = settings["homing_current_threshold_a"]
         self.homing_velocity_turns_s = settings["homing_velocity_turns_s"]
         self.homing_current_limit_a = settings["homing_current_limit_a"]
+        self.calib_hold_force_n = settings["calib_hold_force_n"]
 
         # In-memory only -- see module docstring.
         self.home_turns: Optional[float] = None
@@ -157,6 +160,12 @@ class CableState:
         self.homing_current_threshold_a = new_threshold
         self.homing_velocity_turns_s = new_velocity
         self.homing_current_limit_a = new_limit
+        self._save_settings()
+
+    def set_calib_hold_force(self, force_n: float) -> None:
+        if force_n <= 0:
+            raise ValueError(f"calibration hold force must be positive, got {force_n!r}")
+        self.calib_hold_force_n = force_n
         self._save_settings()
 
     def _load_settings(self) -> dict:

@@ -156,3 +156,26 @@ def test_set_homing_settings_rejected_call_does_not_partially_apply(tmp_path):
     with pytest.raises(ValueError):
         state.set_homing_settings(current_threshold_a=5.0, current_limit_a=1.0)  # limit < threshold
     assert state.homing_current_threshold_a == original_threshold  # unchanged, not half-applied
+
+
+# ---- live-adjustable max-extension calibration hold force ----
+
+def test_fresh_state_has_default_calib_hold_force(tmp_path):
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path))
+    assert state.calib_hold_force_n == board_constants.CALIB_HOLD_FORCE_N
+
+
+def test_set_calib_hold_force_persists_across_a_fresh_instance(tmp_path):
+    sidecar = _tmp_sidecar(tmp_path)
+    state1 = CableState(sidecar_path=sidecar)
+    state1.set_calib_hold_force(4.5)
+    state2 = CableState(sidecar_path=sidecar)
+    assert state2.calib_hold_force_n == 4.5
+
+
+def test_set_calib_hold_force_rejects_nonpositive(tmp_path):
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path))
+    with pytest.raises(ValueError):
+        state.set_calib_hold_force(0.0)
+    with pytest.raises(ValueError):
+        state.set_calib_hold_force(-1.0)

@@ -45,6 +45,7 @@ def _cable_status_dict() -> dict:
         "homing_current_threshold_a": cs.homing_current_threshold_a,
         "homing_velocity_turns_s": cs.homing_velocity_turns_s,
         "homing_current_limit_a": cs.homing_current_limit_a,
+        "calib_hold_force_n": cs.calib_hold_force_n,
         # Zeroed-at-home position, distinct from the raw absolute encoder
         # reading in latest_sample.position -- requested 23 July 2026 (the
         # raw encoder value is whatever arbitrary number it was at power-on,
@@ -208,6 +209,22 @@ def register(app) -> None:
             return jsonify({"error": "r0 required"}), 400
         try:
             control_routes.cable_state.set_r0(float(r0))
+            return jsonify({"cable": _cable_status_dict()})
+        except (ValueError, TypeError) as e:
+            return jsonify({"error": str(e)}), 400
+
+    @app.route("/api/exercise/update_calib_hold_force", methods=["POST"])
+    def exercise_update_calib_hold_force():
+        """Live-adjustable max-extension calibration hold force (requested
+        23 July 2026) -- was a fixed CALIB_HOLD_FORCE_N constant (spec §3.2:
+        must stay trivially overcome by hand; this route doesn't relax that
+        expectation, just makes the exact value adjustable)."""
+        body = request.get_json(silent=True) or {}
+        force_n = body.get("force_n")
+        if force_n is None:
+            return jsonify({"error": "force_n required"}), 400
+        try:
+            control_routes.cable_state.set_calib_hold_force(float(force_n))
             return jsonify({"cable": _cable_status_dict()})
         except (ValueError, TypeError) as e:
             return jsonify({"error": str(e)}), 400
