@@ -14,6 +14,7 @@ import pytest
 
 from config import board_constants
 from core.cable.force_mode import ForceMode, ForceState
+from core.cable.geometry import length_from_turns_delta, turns_delta_from_length
 from core.cable.state import CableState
 from core.control.session import ControlSession
 from core.control.modes import MODES_BY_NAME
@@ -395,6 +396,148 @@ def test_force_tapers_approaching_max_extension(tmp_path, monkeypatch):
 
     assert far_force > near_force
     assert near_force < 10.0
+
+
+# ---- configurable start/end sub-range (requested 23 July 2026) ----
+
+def test_engage_without_range_defaults_to_full_home_to_max(tmp_path):
+    mode = _homed_and_maxed_mode(tmp_path, home=0.0, max_turns=20.0)
+    hw = RecordingHardware()
+    _arm(mode, hw)
+    extra = mode.apply_target(hw, mode.validate_target({"action": "engage", "mode": "constant", "force_n": 50.0}))
+    extra = mode.tick(hw, _sample(DT, 0.0, 0.0))
+    assert extra["range_start_length_m"] == pytest.approx(0.0)
+    assert extra["range_end_length_m"] == pytest.approx(length_from_turns_delta(20.0, mode.cable_state.r0, mode.cable_state.k))
+
+
+def test_engage_with_custom_range_converts_lengths_to_turns(tmp_path):
+    mode = _homed_and_maxed_mode(tmp_path, home=0.0, max_turns=20.0)
+    hw = RecordingHardware()
+    _arm(mode, hw)
+    mode.apply_target(hw, mode.validate_target(
+        {"action": "engage", "mode": "constant", "force_n": 50.0, "start_length_m": 1.0, "end_length_m": 2.0}
+    ))
+    extra = mode.tick(hw, _sample(DT, 0.0, 0.0))
+    assert extra["range_start_length_m"] == pytest.approx(1.0, abs=1e-6)
+    assert extra["range_end_length_m"] == pytest.approx(2.0, abs=1e-6)
+
+
+def test_engage_rejects_range_start_beyond_calibrated_max(tmp_path):
+    mode = _homed_and_maxed_mode(tmp_path, home=0.0, max_turns=20.0)
+    hw = RecordingHardware()
+    _arm(mode, hw)
+    with pytest.raises(ValueError):
+        mode.apply_target(hw, mode.validate_target(
+            {"action": "engage", "mode": "constant", "force_n": 50.0, "start_length_m": 10.0}
+        ))
+
+
+def test_engage_rejects_zero_width_range(tmp_path):
+    mode = _homed_and_maxed_mode(tmp_path, home=0.0, max_turns=20.0)
+    hw = RecordingHardware()
+    _arm(mode, hw)
+    with pytest.raises(ValueError):
+        mode.apply_target(hw, mode.validate_target(
+            {"action": "engage", "mode": "constant", "force_n": 50.0, "start_length_m": 1.0, "end_length_m": 1.0}
+        ))
+
+
+def test_default_range_applies_full_force_at_home_no_start_side_taper(tmp_path, monkeypatch):
+    _fast_ramp(monkeypatch)
+    mode = _homed_and_maxed_mode(tmp_path, home=0.0, max_turns=20.0)
+    hw = RecordingHardware()
+    _arm(mode, hw)
+    mode.apply_target(hw, mode.validate_target({"action": "engage", "mode": "constant", "force_n": 50.0}))
+    t = 0.0
+    for _ in range(20):
+        t += DT
+        hw.sample = _sample(t, 0.0, 0.0)  # right at home the whole time
+        extra = mode.tick(hw, hw.sample)
+    assert extra["commanded_force_n"] == pytest.approx(50.0, rel=0.05)
+
+
+def test_custom_range_tapers_at_start_edge(tmp_path, monkeypatch):
+    _fast_ramp(monkeypatch)
+    monkeypatch.setattr(board_constants, "MAX_EXTENSION_FORCE_TAPER_M", 0.15)
+    mode = _homed_and_maxed_mode(tmp_path, home=0.0, max_turns=20.0)
+    r0, k = mode.cable_state.r0, mode.cable_state.k
+    start_turns = turns_delta_from_length(1.0, r0, k)
+    hw = RecordingHardware()
+    _arm(mode, hw)
+    mode.apply_target(hw, mode.validate_target(
+        {"action": "engage", "mode": "constant", "force_n": 100.0, "start_length_m": 1.0}
+    ))
+
+    # Kept moving (concentric direction) throughout, not stationary, so the
+    # phase detector never enters a hold and transitions ENGAGED_CONCENTRIC
+    # -> HOLDING (which would otherwise force target down to FORCE_MIN_N and
+    # confound this taper-specific assertion).
+    moving_velocity = CABLE_SIGN * 0.5
+
+    t = 0.0
+    for _ in range(20):
+        t += DT
+        hw.sample = _sample(t, start_turns, moving_velocity)  # sitting right at the start edge
+        extra = mode.tick(hw, hw.sample)
+    at_edge_force = extra["commanded_force_n"]
+
+    well_past_start_turns = turns_delta_from_length(1.0 + 1.0, r0, k)  # well beyond the taper distance
+    for _ in range(20):
+        t += DT
+        hw.sample = _sample(t, well_past_start_turns, moving_velocity)
+        extra = mode.tick(hw, hw.sample)
+    past_taper_force = extra["commanded_force_n"]
+
+    assert at_edge_force < 10.0
+    assert past_taper_force > at_edge_force
+    assert past_taper_force == pytest.approx(100.0, rel=0.05)
+
+
+def test_custom_range_tapers_at_end_edge(tmp_path, monkeypatch):
+    _fast_ramp(monkeypatch)
+    monkeypatch.setattr(board_constants, "MAX_EXTENSION_FORCE_TAPER_M", 0.15)
+    mode = _homed_and_maxed_mode(tmp_path, home=0.0, max_turns=20.0)
+    r0, k = mode.cable_state.r0, mode.cable_state.k
+    end_turns = turns_delta_from_length(2.0, r0, k)
+    hw = RecordingHardware()
+    _arm(mode, hw)
+    mode.apply_target(hw, mode.validate_target(
+        {"action": "engage", "mode": "constant", "force_n": 100.0, "end_length_m": 2.0}
+    ))
+
+    moving_velocity = CABLE_SIGN * 0.5  # avoid the phase detector's hold transition, see sibling test
+    well_before_end_turns = turns_delta_from_length(1.0, r0, k)
+    t = 0.0
+    for _ in range(20):
+        t += DT
+        hw.sample = _sample(t, well_before_end_turns, moving_velocity)
+        extra = mode.tick(hw, hw.sample)
+    before_end_force = extra["commanded_force_n"]
+
+    for _ in range(20):
+        t += DT
+        hw.sample = _sample(t, end_turns, moving_velocity)  # right at the (custom, short-of-max) end edge
+        extra = mode.tick(hw, hw.sample)
+    at_end_force = extra["commanded_force_n"]
+
+    assert before_end_force == pytest.approx(100.0, rel=0.05)
+    assert at_end_force < 10.0
+
+
+def test_update_params_can_change_range_while_engaged(tmp_path, monkeypatch):
+    _fast_ramp(monkeypatch)
+    monkeypatch.setattr(board_constants, "HOLD_DURATION_S", 10_000.0)
+    mode = _homed_and_maxed_mode(tmp_path, home=0.0, max_turns=20.0)
+    hw = RecordingHardware()
+    _arm(mode, hw)
+    mode.apply_target(hw, mode.validate_target({"action": "engage", "mode": "constant", "force_n": 50.0}))
+
+    mode.apply_target(hw, mode.validate_target(
+        {"action": "update_params", "mode": "constant", "force_n": 50.0, "start_length_m": 0.5, "end_length_m": 3.0}
+    ))
+    extra = mode.tick(hw, _sample(DT, 0.0, 0.0))
+    assert extra["range_start_length_m"] == pytest.approx(0.5, abs=1e-6)
+    assert extra["range_end_length_m"] == pytest.approx(3.0, abs=1e-6)
 
 
 # ---- §6 item 8: fault zeroes torque and requires explicit manual resume ----

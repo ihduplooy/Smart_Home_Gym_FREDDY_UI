@@ -32,6 +32,7 @@ position-is-wrong failure) triggers the full-session-stop mechanism.
 """
 
 import logging
+import math
 from enum import Enum
 from typing import Any, Dict
 
@@ -41,7 +42,7 @@ from core.profiles.detectors import CABLE_SIGN, Phase, PhaseDetector
 from core.profiles.units import force_to_torque, torque_to_force
 
 from ..control.modes import BaseMode
-from .geometry import length_from_turns_delta, speed_m_s_from_turns_s
+from .geometry import length_from_turns_delta, speed_m_s_from_turns_s, turns_delta_from_length
 from .governor import governed_force
 from .letgo import LetGoDetector
 from .limits import check_runtime_guard, validate_homed
@@ -83,6 +84,14 @@ class ForceMode(BaseMode):
         # user-facing "how much resistance" input regardless of mode.
         self._force_n_param = board_constants.FORCE_MIN_N
         self._isokinetic_velocity_target_turns_s = board_constants.ISOKINETIC_VELOCITY_TARGET_TURNS_S
+        # Sub-range of the home->max travel where resistance is active
+        # (requested 23 July 2026 -- "we don't always want the max
+        # extension"); absolute encoder turns, set at engage/update_params
+        # time. None until the first engage -- defaults to the full
+        # home->max range there, so an engage with no range given behaves
+        # exactly as before this feature existed.
+        self._range_start_turns = None
+        self._range_end_turns = None
 
         self._filtered_velocity_turns_s = None
         self._commanded_force_n = 0.0
@@ -185,6 +194,17 @@ class ForceMode(BaseMode):
         extra["regen_power_w"] = self._last_regen_power_w if self.state in _RESISTING_STATES else 0.0
         extra["power_limiter_active"] = self._power_limiter_active
         extra["fault_reason"] = self._last_fault_reason
+        if self._range_start_turns is not None and self._range_end_turns is not None:
+            home_turns = self.cable_state.home_turns
+            extra["range_start_length_m"] = length_from_turns_delta(
+                self._range_start_turns - home_turns, self.cable_state.r0, self.cable_state.k
+            )
+            extra["range_end_length_m"] = length_from_turns_delta(
+                self._range_end_turns - home_turns, self.cable_state.r0, self.cable_state.k
+            )
+        else:
+            extra["range_start_length_m"] = None
+            extra["range_end_length_m"] = None
         return extra
 
     # ---- action handlers ----
@@ -236,9 +256,49 @@ class ForceMode(BaseMode):
             if isinstance(velocity_target, bool) or not isinstance(velocity_target, (int, float)) or velocity_target <= 0:
                 raise ValueError(f"velocity_target_turns_s must be a positive number, got {velocity_target!r}")
 
+        # Sub-range of travel where resistance is active (spec: requested
+        # 23 July 2026). Omitted -> full home->max range, same as before
+        # this feature existed. Only meaningful once homed with max set --
+        # callers (engage) already require that; update_params reuses this
+        # same validation so a range can't be set from stale home/max either.
+        range_start_turns, range_end_turns = self._resolve_range(
+            value.get("start_length_m"), value.get("end_length_m")
+        )
+
         self._force_mode = mode
         self._force_n_param = float(force_n)
         self._isokinetic_velocity_target_turns_s = float(velocity_target)
+        self._range_start_turns = range_start_turns
+        self._range_end_turns = range_end_turns
+
+    def _resolve_range(self, start_length_m, end_length_m):
+        home_turns = self.cable_state.home_turns
+        max_turns = self.cable_state.max_turns
+
+        if start_length_m is None:
+            start_turns = home_turns
+        else:
+            if isinstance(start_length_m, bool) or not isinstance(start_length_m, (int, float)) or start_length_m < 0:
+                raise ValueError(f"start_length_m must be a non-negative number, got {start_length_m!r}")
+            start_turns = home_turns + CABLE_SIGN * turns_delta_from_length(start_length_m, self.cable_state.r0, self.cable_state.k)
+
+        if end_length_m is None:
+            end_turns = max_turns
+        else:
+            if isinstance(end_length_m, bool) or not isinstance(end_length_m, (int, float)) or end_length_m < 0:
+                raise ValueError(f"end_length_m must be a non-negative number, got {end_length_m!r}")
+            end_turns = home_turns + CABLE_SIGN * turns_delta_from_length(end_length_m, self.cable_state.r0, self.cable_state.k)
+
+        lo, hi = min(home_turns, max_turns), max(home_turns, max_turns)
+        start_clamped, end_clamped = sorted((start_turns, end_turns), key=lambda t: t * CABLE_SIGN)
+        if not (lo - 1e-9 <= start_clamped <= hi + 1e-9) or not (lo - 1e-9 <= end_clamped <= hi + 1e-9):
+            raise ValueError(
+                f"Force range must fall within the calibrated [home, max] travel -- "
+                f"got a range that falls outside it."
+            )
+        if abs(end_clamped - start_clamped) < 1e-9:
+            raise ValueError("Force range start and end must not be the same point.")
+        return start_clamped, end_clamped
 
     def _apply_disengage(self, hardware: HardwareInterface, value: Dict[str, Any]) -> None:
         if self.state not in _RESISTING_STATES:
@@ -301,12 +361,29 @@ class ForceMode(BaseMode):
             base_force = min(self._force_n_param, board_constants.FORCE_MAX_N)
 
         taper = 1.0
-        if self.cable_state.has_max:
-            turns_to_max = self.cable_state.max_turns - self.cable_state.home_turns
-            turns_to_current = sample.position - self.cable_state.home_turns
-            length_to_max = length_from_turns_delta(turns_to_max, self.cable_state.r0, self.cable_state.k)
-            length_to_current = length_from_turns_delta(turns_to_current, self.cable_state.r0, self.cable_state.k)
-            distance_to_limit_m = length_to_max - length_to_current
-            taper = taper_factor(distance_to_limit_m, board_constants.MAX_EXTENSION_FORCE_TAPER_M)
+        if self._range_start_turns is not None and self._range_end_turns is not None:
+            home_turns = self.cable_state.home_turns
+            r0, k = self.cable_state.r0, self.cable_state.k
+            length_to_current = length_from_turns_delta(sample.position - home_turns, r0, k)
+            length_to_end = length_from_turns_delta(self._range_end_turns - home_turns, r0, k)
+            # Two-edge taper (spec follow-up, requested 23 July 2026): the
+            # active range is now a configurable [start, end] sub-range of
+            # home->max, not always the full travel. The end edge always
+            # tapers (unchanged from the original max-extension taper -- a
+            # safety ease-off approaching the physical/enforced limit,
+            # default or not). The start edge only tapers when it's a real
+            # custom boundary away from home: home itself isn't a "soft"
+            # zone needing deceleration (no default range given must behave
+            # exactly as before this feature existed -- full force from the
+            # first tick, no home-side ramp).
+            distance_from_end_edge_m = length_to_end - length_to_current
+            end_taper = taper_factor(distance_from_end_edge_m, board_constants.MAX_EXTENSION_FORCE_TAPER_M)
+            if math.isclose(self._range_start_turns, home_turns, abs_tol=1e-9):
+                start_taper = 1.0
+            else:
+                length_to_start = length_from_turns_delta(self._range_start_turns - home_turns, r0, k)
+                distance_from_start_edge_m = length_to_current - length_to_start
+                start_taper = taper_factor(distance_from_start_edge_m, board_constants.MAX_EXTENSION_FORCE_TAPER_M)
+            taper = min(start_taper, end_taper)
 
         self._target_force_n = base_force * taper
