@@ -64,6 +64,17 @@ MOTOR_CURRENT_CONTROL_BANDWIDTH = 100  # reduced from ODrive's default for stabi
 # "Exercise tab Layer A" entry).
 MOTOR_TORQUE_CONSTANT = 0.516875  # Nm/A, fallback estimate (8.27 / 16)
 
+# Measured phase resistance — consistent across every motor calibration run
+# on this unit (Layer B §5.2, exercise_tab_build_spec_layerB.md). Distinct
+# from MOTOR_TORQUE_CONSTANT: this one is NOT an estimate, it's what
+# axis0.motor.config.phase_resistance reads after calibration, live-verified
+# via config/odrive_config.py's check_motor_calibration_sane() (docs/
+# decisions.md). Used by core/cable/power_limiter.py for the copper-loss
+# term (P_copper = 1.5 * Iq^2 * R_phase) in the regen power estimate — the
+# one thing standing between "most rep energy stays in the windings" and
+# "most rep energy hits the bus," per §5.2's break-even analysis.
+MOTOR_PHASE_RESISTANCE_OHM = 0.38  # ohm
+
 # --------------------------------------------------------------------------
 # Encoder — onboard AS5047P magnetic encoder (SPI, absolute)
 # --------------------------------------------------------------------------
@@ -99,9 +110,25 @@ TRAP_TRAJ_VEL_LIMIT = 1.0  # turns/s
 TRAP_TRAJ_ACCEL_LIMIT = 1.0  # turns/s^2
 TRAP_TRAJ_DECEL_LIMIT = 1.0  # turns/s^2
 
-# TODO(2A): enable_torque_mode_vel_limit — ODrive's torque mode velocity limiter
-# may fight a profile layer (Session 3's core/profiles/) doing its own
-# velocity-dependent control. Decision waits for real hardware in Phase 2A.
+# Open item #8, resolved (Layer B §3.1, exercise_tab_build_spec_layerB.md,
+# 23 July 2026): ODrive's torque-mode velocity limiter reduces commanded
+# torque based on velocity/vel_gain by default -- directly fights a
+# constant-force profile (pull faster, get less force, the opposite of the
+# intended behaviour). Decision: disable it and replace it with the
+# software governor (core/cable/governor.py) instead of leaving it as an
+# implicit consequence of some other write. This REMOVES ODrive's own
+# last-resort protection against a torque command running away in an
+# unloaded direction -- software now owns that entirely, which is why the
+# let-go detector (core/cable/letgo.py) and the velocity ceiling it enforces
+# are mandatory, not defensive extras. Verified property path:
+# axis{n}.controller.config.enable_torque_mode_vel_limit (BoolProperty, rw)
+# per the bundled odriveApiReference05x.json -- this property has not yet
+# been exercised against the real board by anything in this codebase (no
+# live dir() cross-check exists for it the way brake_resistance/
+# dc_max_negative_current/max_regen_current do); confirm it against
+# dir(axis0.controller.config) during the first live run, same caution
+# already applied elsewhere in this file.
+ENABLE_TORQUE_MODE_VEL_LIMIT = False
 
 # --------------------------------------------------------------------------
 # Resistance profile layer (Session 3) — tuning placeholders
@@ -241,6 +268,146 @@ SPOOL_CALIBRATION_MIN_THETA_M_RAD = 1.0  # below this, L ~= r0*theta dominates
                                          # reliably back out (spec §3.3 guard).
 
 # --------------------------------------------------------------------------
+# Exercise tab, Layer B Session B1 (concentric force feedback) — tuning
+# values. Chosen against this board's live config plus the measured
+# SPOOL_RADIUS_M=0.035m, MOTOR_PHASE_RESISTANCE_OHM=0.38ohm, and the still-
+# estimated MOTOR_TORQUE_CONSTANT=0.516875 (open item #13, unresolved).
+# Full reasoning for each in docs/decisions.md ("Exercise tab Layer B"
+# entry), including the §5.2 break-even power analysis these numbers feed.
+# Two rows from the spec's own §9 table are intentionally NOT added as new
+# constants here — see the comments at PHASE_VEL_THRESHOLD_TURNS_S (hold
+# detection) and FORCE_MIN_N (isokinetic force floor default) above/below.
+# --------------------------------------------------------------------------
+
+# Force ceiling/floor.
+FORCE_MAX_N = 150.0  # Hard ceiling on commanded cable force. Bound by two
+                     # independent things: (1) _TORQUE_LIMIT_NM (core/
+                     # hardware/odrive_hw.py) = MOTOR_CURRENT_LIM *
+                     # MOTOR_TORQUE_CONSTANT = 15A * 0.516875 = 7.753 Nm ->
+                     # F = torque/SPOOL_RADIUS_M ~= 221.5 N is the absolute
+                     # structural ceiling; (2) thermal -- at 150N, Iq~=10.16A,
+                     # P_copper~=58.8W continuously REGARDLESS of velocity
+                     # (heating the motor, not the bus -- see the
+                     # MOTOR_PHASE_RESISTANCE_OHM comment above), and this
+                     # board has no thermal sensing (open item #1). 150N sits
+                     # well below the structural ceiling (spec §9: "start
+                     # well below what the hardware can do") while still
+                     # being a meaningful heavy-pull force for early testing.
+                     # The §14 first-live-run protocol starts at the LOWEST
+                     # force and escalates by hand while checking motor
+                     # temperature -- this constant is the software ceiling
+                     # that testing approaches gradually, not a recommended
+                     # starting point.
+FORCE_MIN_N = 5.0  # Hold-state floor (spec §4.1: HOLDING drops to a low hold
+                   # force, never a hard zero -- that would drop the load).
+                   # Also reused, per spec §9's "F_base may be non-zero"
+                   # note, as ISOKINETIC's default force-floor constant --
+                   # no separate ISOKINETIC_FORCE_BASE_N added, since both
+                   # describe the identical physical concept: "enough tension
+                   # to not drop/slacken the load, low enough to be
+                   # harmless." Same order of magnitude as Layer A's
+                   # CALIB_HOLD_FORCE_N=3.0N, slightly higher since this hold
+                   # happens under a real workout load, not just a bare
+                   # cable during calibration.
+
+# Ramps (spec §4.2, §6 item 2: force ramps, never steps). Implemented as a
+# fixed slew RATE (FORCE_MAX_N / *_S), not a fixed duration re-normalized per
+# target -- deviation from the spec's literal "ramps ... over
+# FORCE_RAMP_IN_S" wording, logged in decisions.md. A rate-based ramp handles
+# engage, disengage, AND a live mid-ENGAGED retarget with one mechanism (no
+# ramp-start timestamp to track, no special-casing a target that changes
+# mid-ramp), and a smaller target than FORCE_MAX_N always ramps in *faster*
+# than FORCE_RAMP_IN_S seconds, never slower -- strictly safer than the
+# literal reading, never less safe.
+FORCE_RAMP_IN_S = 0.5  # Time a full 0->FORCE_MAX_N ramp would take.
+FORCE_RAMP_OUT_S = 0.5  # Symmetric with ramp-in -- ramping resistance out
+                        # too fast on disengage is a lesser hazard than
+                        # ramping it in too fast (it doesn't push/pull the
+                        # user unexpectedly), but there's no reason for it to
+                        # be faster; kept equal for a predictable feel.
+
+# Hold detection (spec §4.1, §9). HOLD_VELOCITY_THRESHOLD_TURNS_S is
+# intentionally NOT a new constant -- reuses PHASE_VEL_THRESHOLD_TURNS_S
+# directly, per the spec's own suggestion ("reuse the existing phase
+# detector's threshold if it fits rather than adding a parallel one"; see
+# core/profiles/detectors.py). ForceMode watches PhaseDetector's existing
+# TOP_HOLD/BOTTOM_HOLD classification (already hysteresis-tuned) and adds
+# only the duration gate below on top of it, rather than re-implementing
+# threshold/hysteresis logic a second time.
+HOLD_DURATION_S = 0.75  # How long continuously in a phase-detector hold
+                        # phase before Layer B's own HOLDING state is
+                        # entered -- long enough to distinguish a deliberate
+                        # pause from a quick rep turnaround, short enough not
+                        # to feel laggy.
+
+# Isokinetic governor (spec §4.3) — torque-domain velocity cap, no
+# integrator anywhere in this path (spec §6 item 5).
+ISOKINETIC_VELOCITY_TARGET_TURNS_S = 1.0  # Default speed cap. Half of
+                                          # CONTROLLER_VEL_LIMIT=2.0 turns/s
+                                          # (spec §9's suggested relation) —
+                                          # at SPOOL_RADIUS_M=0.035m this is
+                                          # ~22 cm/s, a moderate controlled
+                                          # training speed with headroom
+                                          # below the absolute ODrive ceiling.
+ISOKINETIC_GOVERNOR_GAIN = 150.0  # N per (turn/s) above target -- a firm,
+                                  # quickly-felt "wall": at FORCE_MIN_N=5.0
+                                  # base, exceeding the target by ~1 turn/s
+                                  # already reaches FORCE_MAX_N.
+ISOKINETIC_VELOCITY_FILTER_ALPHA = 0.3  # EWMA smoothing applied to the
+                                        # velocity estimate before it reaches
+                                        # the governor (spec §4.3: "filtering
+                                        # ... is likely necessary; check").
+                                        # Much lighter than REP_EWMA_ALPHA=
+                                        # 0.05 (core/profiles/detectors.py,
+                                        # time constant ~20 ticks/0.4s,
+                                        # tuned for rep-boundary detection,
+                                        # not live force control) -- alpha=
+                                        # 0.3 (~3 ticks/60ms time constant)
+                                        # smooths single-sample encoder noise
+                                        # (16384 CPR is "reasonably clean"
+                                        # per spec §4.3) without making the
+                                        # governor feel laggy against a real
+                                        # velocity change.
+
+# Let-go detector (spec §4.4, §6 items 3/4) — active in concentric only,
+# gated by ForceMode's state, tested explicitly for that gating.
+LETGO_VELOCITY_TURNS_S = 0.1  # Reel-in speed indicating nothing is holding
+                              # the cable during concentric. 2x
+                              # PHASE_VEL_THRESHOLD_TURNS_S=0.05 (the "at
+                              # rest" threshold) -- a clear, unambiguous
+                              # reel-in signal, not a noise-floor value that
+                              # would false-trigger on ordinary settling.
+LETGO_DEBOUNCE_SAMPLES = 5  # Matches HOMING_DEBOUNCE_SAMPLES exactly, per
+                            # spec §9's explicit suggestion (~100ms at 50Hz).
+
+# Power limiter (spec §5.3) — derived from §5.1/§5.2, not guessed.
+REGEN_POWER_BUDGET_W = 30.0  # Brake resistor is 2ohm/50W rated (Layer B
+                             # §2.4), no forced cooling (open item #1 -- a
+                             # fan is "later"). Derated to 60% of rated
+                             # dissipation for sustained continuous duty in
+                             # still air (a common no-forced-cooling
+                             # derating factor) -> 30W. This bounds the
+                             # ESTIMATED REGEN power (post-copper-loss, what
+                             # core/cable/power_limiter.py computes as
+                             # P_mech - P_copper) actually reaching the brake
+                             # resistor/bus -- not raw mechanical power, and
+                             # not the separate, unsensored thermal
+                             # (copper-heating-the-motor) concern flagged in
+                             # §5.2, which this limiter does not and cannot
+                             # protect against.
+
+# Max-extension force taper (spec §4.5) — distance-based, not time-based:
+# force eases off as the cable approaches the physical limit under load,
+# rather than holding full force until Layer A's runtime guard trips.
+MAX_EXTENSION_FORCE_TAPER_M = 0.15  # 3x MAX_EXTENSION_SAFETY_MARGIN_M
+                                    # (0.05m) -- starts well before the
+                                    # enforced limit itself (which already
+                                    # sits inside the physically marked
+                                    # point by that margin), giving a
+                                    # gentle, perceptible ease-off rather
+                                    # than a last-moment flinch.
+
+# --------------------------------------------------------------------------
 # Axis — axis0 only; axis1 is a ghost node
 # --------------------------------------------------------------------------
 # This board only ever drives axis0. Axis1's CAN node ID must be set to 63 to
@@ -341,6 +508,7 @@ def as_dict():
             "trap_traj_vel_limit": TRAP_TRAJ_VEL_LIMIT,
             "trap_traj_accel_limit": TRAP_TRAJ_ACCEL_LIMIT,
             "trap_traj_decel_limit": TRAP_TRAJ_DECEL_LIMIT,
+            "enable_torque_mode_vel_limit": ENABLE_TORQUE_MODE_VEL_LIMIT,
         },
         "exercise": {
             "homing_current_threshold_a": HOMING_CURRENT_THRESHOLD_A,
@@ -358,6 +526,26 @@ def as_dict():
             "spool_correction_k_bounds": list(SPOOL_CORRECTION_K_BOUNDS),
             "spool_calibration_min_theta_m_rad": SPOOL_CALIBRATION_MIN_THETA_M_RAD,
             "spool_radius_m": SPOOL_RADIUS_M,
+        },
+        "force": {
+            "force_max_n": FORCE_MAX_N,
+            "force_min_n": FORCE_MIN_N,
+            "force_ramp_in_s": FORCE_RAMP_IN_S,
+            "force_ramp_out_s": FORCE_RAMP_OUT_S,
+            "hold_duration_s": HOLD_DURATION_S,
+            "isokinetic_velocity_target_turns_s": ISOKINETIC_VELOCITY_TARGET_TURNS_S,
+            "isokinetic_governor_gain": ISOKINETIC_GOVERNOR_GAIN,
+            "isokinetic_velocity_filter_alpha": ISOKINETIC_VELOCITY_FILTER_ALPHA,
+            "letgo_velocity_turns_s": LETGO_VELOCITY_TURNS_S,
+            "letgo_debounce_samples": LETGO_DEBOUNCE_SAMPLES,
+            "regen_power_budget_w": REGEN_POWER_BUDGET_W,
+            "max_extension_force_taper_m": MAX_EXTENSION_FORCE_TAPER_M,
+            "motor_phase_resistance_ohm": MOTOR_PHASE_RESISTANCE_OHM,
+            "torque_constant_is_estimate": True,  # spec §10.3: UI honesty label
+                                                   # gate. Flip to False only
+                                                   # once open item #13 (KV
+                                                   # hand-spin measurement)
+                                                   # lands.
         },
         "axis": {
             "active_axis": ACTIVE_AXIS,
