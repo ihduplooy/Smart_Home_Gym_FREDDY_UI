@@ -1796,3 +1796,276 @@ how to handle this rather than deciding unilaterally; chosen: fold together
 rather than surgically split hunks. Commits from this session may therefore
 contain both Layer A work and carried-forward bench-session content in the
 same commit — called out explicitly in each affected commit message.
+
+---
+
+## Exercise tab, Layer B Session B1 (concentric force feedback) — 23 July 2026
+
+Built per `exercise_tab_build_spec_layerB.md`. Session B1 only — concentric
+resistance (constant force + isokinetic) and the safety machinery around it.
+Eccentric (B2) is explicitly out of scope and gated behind B1 being
+validated on real hardware with a real person, not merely behind B1 being
+merged.
+
+### §2 preconditions — resolution
+
+All four were unmet when this session started; reported to the user and
+stopped rather than working around them (per explicit instruction). Result:
+
+- **§2.1 (Layer A validated live with a cable attached): still unresolved.**
+  The user explicitly authorized proceeding with the build/sim-test path
+  anyway, deferring the live validation itself to their own bench session —
+  this is *not* the same as the precondition being satisfied, and the DoD
+  checklist below reflects that honestly rather than marking it done.
+- **§2.2 (KV/torque-constant measurement, open item #13): still
+  unresolved.** Per the spec's own carve-out, B1 was built and sim/unit-
+  tested anyway; the UI's uncalibrated-estimate label (§10.3) is the
+  mitigation, not a substitute for the measurement.
+- **§2.3 (spool radius) and §2.4 (regen configuration): resolved**, with
+  real, user-provided values — `SPOOL_RADIUS_M = 0.035` (ruler measurement),
+  `BRAKE_RESISTANCE = 2.0` (confirmed against the physical resistor, 50W
+  rated), `DC_MAX_NEGATIVE_CURRENT = -0.5` (tightened from an unjustified
+  -3.0 placeholder), `MAX_REGEN_CURRENT = 0` (confirmed correct as-is). Full
+  reasoning for each in `config/board_constants.py`'s comments and repeated
+  below.
+
+### Architecture deviations from spec
+
+1. **Separate `ForceMode` (`core/cable/force_mode.py`), not an `ExerciseMode`
+   extension — the §8 decision.** `ExerciseMode` is already ~250 lines
+   dedicated to Layer A's brief, one-shot calibration actions and switches
+   ODrive control modes within a session. `ForceMode` is structurally
+   different: fixed to torque control for its *entire* lifecycle (spec §3,
+   the load-bearing decision of the whole layer) but runs a sustained,
+   continuous, multi-component computation every tick (governor, let-go
+   detector, power limiter, ramps). Folding the second shape into the first
+   class would have mixed two different design shapes in one file. `ForceMode`
+   registers as a sixth mode name (`"force"`) on the same shared
+   `control_session`, mutually exclusive with `velocity`/`torque`/`position`/
+   `profile`/`exercise`, sharing `CableState` via the same `mode_factories`
+   hook Layer A added. Its live status reuses `/api/exercise/status`
+   unchanged (already generic).
+2. **FAULT is deliberately NOT the raise-inside-`tick()` auto-stop path**
+   Layer A's runtime guard uses. Spec §4.6 frames "resume" as lighter than
+   re-homing, returning "the state machine" — not a fresh session — to
+   ARMED. So a let-go event calls `hardware.stop()` directly from inside
+   `tick()` (immediate, not ramped) while `ControlSession` keeps running;
+   only Layer A's runtime guard (a more severe, position-is-wrong failure)
+   triggers the existing full-session-stop mechanism. Both coexist in
+   `ForceMode.tick()`.
+3. **Ramps implemented as a fixed slew rate, not a fixed duration
+   re-normalized per target.** Spec §4.2's literal text is "force ramps from
+   zero to target over `FORCE_RAMP_IN_S`." Implemented instead as
+   `rate = FORCE_MAX_N / FORCE_RAMP_IN_S` (N/s), applied every tick via
+   `core/cable/ramps.py::slew_toward()`. This handles engage, disengage, and
+   a live mid-`ENGAGED` retarget with one mechanism — no ramp-start
+   timestamp to track, no special-casing a target that changes mid-ramp —
+   and a target smaller than `FORCE_MAX_N` always ramps in *faster* than the
+   literal `FORCE_RAMP_IN_S`, never slower. Strictly safer than the literal
+   reading, never less safe.
+4. **Hold detection composes with `PhaseDetector` rather than extending
+   it.** `ForceMode` watches for `PhaseDetector`'s existing `TOP_HOLD`/
+   `BOTTOM_HOLD` classification and adds a duration timer
+   (`HOLD_DURATION_S`) on top, rather than re-implementing threshold/
+   hysteresis logic a second time. The interface fit cleanly — no changes
+   needed to `core/profiles/detectors.py`. Per the spec's own instruction,
+   noting this here since it was worth confirming explicitly rather than
+   silently duplicating detection logic.
+5. **`velocity_m_s_from_turns_s()` (`core/cable/geometry.py`) deliberately
+   ignores the k-corrected effective radius**, using the fixed `r0` only —
+   consistent with `force_to_torque()`/`torque_to_force()`
+   (`core/profiles/units.py`), which already ignore `k` entirely
+   (`SPOOL_RADIUS_M` is the only radius either function ever sees). Velocity
+   does the same for consistency: `k`'s spool-wrap correction only ever
+   applies to *length* (position), not to the force/velocity/torque
+   conversions this layer's safety math depends on.
+6. **HOLDING is terminal-ish in B1, by design, not by omission.** Per spec
+   §4.1's own framing, `HOLDING` does not automatically transition back to
+   `ENGAGED_CONCENTRIC` if the user resumes pulling — it stays at
+   `FORCE_MIN_N` until an explicit disengage. B2 is where this becomes the
+   eccentric launch point; building any automatic exit now would be scope
+   creep ahead of that gating.
+7. **`_force_n_param` serves double duty** (constant mode's flat target,
+   isokinetic's `F_base`) rather than two separate fields. An earlier draft
+   had two fields; the isokinetic one was never updated from the `engage`
+   action's `force_n` parameter, silently stuck at the `FORCE_MIN_N`
+   default forever regardless of what was requested. Caught by
+   `test_no_windup_on_sustained_hold_still` (expected 20N, got 5N) before
+   it shipped — see `docs/progress.md` for the fuller account. Fixed by
+   unifying into one field, which is also the conceptually correct model:
+   both are the same user-facing "how much resistance" input.
+
+### §3.1 — `enable_torque_mode_vel_limit`, open item #8 closed
+
+Disabled (`ENABLE_TORQUE_MODE_VEL_LIMIT = False`), replaced by the software
+governor (`core/cable/governor.py`), reasoning exactly as spec §3.1 lays
+out: ODrive's default torque-mode velocity limiter directly fights a
+constant-force profile (pull faster, get less force), and disabling it
+removes ODrive's own last-resort protection against a runaway torque
+command in an unloaded direction — software (the let-go detector, the
+velocity ceiling it enforces) now owns that entirely.
+
+**Applied as a runtime-owned property, not a one-time NVM write via
+`config/odrive_config.py`.** `OdriveHardware.set_mode()`'s `TORQUE` branch
+writes it on every torque-mode entry — the same relationship `connect()`
+already has with `current_lim` (Layer A). This means it applies uniformly to
+Control tab's `TorqueMode`, Profiles' `ProfileMode`, and Layer B's
+`ForceMode` alike, resolving the open item project-wide rather than
+Force-mode-locally, which matches how the item was originally framed in
+`core/control/modes.py`'s own TODO (against Profiles, before Layer B
+existed). Deliberately not written into `config/odrive_config.py`: that
+script is the frozen "erase and reconfigure from scratch" script (its own
+`dc_max_negative_current`/`brake_resistance` values are still the old
+pre-Layer-B placeholders, confirmed not auto-synced from live bench tuning)
+— adding a second, potentially-drifting copy of this property there would
+recreate exactly the kind of two-places-that-can-disagree risk that caused
+the `enable_brake_resistor` confusion in the first place.
+
+**Live-board confirmation — action item, not yet done.** The property path
+(`axis{n}.controller.config.enable_torque_mode_vel_limit`, BoolProperty, rw)
+is corroborated only by the bundled `odriveApiReference05x.json` (labeled
+v0.5.6, not this board's exact v0.5.1) — unlike `brake_resistance`/
+`dc_max_negative_current`/`max_regen_current`, which are confirmed via
+`config/odrive_config.py`'s own live-run comments, nothing in this codebase
+has exercised this specific property against the real board yet. It is
+written unconditionally on every torque-mode entry (`OdriveHardware.
+set_mode()`), so if the name is wrong on this firmware it will raise loudly
+the very first time *any* mode enters torque control — Control tab's Torque
+mode included, not just Layer B. **Action item for the bench session:**
+confirm this property exists via `dir(axis0.controller.config)` before or
+during that first torque-mode entry, the same live-`dir()` discipline
+already used to catch the `enable_brake_resistor` mistake.
+
+### §5.2 — break-even power analysis, real constants
+
+Formula: `v_breakeven ≈ 1.5 · F_cable · r_spool² · R_phase / Kt²`, at
+`r_spool = 0.035` (measured), `R_phase = 0.38` (measured, consistent across
+every calibration run), `Kt = 0.516875` (**still the open-item-#13
+estimate**).
+
+| F | v_breakeven | P_copper (velocity-independent) |
+|---|---|---|
+| 50N | 0.131 m/s | 6.5W |
+| 100N | 0.261 m/s | 26.1W |
+| 150N | 0.392 m/s | 58.8W |
+| 200N | 0.523 m/s | 104.5W |
+
+**Correction made during this session, before reporting it:** the first
+pass at "does the software power limiter ever actually activate" used
+`CONTROLLER_VEL_LIMIT` as the achievable-velocity ceiling. That was wrong,
+independent of an unrelated external bench re-tune that happened to change
+that constant's value (2.0 → 10.0 turns/s) partway through this session.
+`CONTROLLER_VEL_LIMIT` governs ODrive's position/velocity control loops;
+Layer B runs in torque mode with `enable_torque_mode_vel_limit=False`, so
+**constant-force mode has no software velocity ceiling of any kind** —
+velocity is bounded only by the user's own strength/speed. Recomputed
+correctly:
+
+- **Constant force**: `REGEN_POWER_BUDGET_W=30` is exceeded once cable speed
+  passes roughly **0.56–0.73 m/s** (varies with force) — a fast but
+  plausible rep speed for lighter/explosive movements. Below ~0.3–0.5 m/s
+  it mostly stays inactive. The power limiter is therefore a **real, active
+  behaviour during fast reps**, not a dormant formality — in constant-force
+  mode it is the only thing standing between a fast rep and exceeding the
+  brake resistor's budget.
+- **Isokinetic**: self-limiting by construction. The governor's rising
+  resistance above `ISOKINETIC_VELOCITY_TARGET_TURNS_S` keeps estimated
+  regen power under ~10W even a full turn/s over target — comfortably under
+  budget. The limiter essentially never needs to intervene here; the
+  governor already does that job structurally.
+
+### Constants chosen (spec §9) — reasoning
+
+Full comments live in `config/board_constants.py`; summarized here per the
+Layer A entry's standard.
+
+- **`FORCE_MAX_N = 150`** — well below the ~221.5N structural ceiling
+  implied by `_TORQUE_LIMIT_NM` (`MOTOR_CURRENT_LIM * MOTOR_TORQUE_CONSTANT
+  / SPOOL_RADIUS_M`); at 150N continuous, `P_copper≈59W` regardless of
+  velocity — a thermal, not regen, concern this software cannot sense
+  (open item #1, no thermal sensing).
+- **`FORCE_MIN_N = 5`** — the HOLDING floor and, reused, isokinetic's
+  default `F_base` (one field, not two — see architecture deviation #7
+  above). Same order of magnitude as Layer A's `CALIB_HOLD_FORCE_N=3.0N`,
+  slightly higher since this hold happens under a real workout load.
+- **`FORCE_RAMP_IN_S = FORCE_RAMP_OUT_S = 0.5`** — symmetric; see
+  architecture deviation #3 for the rate-vs-duration interpretation.
+- **`HOLD_DURATION_S = 0.75`** — long enough to distinguish a deliberate
+  pause from a quick rep turnaround, short enough not to feel laggy.
+  **Untested against a real rep** — see the first-live-run watch items
+  below.
+- **`ISOKINETIC_VELOCITY_TARGET_TURNS_S = 1.0`** (~22cm/s) and
+  **`ISOKINETIC_GOVERNOR_GAIN = 150`** (N per turn/s above target) — a
+  moderate default cap with a firm, quickly-felt wall.
+- **`ISOKINETIC_VELOCITY_FILTER_ALPHA = 0.3`** — EWMA smoothing before the
+  governor (spec §4.3's "filtering is likely necessary; check"). Much
+  lighter than `REP_EWMA_ALPHA=0.05` (tuned for rep-boundary detection, not
+  live force control) — needs to stay responsive, not just smooth.
+- **`LETGO_VELOCITY_TURNS_S = 0.1`** (2x `PHASE_VEL_THRESHOLD_TURNS_S`) and
+  **`LETGO_DEBOUNCE_SAMPLES = 5`** (matches `HOMING_DEBOUNCE_SAMPLES`, per
+  spec's explicit suggestion). **The 100ms debounce window's real
+  travel/speed budget is unvalidated against real inertia** — see the
+  first-live-run watch items below.
+- **`REGEN_POWER_BUDGET_W = 30`** — 50W rated, derated to 60% for sustained
+  continuous duty with no forced cooling (open item #1).
+- **`MAX_EXTENSION_FORCE_TAPER_M = 0.15`** — 3x `MAX_EXTENSION_SAFETY_
+  MARGIN_M`, a gentle, perceptible ease-off zone starting well before the
+  enforced limit. **Interaction with a fast, hard pull is unvalidated** —
+  see the first-live-run watch items below.
+- New, not in the spec's own §9 table: **`MOTOR_PHASE_RESISTANCE_OHM =
+  0.38`** (the spec's own stated measured value) and
+  **`ENABLE_TORQUE_MODE_VEL_LIMIT = False`** (open item #8, closed above).
+- Two §9 table rows intentionally *not* added as separate constants:
+  hold-threshold reuses `PHASE_VEL_THRESHOLD_TURNS_S`; isokinetic's force
+  floor reuses `FORCE_MIN_N`. Per the spec's own reuse suggestions.
+
+### First-live-run watch items — named, for whoever is at the bench
+
+These are not implementation bugs — they're places the design is only as
+good as an assumption about real dynamics that only live testing with a
+real person can check. Cross-referenced against `exercise_tab_build_spec_
+layerB.md` §14's escalation steps below; they need to survive to whoever
+runs that session, which may not be this conversation.
+
+1. **HOLDING creep at `FORCE_MIN_N`.** The let-go detector is gated to
+   `ENGAGED_CONCENTRIC` only (spec §4.4) — during `HOLDING`, force drops to
+   5N and nothing is actively watching for a slow, undetected reel-in the
+   way concentric's dedicated debounce does. The only backstop is Layer A's
+   position runtime guard, which is coarser and slower. **Watch for this
+   starting at §14 step 3** (handle attached, lowest force — the first
+   point `HOLDING` becomes reachable at all) **and keep watching through
+   step 4** (escalating force) — HOLDING's own force stays fixed at 5N
+   regardless of the engaged force level, but surrounding conditions
+   (motor already warm, higher pre-hold momentum) change as force
+   escalates. Watch during any *extended* hold specifically, not just the
+   moment of transition into `HOLDING`.
+2. **Let-go debounce at increasing force.** `LETGO_VELOCITY_TURNS_S`/
+   `LETGO_DEBOUNCE_SAMPLES` (100ms) are reasoned by analogy to homing's
+   debounce, not from real cable/handle inertia — there's no way to compute
+   how much the spool actually accelerates in that window at higher
+   commanded force without real mass/inertia data. **Validate low-force
+   triggers at §14 step 3 before trusting the window at `FORCE_MAX_N`** —
+   this is precisely what step 4's "escalate force gradually" is for;
+   don't skip straight to high force and assume the debounce window that
+   worked gently also works hard.
+3. **Taper behaviour at faster pull speeds.** `MAX_EXTENSION_FORCE_TAPER_M`
+   correctly solves the problem it was designed for (an abrupt full-force-
+   to-fault transition at the limit) but easing off resistance *removes*
+   some of the deceleration that was helping keep a fast-pulling user in
+   range — plausible, not certain, that at high pull speed the taper makes
+   reaching the position guard's fault *easier* to hit, not harder. **§14
+   step 4 escalates force but has no dedicated step for pull *speed*** —
+   noting that gap explicitly rather than assuming force escalation alone
+   covers it. Test the taper deliberately at faster pulls, not just the
+   first slow, careful one, and not only at the force level where it was
+   first tried.
+
+### Testing summary
+
+`core/cable/{ramps,governor,letgo,power_limiter}.py` — 40 synthetic tests,
+pure/hardware-free, written alongside the modules. `core/cable/force_mode.py`
+— 29 tests (`test_force_mode.py`), covering all ten spec §6 safety
+behaviours individually, including sign correctness (§6 item 10 — asserted
+the sign, not just the magnitude) and an end-to-end `ControlSession` test
+for global Stop mid-`ENGAGED` plus the Layer A current-limit-restore
+backstop surviving it. 242/242 core tests passing throughout.
