@@ -15,6 +15,14 @@ homed, empty string otherwise (un-homed Exercise runs, and every other
 mode). Same additive pattern as phase/rep_count above; existing logs and the
 CSV reference tables in the manuals stay readable (columns only ever
 appended, never reordered/removed).
+
+Exercise tab Layer B amendment (exercise_tab_build_spec_layerB.md §11): six
+more columns appended -- `commanded_force_n`, `estimated_force_n`,
+`cable_velocity_m_s`, `regen_power_w`, `force_state`, `power_limiter_active`
+-- populated during Force runs, empty strings for every other mode. The
+spec explicitly calls for capturing commanded-vs-estimated force together,
+not just one, since this CSV is the primary record for anything the project
+eventually reports.
 """
 
 import csv
@@ -37,6 +45,12 @@ COLUMNS = [
     "phase",
     "rep_count",
     "cable_length_m",
+    "commanded_force_n",
+    "estimated_force_n",
+    "cable_velocity_m_s",
+    "regen_power_w",
+    "force_state",
+    "power_limiter_active",
 ]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -79,6 +93,12 @@ class CsvLogger:
         phase: str = "",
         rep_count="",
         cable_length_m="",
+        commanded_force_n="",
+        estimated_force_n="",
+        cable_velocity_m_s="",
+        regen_power_w="",
+        force_state="",
+        power_limiter_active="",
     ) -> None:
         if self._writer is None or self._t0 is None:
             raise RuntimeError("CsvLogger.log_sample() called before open()")
@@ -94,6 +114,12 @@ class CsvLogger:
             phase,
             rep_count,
             cable_length_m,
+            commanded_force_n,
+            estimated_force_n,
+            cable_velocity_m_s,
+            regen_power_w,
+            force_state,
+            power_limiter_active,
         ])
         now = time.monotonic()
         if now - self._last_flush >= _FLUSH_INTERVAL_S:

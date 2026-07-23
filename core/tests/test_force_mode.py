@@ -551,3 +551,53 @@ def test_estimated_force_reflects_measured_torque(tmp_path):
     extra = mode.tick(hw, hw.sample)
     expected = board_constants.MOTOR_TORQUE_CONSTANT * 1.0 / board_constants.SPOOL_RADIUS_M
     assert extra["estimated_force_n"] == pytest.approx(expected)
+
+
+# ---- CSV telemetry (spec §11) ----
+
+def test_force_csv_gains_columns(tmp_path):
+    import csv as csv_module
+
+    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json")
+    cable_state.latch_home(0.0)
+    cable_state.set_max(marked_turns=20.0, enforced_turns=20.0)
+    session = ControlSession(
+        hardware_source="sim",
+        mode_factories={**MODES_BY_NAME, "force": lambda: ForceMode(cable_state)},
+    )
+    session.start(mode="force", target={"action": "arm"})
+    time.sleep(0.1)
+    log_path = session.status()["log_path"]
+    session.stop()
+
+    with open(log_path, newline="") as f:
+        rows = list(csv_module.reader(f))
+    header = rows[0]
+    for col in (
+        "commanded_force_n", "estimated_force_n", "cable_velocity_m_s",
+        "regen_power_w", "force_state", "power_limiter_active",
+    ):
+        assert col in header
+    data_row = rows[1]
+    assert data_row[header.index("force_state")] == "armed"
+    assert data_row[header.index("commanded_force_n")] == "0.0"
+
+
+def test_velocity_mode_csv_leaves_force_columns_empty(tmp_path):
+    import csv as csv_module
+
+    session = ControlSession(hardware_source="sim")
+    session.start(mode="velocity", target=0.3)
+    time.sleep(0.1)
+    log_path = session.status()["log_path"]
+    session.stop()
+
+    with open(log_path, newline="") as f:
+        rows = list(csv_module.reader(f))
+    header = rows[0]
+    data_row = rows[1]
+    for col in (
+        "commanded_force_n", "estimated_force_n", "cable_velocity_m_s",
+        "regen_power_w", "force_state", "power_limiter_active",
+    ):
+        assert data_row[header.index(col)] == ""

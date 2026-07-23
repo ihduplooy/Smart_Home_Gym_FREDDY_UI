@@ -247,6 +247,12 @@ class ControlSession:
                         phase=extra.get("phase", ""),
                         rep_count=extra.get("rep_count", ""),
                         cable_length_m="" if cable_length_m is None else cable_length_m,
+                        commanded_force_n=extra.get("commanded_force_n", ""),
+                        estimated_force_n=extra.get("estimated_force_n", ""),
+                        cable_velocity_m_s=extra.get("cable_velocity_m_s", ""),
+                        regen_power_w=extra.get("regen_power_w", ""),
+                        force_state=extra.get("force_state", ""),
+                        power_limiter_active=extra.get("power_limiter_active", ""),
                     )
                 except Exception:
                     log.exception("CSV logger write failed")
