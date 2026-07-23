@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Gym Control — User Manual</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0c0f0d;
+    --panel:#141816;
+    --panel-2:#1a201d;
+    --line:#2a332e;
+    --line-soft:#20281f;
+    --text:#e7ede8;
+    --muted:#8fa091;
+    --dim:#5d6d61;
+    --amber:#e8a33d;
+    --amber-dim:#7a5c2a;
+    --sim:#e8c93d;
+    --real:#e35b4f;
+    --ok:#5fbf8f;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  body::before{
+    content:"";
+    position:fixed; inset:0;
+    background-image:
+      linear-gradient(rgba(232,163,61,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(232,163,61,0.025) 1px, transparent 1px);
+    background-size: 28px 28px;
+    pointer-events:none;
+    z-index:0;
+  }
+
+  /* ---------- layout ---------- */
+  .shell{
+    display:flex;
+    min-height:100vh;
+    position:relative;
+    z-index:1;
+  }
+  .sidebar{
+    width:270px;
+    flex-shrink:0;
+    background:var(--panel);
+    border-right:1px solid var(--line);
+    position:sticky;
+    top:0;
+    height:100vh;
+    overflow-y:auto;
+    padding:0 0 24px 0;
+  }
+  .sidebar-head{
+    padding:22px 20px 18px 20px;
+    border-bottom:1px solid var(--line);
+  }
+  .plate{
+    display:inline-block;
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:.14em;
+    color:var(--amber);
+    border:1px solid var(--amber-dim);
+    padding:2px 7px;
+    border-radius:2px;
+    text-transform:uppercase;
+  }
+  .sidebar-head h1{
+    font-size:16px;
+    margin:12px 0 4px 0;
+    font-weight:600;
+    letter-spacing:.01em;
+  }
+  .sidebar-head p{
+    margin:0;
+    font-size:12px;
+    color:var(--muted);
+    font-family:var(--mono);
+  }
+  .status-line{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    margin-top:10px;
+    font-family:var(--mono);
+    font-size:10.5px;
+    color:var(--dim);
+  }
+  .dot{
+    width:6px;height:6px;border-radius:50%;
+    background:var(--dim);
+    flex-shrink:0;
+  }
+
+  nav{padding:14px 10px;}
+  nav .group-label{
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:.14em;
+    color:var(--dim);
+    text-transform:uppercase;
+    padding:14px 10px 6px 10px;
+  }
+  nav a{
+    display:flex;
+    align-items:baseline;
+    gap:9px;
+    text-decoration:none;
+    color:var(--muted);
+    font-size:13.2px;
+    padding:7px 10px;
+    border-radius:4px;
+    border-left:2px solid transparent;
+    transition:background .12s, color .12s, border-color .12s;
+  }
+  nav a .num{
+    font-family:var(--mono);
+    font-size:10.5px;
+    color:var(--dim);
+    min-width:20px;
+  }
+  nav a:hover{ background:var(--panel-2); color:var(--text); }
+  nav a.active{
+    color:var(--amber);
+    background:var(--panel-2);
+    border-left-color:var(--amber);
+  }
+  nav a.active .num{ color:var(--amber); }
+
+  main{
+    flex:1;
+    max-width:860px;
+    padding:56px 56px 120px 56px;
+  }
+  @media (max-width:900px){
+    .sidebar{position:fixed; left:-270px; z-index:10; transition:left .2s; box-shadow:20px 0 40px rgba(0,0,0,.4);}
+    .sidebar.open{left:0;}
+    main{padding:80px 22px 100px 22px; max-width:100%;}
+    .menu-btn{display:flex !important;}
+  }
+  .menu-btn{
+    display:none;
+    position:fixed; top:16px; left:16px; z-index:20;
+    width:38px;height:38px;
+    align-items:center; justify-content:center;
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    border-radius:6px;
+    color:var(--amber);
+    cursor:pointer;
+    font-family:var(--mono);
+  }
+
+  /* ---------- title block ---------- */
+  .hero{
+    border-bottom:1px solid var(--line);
+    padding-bottom:28px;
+    margin-bottom:40px;
+  }
+  .hero .eyebrow{
+    font-family:var(--mono);
+    font-size:11px;
+    letter-spacing:.18em;
+    text-transform:uppercase;
+    color:var(--amber);
+    margin-bottom:10px;
+  }
+  .hero h1{
+    font-size:32px;
+    margin:0 0 10px 0;
+    font-weight:700;
+    letter-spacing:-0.01em;
+  }
+  .hero .sub{
+    color:var(--muted);
+    font-size:14.5px;
+    max-width:58ch;
+  }
+  .hero .cross-refs{
+    margin-top:16px;
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+  .cross-refs span{
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--dim);
+    border:1px solid var(--line);
+    padding:3px 9px;
+    border-radius:3px;
+  }
+  .cross-refs code{ color:var(--amber); font-family:var(--mono);}
+
+  /* ---------- sections ---------- */
+  section{ margin-bottom:52px; scroll-margin-top:24px; }
+  section h2{
+    font-size:12px;
+    font-family:var(--mono);
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--dim);
+    margin:0 0 18px 0;
+    display:flex;
+    align-items:center;
+    gap:12px;
+  }
+  section h2::after{
+    content:"";
+    flex:1;
+    height:1px;
+    background:var(--line);
+  }
+  section h2 .idx{ color:var(--amber); }
+
+  section > p{ color:var(--text); font-size:14.5px; }
+  section a.inline-link{ color:var(--amber); }
+
+  h3.subhead{
+    font-size:16px;
+    margin:28px 0 10px 0;
+    font-weight:600;
+  }
+
+  /* ---------- tab panels ---------- */
+  .tab-panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:8px;
+    margin-bottom:22px;
+    overflow:hidden;
+  }
+  .tab-panel .tab-head{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    padding:15px 20px;
+    background:var(--panel-2);
+    border-bottom:1px solid var(--line);
+  }
+  .tab-panel .tab-tag{
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--bg);
+    background:var(--amber);
+    padding:2px 8px;
+    border-radius:3px;
+    font-weight:600;
+    letter-spacing:.03em;
+  }
+  .tab-panel .tab-title{
+    font-weight:600;
+    font-size:15px;
+  }
+  .tab-panel .tab-body{ padding:18px 20px 20px 20px; font-size:14px; }
+  .tab-body p{ margin-top:0; }
+  .tab-body ul, .tab-body ol{ padding-left:20px; margin:10px 0; }
+  .tab-body li{ margin-bottom:7px; color:var(--text); }
+  .tab-body li::marker{ color:var(--dim); font-family:var(--mono); font-size:12px;}
+
+  /* ---------- badges (mirror actual UI meaning: sim=yellow, real=red) ---------- */
+  .badge{
+    display:inline-flex;
+    align-items:center;
+    gap:5px;
+    font-family:var(--mono);
+    font-size:11px;
+    font-weight:600;
+    padding:2px 8px;
+    border-radius:3px;
+    letter-spacing:.04em;
+  }
+  .badge.sim{ background:rgba(232,201,61,0.14); color:var(--sim); border:1px solid rgba(232,201,61,0.35);}
+  .badge.real{ background:rgba(227,91,79,0.14); color:var(--real); border:1px solid rgba(227,91,79,0.35);}
+  .badge.stop{ background:rgba(227,91,79,0.18); color:var(--real); border:1px solid var(--real); font-weight:700;}
+
+  /* ---------- callouts ---------- */
+  .callout{
+    display:flex;
+    gap:12px;
+    border:1px solid var(--line);
+    border-left:3px solid var(--amber);
+    background:var(--panel-2);
+    border-radius:0 6px 6px 0;
+    padding:13px 16px;
+    margin:16px 0;
+    font-size:13.5px;
+  }
+  .callout.warn{ border-left-color:var(--real); }
+  .callout.ok{ border-left-color:var(--ok); }
+  .callout .icon{
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--dim);
+    flex-shrink:0;
+    padding-top:2px;
+  }
+  .callout.warn .icon{ color:var(--real); }
+  .callout.ok .icon{ color:var(--ok); }
+  .callout p{ margin:0; color:var(--text); }
+  .callout strong{ color:var(--amber); }
+  .callout.warn strong{ color:var(--real); }
+
+  /* ---------- code ---------- */
+  pre{
+    background:#0a0d0b;
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:14px 16px;
+    overflow-x:auto;
+    font-family:var(--mono);
+    font-size:12.6px;
+    color:#c9e6cf;
+    margin:14px 0;
+  }
+  code{
+    font-family:var(--mono);
+    font-size:.92em;
+    background:var(--panel-2);
+    padding:1px 5px;
+    border-radius:3px;
+    color:#c9e6cf;
+  }
+  pre code{ background:none; padding:0; }
+  .comment{ color:var(--dim); }
+
+  /* ---------- table ---------- */
+  table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:13.5px;
+    margin:16px 0;
+  }
+  th{
+    text-align:left;
+    font-family:var(--mono);
+    font-size:10.5px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:var(--dim);
+    border-bottom:1px solid var(--line);
+    padding:8px 12px;
+  }
+  td{
+    padding:10px 12px;
+    border-bottom:1px solid var(--line-soft);
+    color:var(--text);
+    vertical-align:top;
+  }
+  tr:last-child td{ border-bottom:none; }
+  td:first-child{ color:var(--amber); font-family:var(--mono); font-size:12.5px; white-space:nowrap; }
+
+  /* ---------- csv filename sample ---------- */
+  .filename{
+    font-family:var(--mono);
+    font-size:12.5px;
+    color:var(--amber);
+    word-break:break-all;
+  }
+
+  .footer-note{
+    margin-top:60px;
+    padding-top:20px;
+    border-top:1px solid var(--line);
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--dim);
+  }
+
+  ::-webkit-scrollbar{ width:9px; height:9px; }
+  ::-webkit-scrollbar-track{ background:var(--bg); }
+  ::-webkit-scrollbar-thumb{ background:var(--line); border-radius:5px; }
+  ::-webkit-scrollbar-thumb:hover{ background:var(--dim); }
+</style>
+</head>
+<body>
+
+<div class="menu-btn" id="menuBtn">☰</div>
+
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <span class="plate">User Manual</span>
+      <h1>Smart Gym Control</h1>
+      <p>How do I use it —</p>
+      <div class="status-line"><span class="dot" style="background:var(--real)"></span> Real hardware wired &amp; running · Phase 2A bring-up</div>
+    </div>
+    <nav>
+      <div class="group-label">Getting started</div>
+      <a href="#starting"><span class="num">§1</span> Starting the app</a>
+
+      <div class="group-label">The eight tabs</div>
+      <a href="#t21"><span class="num">2.1</span> Configuration</a>
+      <a href="#t22"><span class="num">2.2</span> Presets</a>
+      <a href="#t23"><span class="num">2.3</span> Dashboard</a>
+      <a href="#t24"><span class="num">2.4</span> Control</a>
+      <a href="#t25"><span class="num">2.5</span> Profiles</a>
+      <a href="#t26"><span class="num">2.6</span> Exercise</a>
+      <a href="#t27"><span class="num">2.7</span> Inspector</a>
+      <a href="#t28"><span class="num">2.8</span> Command Console</a>
+
+      <div class="group-label">Reference</div>
+      <a href="#logs"><span class="num">§3</span> Telemetry logs</a>
+      <a href="#simreal"><span class="num">§4</span> With/without hardware</a>
+      <a href="#rough"><span class="num">§5</span> Rough edges</a>
+      <a href="#quickref"><span class="num">§6</span> Quick reference</a>
+    </nav>
+  </aside>
+
+  <main>
+    <div class="hero">
+      <div class="eyebrow">Practical guide — how to use the GUI</div>
+      <h1>Smart Gym Control</h1>
+      <p class="sub">This file covers <em>how</em> to run and use the interface. For <em>why</em> things
+      were built this way, see <code>decisions.md</code>; for what's been verified working, see
+      <code>progress.md</code>.</p>
+      <div class="cross-refs">
+        <span>decisions.md — rationale</span>
+        <span>progress.md — verified status</span>
+        <span>README.md — setup fallback</span>
+      </div>
+    </div>
+
+    <!-- ================= SECTION 1 ================= -->
+    <section id="starting">
+      <h2><span class="idx">§1</span> Starting the app</h2>
+      <p>From the project root, with the Python venv active:</p>
+      <pre><code><span class="comment"># Real hardware (once an ODrive is actually connected)</span>
+npm run dev
+
+<span class="comment"># No hardware — simulated ODrive device, recommended for now</span>
+npm run mock_dev</code></pre>
+      <p>Run either from <code>frontend/</code> if the root script isn't set up to proxy — check
+      <code>README.md</code> if a command isn't found. Once running:</p>
+      <table>
+        <tr><th>Endpoint</th><th>Address</th></tr>
+        <tr><td>UI</td><td><code>http://localhost:3000</code></td></tr>
+        <tr><td>Backend</td><td><code>http://127.0.0.1:5050</code> — the frontend talks to this automatically, you never need to open it directly</td></tr>
+      </table>
+      <div class="callout">
+        <span class="icon">i</span>
+        <p>Leave the terminal running — <code>Ctrl+C</code> stops both servers together. There's no
+        separate "quit" button in the app itself (that was upstream's standalone-app packaging,
+        removed — see <code>decisions.md</code>).</p>
+      </div>
+      <div class="callout warn">
+        <span class="icon">!</span>
+        <p>If you see <strong>No ODrive device found</strong> in the sidebar, that's expected with no
+        hardware and no mock — either wire up a device or restart with <code>mock_dev</code>.</p>
+      </div>
+    </section>
+
+    <!-- ================= SECTION 2 intro ================= -->
+    <section id="tabs-intro">
+      <h2><span class="idx">§2</span> The eight tabs</h2>
+      <p>The sidebar switches between eight tabs, in two groups:</p>
+      <table>
+        <tr><th>Group</th><th>Tabs</th><th>Purpose</th></tr>
+        <tr><td>Setup / inspection</td><td>Configuration, Presets, Dashboard, Inspector, Command Console</td><td>Reading/writing raw ODrive properties, getting a device calibrated and configured. Carried over from upstream, largely unchanged.</td></tr>
+        <tr><td>Control</td><td>Control, Profiles, Exercise</td><td>New in this project — actually driving the motor once it's configured: pick a mode or a resistance profile, hit Start, watch live telemetry, hit Stop. Exercise is the odd one out — it's for once a cable is physically attached to the spool, adding homing/end-stops on top rather than raw turns-based control.</td></tr>
+      </table>
+    </section>
+
+    <!-- 2.1 Configuration -->
+    <section id="t21">
+      <div class="tab-panel">
+        <div class="tab-head">
+          <span class="tab-tag">2.1</span>
+          <span class="tab-title">Configuration — the config wizard</span>
+        </div>
+        <div class="tab-body">
+          <p>Guided, multi-step wizard for writing this board's known-good settings (motor, encoder,
+          controller, bus limits) to a connected device.</p>
+          <ul>
+            <li>Opens <strong>pre-loaded</strong> with this project's values — pole pairs 15, AS5047P on SPI
+            CS pin 7, encoder mode 257, cpr 16384, position control, tuned bus-current limits,
+            axis0-only with axis1's CAN node silenced — sourced from <code>config/board_constants.py</code>,
+            not typed in by hand.</li>
+            <li>Step through the wizard normally; the <strong>Apply</strong> step shows a
+            <strong>command preview</strong> before anything is written — review it before confirming.</li>
+            <li>Toggle <strong>"Only changed parameters"</strong> to limit writes to fields that differ
+            from the device's current values, or turn it off to see/write the full set.</li>
+          </ul>
+          <div class="callout ok">
+            <span class="icon">→</span>
+            <p>Use this tab first, on a freshly-connected or freshly-erased board, before touching
+            Control or Profiles.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2.2 Presets -->
+    <section id="t22">
+      <div class="tab-panel">
+        <div class="tab-head">
+          <span class="tab-tag">2.2</span>
+          <span class="tab-title">Presets</span>
+        </div>
+        <div class="tab-body">
+          <p>Save, load, import, and export named configuration snapshots (JSON).</p>
+          <ul>
+            <li>A factory preset <strong>"Smart Gym Cable — Hoverboard + AS5047P"</strong> ships
+            pre-loaded — it's the exact config wizard defaults, saved as a preset for quick
+            reapplication.</li>
+            <li>Loading a preset does <strong>not</strong> write to the device by itself; it feeds
+            values into the wizard/apply flow the same way manual edits would.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2.3 Dashboard -->
+    <section id="t23">
+      <div class="tab-panel">
+        <div class="tab-head">
+          <span class="tab-tag">2.3</span>
+          <span class="tab-title">Dashboard</span>
+        </div>
+        <div class="tab-body">
+          <p>Live overview / at-a-glance telemetry for the connected device (or mock). Good first stop
+          after connecting to confirm the device is alive and reporting sane values before diving
+          into Inspector or Control.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2.4 Control -->
+    <section id="t24">
+      <div class="tab-panel">
+        <div class="tab-head">
+          <span class="tab-tag">2.4</span>
+          <span class="tab-title">Control — velocity / torque motor control</span>
+        </div>
+        <div class="tab-body">
+          <p>Direct, low-level motor control in three modes: <strong>Velocity</strong>,
+          <strong>Torque</strong>, and <strong>Position</strong>. This is where you actually spin the
+          motor — always the real connected device now (or the mock device under <code>mock_dev</code>);
+          there's no sim/real switcher here anymore.</p>
+          <ol>
+            <li>Pick a mode, enter a numeric target (units shown next to the field — turns/s for
+            velocity, Nm for torque, or the Move Distance/Velocity/Accel-Decel fields for a Position
+            move).</li>
+            <li><strong>Start</strong> — begins the run. Fails cleanly with a visible error if no device
+            is attached (no crash, no hang). While running you get:
+              <ul>
+                <li>Live numeric readout: position, velocity, torque, current.</li>
+                <li>Three live mini-charts (position / velocity / torque).</li>
+                <li>A <strong>"Set target"</strong> button to retarget live, without stopping.</li>
+                <li>The active CSV log filename (see <a class="inline-link" href="#logs">§3</a>).</li>
+              </ul>
+            </li>
+            <li><span class="badge stop">STOP</span> — always visible and reachable, disabled only when
+            nothing is running. Available regardless of what else is happening on screen — this is
+            the safety-critical control.</li>
+          </ol>
+          <div class="callout ok">
+            <span class="icon">→</span>
+            <p>If the hardware reports an error while running, the session stops itself automatically
+            and the error is shown on screen — you don't need to notice it yourself.</p>
+          </div>
+          <h3 style="margin:22px 0 8px 0; font-size:15px; color:var(--text);">Controller Gains</h3>
+          <p>Below the main controls, a <strong>Controller Gains</strong> card lets you tune Position
+          Gain, Velocity Gain, and Velocity Integrator Gain live, without going through the
+          Configuration wizard:</p>
+          <ul>
+            <li>Each gain has a slider. Dragging updates the number shown next to it immediately; the
+            value is only written to the device when you <strong>release</strong> the slider — so
+            dragging doesn't flood the connection with writes.</li>
+            <li>Requires a connected device (the card shows "no device" and a prompt otherwise) — it
+            reads the board's current gains once connected, so the sliders start from whatever's
+            actually on the device, not some default.</li>
+            <li><strong>Save to NVM</strong> persists the current gains to the board's non-volatile
+            memory so they survive a power cycle. This briefly reboots the board (an ODrive requirement
+            for <code>save_configuration</code>), so the button is disabled while a Control or Profiles
+            session is running — stop first, then save. Without saving, slider changes are live but
+            temporary — they're gone on next reboot.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2.5 Profiles -->
+    <section id="t25">
+      <div class="tab-panel">
+        <div class="tab-head">
+          <span class="tab-tag">2.5</span>
+          <span class="tab-title">Profiles — resistance-profile training</span>
+        </div>
+        <div class="tab-body">
+          <p>A layer on top of Control: instead of a fixed velocity/torque target, pick a
+          <strong>resistance profile</strong> that computes torque dynamically based on the cable's
+          motion (position/velocity), plus optional rep counting.</p>
+          <ol>
+            <li>Pick a <strong>base profile</strong> from the dropdown (registry-driven — whatever
+            profiles the backend reports):
+              <ul>
+                <li><strong>Constant</strong> — flat resistance (force → torque conversion only).</li>
+                <li><strong>Bell curve</strong> — resistance ramps up/down over a position range, peaking mid-range (raised-cosine shape).</li>
+                <li><strong>VBT</strong> (velocity-based training) — adjusts resistance rep-to-rep based on how fast the previous rep was.</li>
+              </ul>
+              <p style="margin:6px 0 0 0; color:var(--muted); font-size:13px;"><strong>Overload</strong>
+              exists as a <em>modifier</em>, not a selectable base profile — see step 3.</p>
+            </li>
+            <li>Fill in the profile's parameters — the form is generated automatically from the
+            profile's schema (labels, min/max).</li>
+            <li>Optionally enable <strong>Eccentric overload</strong>: a toggle + ratio + target-phase
+            selector that multiplies the resistance during one phase of the rep only (e.g. heavier
+            on the lowering/eccentric phase). This wraps whichever base profile you picked — you
+            don't pick "overload" itself as the profile.</li>
+            <li>Same always-visible <span class="badge stop">STOP</span> as the Control tab — this is
+            the same underlying session, just a third mode (also real-device-only now, no sim/real
+            switcher — see <a class="inline-link" href="#t24">§2.4</a>).</li>
+            <li><strong>Start</strong> — while running you get:
+              <ul>
+                <li>A color-coded <strong>phase badge</strong> (concentric / top hold / eccentric / bottom hold) — what the phase detector currently thinks the cable is doing.</li>
+                <li>A <strong>rep count</strong>.</li>
+                <li>The same live telemetry / CSV behavior as Control.</li>
+              </ul>
+            </li>
+            <li><strong>"Set target"</strong> lets you retarget the profile's primary parameter live
+            (e.g. change the base force) without restarting the session — useful for forcing a phase
+            change while testing (a negative force flips the direction, for example).</li>
+          </ol>
+          <div class="callout warn">
+            <span class="icon">STUB</span>
+            <p>A persistent on-screen notice reminds you the profile math is stub-quality
+            (<code># STUB(2A+)</code>) — real tuning against actual cable rigging happens in Phase 2A.
+            Treat exact numeric behavior as illustrative, not final.</p>
+          </div>
+          <div class="callout">
+            <span class="icon">i</span>
+            <p><strong>Only one of Control or Profiles can run at a time</strong> (they share one
+            backend session) — starting one while the other is active is refused with a visible
+            warning, not a silent conflict.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2.6 Exercise -->
+    <section id="t26">
+      <div class="tab-panel">
+        <div class="tab-head">
+          <span class="tab-tag">2.6</span>
+          <span class="tab-title">Exercise — cable-attached positioning &amp; safety</span>
+        </div>
+        <div class="tab-body">
+          <p>For once a cable is physically attached to the spool. Control and Profiles stay exactly
+          as they are — raw, turns-based, no-cable bench-testing tools; Exercise is the tab that
+          makes cable-attached operation safe by giving the machine a length reference and hard end
+          stops.</p>
+          <div class="callout warn">
+            <span class="icon">A</span>
+            <p>This is <strong>Layer A</strong> only: positioning and safety. Force feedback /
+            resistance (Layer B) is planned but not yet built — Exercise does not resist you, it
+            only positions and limits.</p>
+          </div>
+          <ol>
+            <li><strong>Start Exercise Session</strong> — arms the session; the motor does not move
+            yet. Nothing in this tab ever moves the cable except an explicit action below.</li>
+            <li><strong>Home</strong> — slow, current-limited reel-in until the cable goes taut,
+            which becomes the <code>0</code> length reference. Watch the live position/current
+            readout while this runs; <strong>Abort Homing</strong> stops it immediately, and the
+            always-present <span class="badge stop">STOP</span> works throughout too. If it fails
+            (cable not attached, slipping, or genuinely stuck), it faults with a clear reason
+            instead of reeling in forever.</li>
+            <li><strong>Max Extension</strong> — once homed, applies a light constant tension (just
+            enough to keep the cable taut, trivially overcome by hand) while you pull the cable out
+            by hand to a safe maximum, then <strong>Set Max Here</strong>. The enforced limit is
+            stored slightly inside the point you marked, as a safety margin. <strong>Cancel</strong>
+            discards the attempt without storing anything.</li>
+            <li><strong>Move</strong> — command the cable to a target length in metres. Requires both
+            Home and Max Extension to be set; both ends are enforced by the motor itself, not just
+            the input field.</li>
+            <li><strong>Advanced: Spool Calibration</strong> (collapsed by default) — corrects for
+            the spool's effective radius changing as cable winds on or off. Reel out to some
+            position (via Move), physically measure the actual cable length with a tape measure, and
+            enter it — the correction factor is computed for you. You never enter a raw
+            multiplier.</li>
+            <li><strong>Manual Position Reset</strong> — clears the home reference and
+            max-extension limit (e.g. after the cable slips, or a bad homing run).
+            Confirmation-gated, and only available while the Exercise session is stopped.</li>
+          </ol>
+          <div class="callout">
+            <span class="icon">i</span>
+            <p>The home reference and max-extension limit <strong>do not survive a backend
+            restart</strong> — they're intentionally never written to disk (a stale reference after
+            a restart, power cycle, or period of the motor sitting idle would mean every safety
+            limit is wrong by the same offset). The spool correction factor <em>does</em> persist,
+            since it's a property of the physical spool, not the current session.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2.7 Inspector -->
+    <section id="t27">
+      <div class="tab-panel">
+        <div class="tab-head">
+          <span class="tab-tag">2.7</span>
+          <span class="tab-title">Inspector</span>
+        </div>
+        <div class="tab-body">
+          <p>Full raw property tree for the connected device (single axis0 only — axis1 is hidden,
+          it's an unused ghost node on this board). Use this for low-level poking: reading/writing
+          arbitrary ODrive properties directly, live property charts, and anything the wizard
+          doesn't expose.</p>
+          <p style="color:var(--muted); font-size:13px;">This is the most "raw" interface — use
+          Configuration/Presets for normal setup, Inspector when you need something specific the
+          wizard doesn't cover.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2.8 Command Console -->
+    <section id="t28">
+      <div class="tab-panel">
+        <div class="tab-head">
+          <span class="tab-tag">2.8</span>
+          <span class="tab-title">Command Console</span>
+        </div>
+        <div class="tab-body">
+          <p>Free-form command entry against the device — equivalent to typing into an ODrive Python
+          console, but through the GUI. Use for one-off commands, calibration sequences, or anything
+          scriptable that doesn't have a dedicated UI control.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= SECTION 3 ================= -->
+    <section id="logs">
+      <h2><span class="idx">§3</span> Telemetry logs (CSV)</h2>
+      <p>Every Control or Profiles run writes a CSV to <code>logs/</code> at the project root, named:</p>
+      <pre><code>telemetry_&lt;timestamp&gt;_&lt;mode&gt;_&lt;sim|real&gt;.csv</code></pre>
+      <p>e.g. <span class="filename">telemetry_20260717_143205_profile-overload_real.csv</span>.</p>
+      <div class="callout">
+        <span class="icon">i</span>
+        <p>Since the Control/Profiles sim/real switcher was removed, this suffix is now always
+        <code>real</code> — even under <code>mock_dev</code>, since it reflects which internal
+        hardware factory the session used (always the real one now), not whether the underlying
+        device happens to be the mock object. Older <code>_sim</code> files from before that removal
+        are still valid history, just from a different code path.</p>
+      </div>
+      <table>
+        <tr><th>Column</th><th>Notes</th></tr>
+        <tr><td>timestamp_iso</td><td rowspan="2" style="color:var(--muted)">Standard run metadata</td></tr>
+        <tr><td>t_rel_s</td></tr>
+        <tr><td>mode</td><td style="color:var(--muted)">e.g. velocity, torque, profile-*</td></tr>
+        <tr><td>target</td><td style="color:var(--muted)">Current commanded target</td></tr>
+        <tr><td>position_turns</td><td rowspan="3" style="color:var(--muted)">Live telemetry, same as on-screen readout</td></tr>
+        <tr><td>velocity_turns_s</td></tr>
+        <tr><td>current_iq_a</td></tr>
+        <tr><td>torque_est_nm</td><td style="color:var(--muted)">Estimated torque</td></tr>
+        <tr><td>phase</td><td style="color:var(--muted)">Blank for Velocity/Torque runs, populated for Profiles runs</td></tr>
+        <tr><td>rep_count</td><td style="color:var(--muted)">Blank for Velocity/Torque runs, populated for Profiles runs</td></tr>
+        <tr><td>cable_length_m</td><td style="color:var(--muted)">Blank except on Exercise runs, and even then only once homed</td></tr>
+      </table>
+      <p>A new file opens automatically on Start and closes on Stop — you don't manage this yourself.
+      The active filename is shown on screen while running.</p>
+      <div class="callout warn">
+        <span class="icon">!</span>
+        <p>For an <strong>Overload</strong>-wrapped run, the filename only says
+        <code>profile-overload</code> — it doesn't record which base profile was wrapped in the
+        filename itself. The wrapped profile's parameters are still in the CSV's own columns /
+        backend logs if you need to distinguish runs later.</p>
+      </div>
+    </section>
+
+    <!-- ================= SECTION 4 ================= -->
+    <section id="simreal">
+      <h2><span class="idx">§4</span> Running with vs without hardware</h2>
+      <p>There's one way to run the app now, not a per-tab switch — the whole app (Control/Profiles
+      included) always talks to whatever <code>device_manager</code> finds:</p>
+      <table>
+        <tr><th>Command</th><th>What to expect</th></tr>
+        <tr>
+          <td><code>npm run dev</code></td>
+          <td>Talks to a real connected ODrive. Starting a Control or Profiles run with nothing
+          attached fails within a couple of seconds with a clear on-screen error; nothing hangs or
+          crashes.</td>
+        </tr>
+        <tr>
+          <td><code>npm run mock_dev</code></td>
+          <td>No hardware needed; the whole app, including Control/Profiles, transparently drives the
+          built-in mock device instead. Good for UI development or a demo away from the bench.</td>
+        </tr>
+      </table>
+      <p>The Control/Profiles tabs' own separate, simpler software simulator — a per-tab Sim/Real
+      toggle — has been removed; see <a class="inline-link" href="#t24">§2.4</a>.</p>
+    </section>
+
+    <!-- ================= SECTION 5 ================= -->
+    <section id="rough">
+      <h2><span class="idx">§5</span> Known rough edges <span style="color:var(--dim); font-weight:400; text-transform:none; letter-spacing:0;">(as of Session 3)</span></h2>
+      <div class="callout">
+        <span class="icon">~150ms</span>
+        <p>Live phase/rep telemetry updates every ~150ms via polling, not a websocket — a deliberate,
+        documented tradeoff (see <code>decisions.md</code>). Slightly less immediate than a true push
+        update, but reliable.</p>
+      </div>
+      <div class="callout warn">
+        <span class="icon">STUB</span>
+        <p>The resistance-profile math is a stub — realistic tuning (cable geometry, real strength
+        curves, VBT step sizes) is Phase 2A work.</p>
+      </div>
+      <div class="callout warn">
+        <span class="icon">!</span>
+        <p><strong>Torque-mode velocity limiting</strong> and the <strong>two-simultaneous-connection</strong>
+        case (e.g. Inspector and Control both trying to talk to the same real device) are flagged but
+        not yet resolved — avoid having both a device-connected inspection tab and a Real-hardware
+        Control/Profiles run active at once until Phase 2A addresses this.</p>
+      </div>
+    </section>
+
+    <!-- ================= SECTION 6 ================= -->
+    <section id="quickref">
+      <h2><span class="idx">§6</span> Quick reference</h2>
+      <table>
+        <tr><th>Want to…</th><th>Go to</th></tr>
+        <tr><td style="color:var(--text); font-family:var(--sans); font-size:13.5px;">Write known-good settings to a fresh board</td><td>Configuration</td></tr>
+        <tr><td style="color:var(--text); font-family:var(--sans); font-size:13.5px;">Save/reload a named config</td><td>Presets</td></tr>
+        <tr><td style="color:var(--text); font-family:var(--sans); font-size:13.5px;">Get a quick device health check</td><td>Dashboard</td></tr>
+        <tr><td style="color:var(--text); font-family:var(--sans); font-size:13.5px;">Spin the motor at a fixed velocity/torque</td><td>Control</td></tr>
+        <tr><td style="color:var(--text); font-family:var(--sans); font-size:13.5px;">Train against a dynamic resistance curve / count reps</td><td>Profiles</td></tr>
+        <tr><td style="color:var(--text); font-family:var(--sans); font-size:13.5px;">Home a cable, set safe end stops, and move it by length</td><td>Exercise</td></tr>
+        <tr><td style="color:var(--text); font-family:var(--sans); font-size:13.5px;">Read or write one specific raw property</td><td>Inspector</td></tr>
+        <tr><td style="color:var(--text); font-family:var(--sans); font-size:13.5px;">Run an arbitrary one-off command</td><td>Command Console</td></tr>
+        <tr><td style="color:var(--text); font-family:var(--sans); font-size:13.5px;">Stop the motor immediately</td><td><span class="badge stop">STOP</span> (Control, Profiles, or Exercise, always visible while running)</td></tr>
+      </table>
+    </section>
+
+    <div class="footer-note">SMART GYM CONTROL — USER MANUAL · GENERATED FROM PROJECT DOCS · SESSION 3</div>
+  </main>
+</div>
+
+<script>
+  // mobile sidebar toggle
+  const btn = document.getElementById('menuBtn');
+  const sidebar = document.getElementById('sidebar');
+  btn.addEventListener('click', () => sidebar.classList.toggle('open'));
+  document.querySelectorAll('nav a').forEach(a => {
+    a.addEventListener('click', () => sidebar.classList.remove('open'));
+  });
+
+  // scrollspy
+  const links = Array.from(document.querySelectorAll('nav a'));
+  const targets = links.map(a => document.querySelector(a.getAttribute('href')));
+  const setActive = () => {
+    let idx = 0;
+    const y = window.scrollY + 100;
+    targets.forEach((t, i) => { if (t && t.offsetTop <= y) idx = i; });
+    links.forEach(a => a.classList.remove('active'));
+    if (links[idx]) links[idx].classList.add('active');
+  };
+  window.addEventListener('scroll', setActive);
+  setActive();
+</script>
+
+</body>
+</html>
