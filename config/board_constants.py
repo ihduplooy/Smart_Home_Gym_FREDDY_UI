@@ -101,7 +101,7 @@ ENCODER_CALIB_RANGE = 10
 # may still need re-tuning once real cable load is introduced in later 2A work.
 CONTROL_MODE_POSITION_CONTROL = 3  # odrive.enums.CONTROL_MODE_POSITION_CONTROL
 INPUT_MODE_TRAP_TRAJ = 5  # odrive.enums.INPUT_MODE_TRAP_TRAJ
-CONTROLLER_VEL_LIMIT = 2.0  # turns/s
+CONTROLLER_VEL_LIMIT = 10.0  # turns/s
 CONTROLLER_POS_GAIN = 6.0
 CONTROLLER_VEL_GAIN = 0.05
 CONTROLLER_VEL_INTEGRATOR_GAIN = 0.1
@@ -161,8 +161,12 @@ REP_PROXIMITY_TURNS = 0.1  # how close position must return to the EWMA to count
 # --------------------------------------------------------------------------
 # Exercise tab, Layer A (cable-attached positioning & safety) — tuning values.
 # All chosen against this board's live config/gains as of 23 July 2026
-# (CONTROLLER_VEL_LIMIT=2.0 turns/s, TRAP_TRAJ_VEL_LIMIT=1.0 turns/s,
-# MOTOR_CURRENT_LIM=15.0A, SPOOL_RADIUS_M=0.05m). Full reasoning for each in
+# (TRAP_TRAJ_VEL_LIMIT=1.0 turns/s, MOTOR_CURRENT_LIM=15.0A,
+# SPOOL_RADIUS_M=0.05m at the time -- see the Layer B note above SPOOL_RADIUS_M
+# for the later correction to 0.035m). None of the values below depend on
+# CONTROLLER_VEL_LIMIT specifically, so its later live re-tune (2.0 -> 10.0
+# turns/s, outside any session's own work) doesn't affect this block's
+# reasoning. Full reasoning for each in
 # docs/decisions.md ("Exercise tab Layer A" entry) — these are exactly the
 # values the bench will end up re-tuning once a cable is actually attached.
 # --------------------------------------------------------------------------
@@ -342,13 +346,24 @@ HOLD_DURATION_S = 0.75  # How long continuously in a phase-detector hold
 
 # Isokinetic governor (spec §4.3) — torque-domain velocity cap, no
 # integrator anywhere in this path (spec §6 item 5).
-ISOKINETIC_VELOCITY_TARGET_TURNS_S = 1.0  # Default speed cap. Half of
-                                          # CONTROLLER_VEL_LIMIT=2.0 turns/s
-                                          # (spec §9's suggested relation) —
-                                          # at SPOOL_RADIUS_M=0.035m this is
+ISOKINETIC_VELOCITY_TARGET_TURNS_S = 1.0  # Default speed cap. At
+                                          # SPOOL_RADIUS_M=0.035m this is
                                           # ~22 cm/s, a moderate controlled
-                                          # training speed with headroom
-                                          # below the absolute ODrive ceiling.
+                                          # training speed. NOT chosen as a
+                                          # fraction of CONTROLLER_VEL_LIMIT
+                                          # (spec §9's suggested relation) --
+                                          # that constant governs ODrive's
+                                          # position/velocity control loops,
+                                          # but Layer B runs in torque mode
+                                          # with ENABLE_TORQUE_MODE_VEL_LIMIT
+                                          # =False (spec §3.1), so it does
+                                          # not bound velocity here at all.
+                                          # This is exactly why the governor
+                                          # itself (this gain + target) is
+                                          # the only thing capping speed in
+                                          # isokinetic mode, and why constant-
+                                          # force mode has NO software speed
+                                          # cap at all (see decisions.md).
 ISOKINETIC_GOVERNOR_GAIN = 150.0  # N per (turn/s) above target -- a firm,
                                   # quickly-felt "wall": at FORCE_MIN_N=5.0
                                   # base, exceeding the target by ~1 turn/s
