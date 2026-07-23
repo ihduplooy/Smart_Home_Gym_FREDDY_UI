@@ -11,14 +11,46 @@ from dataclasses import asdict
 
 from flask import jsonify, request
 
-from core.control.session import ControlSession
+from core.cable import CableState, ExerciseMode
+from core.control.modes import MODES_BY_NAME
+from core.control.session import ControlSession, DEFAULT_HARDWARE_FACTORIES
+from core.hardware.odrive_hw import OdriveHardware
 from core.profiles import PROFILE_REGISTRY, OverloadWrapper, Phase
+
+from . import device_manager
 
 log = logging.getLogger(__name__)
 
+
+def _real_hardware_factory() -> OdriveHardware:
+    """Built here (not core/) so OdriveHardware reuses device_manager's
+    already-cached USB connection/lock instead of opening a second,
+    independent one — see core/hardware/odrive_hw.py's module docstring and
+    docs/decisions.md (22 July 2026) for why that mattered live."""
+    return OdriveHardware(
+        find_any_fn=lambda timeout: device_manager.get_shared_handle(timeout=timeout),
+        lock_provider=device_manager.get_shared_io_lock,
+    )
+
+
+# Exercise tab (Layer A): home/max/k live here, not inside ExerciseMode --
+# ControlSession.stop() destroys the mode handler on every stop(), but
+# "Reset Position" (exercise_tab_build_spec_layerA.md §3.5) must work while
+# idle, against a home reference from a *previous* run. Same process
+# lifetime as control_session below; constructed once. See docs/decisions.md
+# ("Exercise tab Layer A" entry) for the full reasoning.
+cable_state = CableState()
+
 # Single ControlSession instance for the whole backend process — the Control
-# tab's one stateful orchestrator.
-control_session = ControlSession(hardware_source="sim")
+# tab's one stateful orchestrator. Defaults to real hardware: this project only
+# ever runs against the real board now that it's wired up (the sim/real
+# switcher was removed from the GUI, though set_hardware_source()/the
+# /api/control/hardware-source route are still there for scripting/tests).
+control_session = ControlSession(
+    hardware_source="real",
+    hardware_factories={**DEFAULT_HARDWARE_FACTORIES, "real": _real_hardware_factory},
+    mode_factories={**MODES_BY_NAME, "exercise": lambda: ExerciseMode(cable_state)},
+)
 
 # Telemetry websocket push rate (spec: ~10 Hz batches).
 _WS_PUSH_INTERVAL_S = 0.1

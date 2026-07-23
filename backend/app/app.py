@@ -1,5 +1,8 @@
 import json
 import logging
+import threading
+import time
+from pathlib import Path
 from typing import Any, Dict, List
 
 from flask import Flask, jsonify, request
@@ -9,6 +12,7 @@ from flask_sock import Sock
 from .constants import VERSION  # backend version tag
 from . import device_manager
 from . import control_routes
+from . import exercise_routes
 from .api_reference import load_api_reference, reference_line
 from .telemetry import telemetry_session
 from config import board_constants
@@ -145,6 +149,50 @@ def create_app() -> Flask:
             log.exception("command failed: %s", path)
             return jsonify({"error": str(e), "path": path}), 400
 
+    @app.route("/api/emergency-stop", methods=["POST"])
+    def emergency_stop():
+        """Always-available panic button (sidebar, every tab): stop whatever
+        Control session is running, then directly idle every axis on the
+        cached device regardless of what put it in closed loop (a Control
+        session, or Dashboard's own Enable Motor) — belt-and-braces rather
+        than relying on session state being accurate."""
+        control_routes.control_session.stop()
+        odrv = device_manager.get_shared_handle()
+        writes = []
+        if odrv is not None:
+            with device_manager.get_shared_io_lock():
+                for axis_path in ("axis0.requested_state", "axis1.requested_state"):
+                    try:
+                        device_manager.set_attr_value(odrv, axis_path, 1)  # AXIS_STATE_IDLE
+                        writes.append({"path": axis_path, "status": "ok"})
+                    except Exception as e:
+                        writes.append({"path": axis_path, "status": "error", "error": str(e)})
+        return jsonify({"stopped": True, "hardware_writes": writes})
+
+    @app.route("/api/reset", methods=["POST"])
+    def reset_interface():
+        """Soft reset for a stuck UI: stop any Control session and forget the
+        cached device handle/lock, so the next Connect starts completely
+        fresh — without restarting the backend process itself."""
+        control_routes.control_session.stop()
+        device_manager.forget_all()
+        return jsonify({"reset": True})
+
+    @app.route("/api/restart-backend", methods=["POST"])
+    def restart_backend():
+        """Restarts just the backend process. Rather than reimplementing
+        process kill/respawn, this rides the Werkzeug debug reloader that's
+        already watching source files: touching one's mtime makes it kill and
+        respawn the worker process exactly as it already does on every code
+        edit in this project. Delayed so this request's own response can
+        flush before the process goes down."""
+        def _trigger():
+            time.sleep(0.3)
+            Path(__file__).touch()
+
+        threading.Thread(target=_trigger, daemon=True).start()
+        return jsonify({"restarting": True})
+
     @sock.route("/api/devices/<serial>/telemetry")
     def ws_telemetry(ws, serial):
         try:
@@ -156,5 +204,6 @@ def create_app() -> Flask:
                 pass
 
     control_routes.register(app, sock)
+    exercise_routes.register(app)
 
     return app
