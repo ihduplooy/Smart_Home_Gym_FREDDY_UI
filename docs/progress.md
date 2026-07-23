@@ -1333,3 +1333,187 @@ deciding unilaterally how to handle it; chosen: fold together rather than
 surgically split hunks per file. Some of this session's commits therefore
 contain both Layer A work and carried-forward bench-session content, called
 out explicitly in each affected commit message.
+
+---
+
+# Exercise tab, Layer B Session B1 (concentric force feedback), 23 July 2026
+
+Built per `exercise_tab_build_spec_layerB.md`. Concentric only — constant
+force and isokinetic resistance, plus the safety machinery that makes
+either safe to stand in front of. Eccentric (B2) is explicitly out of scope,
+gated behind B1 being validated on real hardware with a real person, not
+merely behind B1 being merged. Full architecture reasoning, constant-by-
+constant justification, the §5.2 power analysis, and three named
+first-live-run watch items are in `docs/decisions.md` ("Exercise tab Layer B
+Session B1" entry) — this section is the §15 Definition of Done walkthrough.
+
+## §2 preconditions — how this session actually started
+
+Checked before writing any code, per explicit instruction to stop rather
+than work around unmet preconditions. All four were unmet:
+`SPOOL_RADIUS_M`/`BRAKE_RESISTANCE`/`DC_MAX_NEGATIVE_CURRENT`/
+`MAX_REGEN_CURRENT` were still placeholders (§2.3/§2.4), the KV measurement
+was outstanding (§2.2, open item #13, still is), and Layer A had never been
+run against real hardware with a cable attached (§2.1, still hasn't). Full
+precondition-check report given to the user; the user then provided real,
+measured values for §2.3/§2.4 and explicitly authorized proceeding with the
+build/sim-test path on §2.1/§2.2 (per the spec's own carve-out for §2.2;
+§2.1 was the user's explicit call to override the spec's stricter framing,
+not a default I assumed).
+
+## §11 DoD walkthrough
+
+- [x] **Governor, let-go detector, and power limiter built as pure,
+      synthetically-tested modules** (`core/cable/{governor,letgo,
+      power_limiter,ramps}.py`), written and tested before any integration,
+      per the session's own hard requirement (matching Layer A's homing.py
+      precedent). 40 tests, all passing on the first run except the power-
+      limiter's quadratic-solving edge cases, which needed the smaller-root
+      derivation worked out carefully up front (see decisions.md's power
+      limiter module docstring for the reasoning) rather than being
+      caught by a failing test after the fact.
+- [x] **Force session state machine integrated per the §8 decision**
+      (`core/cable/force_mode.py::ForceMode`), running in the existing
+      50Hz `ControlSession` loop — no new thread. Registered as a sixth
+      mode (`"force"`) alongside velocity/torque/position/profile/exercise
+      on the one shared session, sharing `CableState` with `ExerciseMode`
+      via the `mode_factories` hook Layer A added.
+- [x] **`enable_torque_mode_vel_limit = False` set explicitly**, open item
+      #8 closed in `docs/decisions.md` with reasoning — applied as a
+      runtime-owned property in `OdriveHardware.set_mode()`'s TORQUE
+      branch (reasserted every torque-mode entry, not a one-time NVM
+      write), so it resolves the item project-wide rather than
+      Force-mode-locally. Live-board confirmation of the property path
+      itself is a named, explicit action item in decisions.md — not yet
+      done, cannot be done without hardware access.
+- [x] **§2.4 regen configuration written**, with real values from the
+      user (`BRAKE_RESISTANCE=2.0` confirmed against the physical
+      resistor; `DC_MAX_NEGATIVE_CURRENT=-0.5`, tightened from an
+      unjustified -3.0 placeholder and justified against the bench's
+      13-15V bus; `MAX_REGEN_CURRENT=0` confirmed correct). Property names
+      cross-checked against `config/odrive_config.py`'s own live-run
+      comments (`odrv0.config.brake_resistance`/`dc_max_negative_current`/
+      `max_regen_current`, all top-level bus config, all previously
+      confirmed live) rather than trusted from the bundled reference alone.
+- [x] **All ten §6 safety behaviours implemented and individually tested**
+      (`core/tests/test_force_mode.py`, 29 tests):
+      1. No torque without explicit engagement —
+         `test_construction_and_arm_apply_zero_torque`,
+         `test_engage_requires_explicit_action`.
+      2. Force ramps in and out, never steps —
+         `test_force_ramps_in_not_instant`,
+         `test_force_ramps_in_reaches_target_eventually`,
+         `test_force_ramps_out_on_disengage_not_instant`.
+      3. Let-go detector fires on sustained reel-in, debounced, hard-stops —
+         `test_letgo_fires_during_concentric_and_hard_stops`,
+         `test_letgo_does_not_fire_on_subdebounce_transient`.
+      4. Let-go detector is state-gated, does not fire outside concentric —
+         `test_letgo_does_not_fire_during_holding`,
+         `test_letgo_does_not_fire_while_armed` (explicit tests for the
+         gating itself, per the spec's own instruction, not just the
+         positive case).
+      5. No integrator in any force path —
+         `test_no_windup_on_sustained_hold_still` (500 ticks held exactly
+         at rest, commanded force settles and stays flat — this is also
+         the test that caught the `_force_n_param`/isokinetic-base-force
+         bug, see below).
+      6. Commanded force clamped by F_max, hardware torque-limit, and the
+         power limiter, in that order — `test_force_clamped_at_force_max`
+         plus the power_limiter.py module tests already covering the
+         other two layers' composition.
+      7. Force eases off approaching max extension, not a fault under full
+         load — `test_force_tapers_approaching_max_extension`.
+      8. Fault zeroes torque and requires explicit manual resume —
+         `test_resume_returns_to_armed_not_engaged`,
+         `test_resume_preserves_force_params_and_leaves_home_max_untouched`,
+         `test_resume_rejected_when_not_faulted`.
+      9. Stop remains available and effective in every state, including
+         mid-rep under full load, and the Layer A current-limit-restore
+         path still behaves when Stop lands mid-ENGAGED —
+         `test_global_stop_mid_engaged_zeroes_torque_and_restores_
+         current_limit` (end-to-end via the real `ControlSession`, not
+         just the recording fake).
+      10. Sign correctness, asserted directly not just magnitude —
+          `test_commanded_torque_opposes_pay_out_during_concentric`.
+- [x] **§5.2 break-even analysis computed against real constants and
+      recorded** — see decisions.md. Caught and corrected a flawed first
+      pass before reporting it (used `CONTROLLER_VEL_LIMIT` as an
+      achievable-velocity ceiling that doesn't actually apply once torque
+      mode's velocity limiter is disabled) — the corrected analysis shows
+      the power limiter is a real, active behaviour during fast constant-
+      force reps, not a formality, while isokinetic is self-limiting by
+      construction.
+- [x] **Constants in `config/board_constants.py`, each with documented
+      reasoning** — full table in decisions.md. Two spec §9 rows
+      intentionally not duplicated as new constants (hold-threshold reuses
+      `PHASE_VEL_THRESHOLD_TURNS_S`, isokinetic force floor reuses
+      `FORCE_MIN_N`); two new ones the table didn't list
+      (`MOTOR_PHASE_RESISTANCE_OHM`, `ENABLE_TORQUE_MODE_VEL_LIMIT`).
+- [x] **UI per §10, including the uncalibrated-force label while §2.2 is
+      outstanding** (`frontend/src/components/tabs/exercise/
+      ExerciseTab.jsx`'s new Force Feedback card): Newtons primary with a
+      kgf secondary hint, mode select (constant/isokinetic) with the
+      velocity-cap field only shown for isokinetic, Engage/Disengage
+      visually distinct from session Start/STOP via colour and placement,
+      live state/commanded-force/estimated-force/velocity/power-limiter
+      display, confirmation-gated Resume for FAULT. The uncalibrated-
+      estimate label is driven by `board_constants.force.
+      torque_constant_is_estimate`, persistent until open item #13 lands
+      (same pattern as the Profiles tab's stub-math notice).
+      **Verified in a real browser** (headless Chrome via CDP): card
+      renders with zero console errors/exceptions; Start Force Session
+      correctly disabled while un-homed; mode select toggling to
+      isokinetic correctly reveals the velocity-cap field; kgf hint and
+      uncalibrated-estimate label both render. Also caught and fixed while
+      verifying: a stray backend process left over from earlier in this
+      session was squatting on port 5050 without `ODRIVE_MOCK`, silently
+      serving "No ODrive device found" to every request.
+- [x] **Telemetry and CSV extended per §11** — `commanded_force_n`,
+      `estimated_force_n`, `cable_velocity_m_s`, `regen_power_w`,
+      `force_state`, `power_limiter_active` appended after
+      `cable_length_m`; phase/rep_count columns reused unchanged, not
+      duplicated, exactly as the spec asked.
+- [x] **Full regression green**: `pytest core/tests` 242/242 (172 Layer A
+      baseline this session started from + 40 Layer B pure modules
+      (ramps/governor/letgo/power_limiter) + 1 geometry helper + 27
+      ForceMode + 2 CSV columns — see commit history for the running count
+      at each step), `npx eslint .` clean, `npx vitest run` 40/40 (2
+      skipped, unaffected).
+      **Layer A and Control/Profiles behaviour confirmed unchanged**: no
+      Layer B commit touched `core/cable/exercise_mode.py`, the Control
+      tab, or the Profiles tab (confirmed via `git diff --stat` across
+      every Layer B commit); live-smoke-tested velocity mode (Control),
+      the profile registry (Profiles), and exercise start/stop (Layer A)
+      against `ODRIVE_MOCK=1` post-Layer-B, all identical to pre-Layer-B
+      behaviour. **Choke-point audit clean** — still exactly one real
+      `odrive.find_any()` call site (`backend/app/device_manager.py`);
+      `ForceMode` shares the existing `control_session`/
+      `_real_hardware_factory`, no new hardware connection path.
+- [x] `docs/progress.md` (this entry) and `docs/decisions.md` updated,
+      including every architecture deviation and the reasoning for each
+      chosen constant, plus three named first-live-run watch items
+      cross-referenced to §14's specific escalation steps (added per
+      explicit follow-up instruction after the checkpoint 2 report, so
+      they survive to whoever is actually at the bench).
+- [x] `docs/user_manual.md` / `manual.html` gain the force-feedback
+      section (see the entry immediately below this one) — did not
+      rabbit-hole into either manual's known pre-existing staleness.
+- [x] **Open items L-B1…L-B4 addressed**:
+      - **L-B1** (bench-measured torque constant, open item #13):
+        **unresolved**, unchanged status. Layer B ships on the fallback
+        estimate (`MOTOR_TORQUE_CONSTANT=0.516875`); the UI's uncalibrated-
+        estimate label is the honesty mechanism while this stays open.
+      - **L-B2** (manual-resume flow after a runaway hard-stop): **resolved**.
+        Built exactly per the WHAT doc's own direction — lighter than
+        re-homing, an explicit confirmed action, force params preserved,
+        home/max untouched, never automatic (`ForceMode`'s FAULT->ARMED
+        `resume` action, `/api/force/resume`, confirmation-gated in the UI).
+      - **L-B3** (concrete resistance-strength UI): **resolved**. Newtons
+        primary (§10.1), kgf secondary hint, `FORCE_MAX_N` as the enforced
+        range, `force_to_torque()` (the existing single conversion site,
+        reused not duplicated) as the mapping to torque.
+      - **L-B4** (explicit start/stop gating for live-vs-idle resistance):
+        **resolved** — this is what the ARMED/ENGAGED split *is* (spec §4.1
+        literally frames it as resolving this item): zero torque while
+        ARMED, resistance only ever live in ENGAGED_CONCENTRIC/HOLDING,
+        entered only by an explicit "engage" action.
