@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box,
   VStack,
@@ -48,6 +48,8 @@ import {
   stopExercise,
   resetExercisePosition,
   calibrateSpoolK,
+  updateHomingSettings,
+  updateSpoolRadius,
 } from '../../../api/exercise'
 import {
   startForceSession,
@@ -104,13 +106,39 @@ const ExerciseTab = ({ isActive = true }) => {
   const [forceError, setForceError] = useState(null)
   const [forceBusy, setForceBusy] = useState(false)
 
+  const [homingThresholdText, setHomingThresholdText] = useState('')
+  const [homingVelocityText, setHomingVelocityText] = useState('')
+  const [homingLimitText, setHomingLimitText] = useState('')
+  const [homingSettingsError, setHomingSettingsError] = useState(null)
+  const [homingSettingsBusy, setHomingSettingsBusy] = useState(false)
+
+  const [spoolRadiusText, setSpoolRadiusText] = useState('')
+  const [spoolRadiusError, setSpoolRadiusError] = useState(null)
+  const [spoolRadiusBusy, setSpoolRadiusBusy] = useState(false)
+
   const { isOpen: resetOpen, onOpen: openReset, onClose: closeReset } = useDisclosure()
   const { isOpen: advancedOpen, onToggle: toggleAdvanced } = useDisclosure()
+  const { isOpen: homingOpen, onToggle: toggleHoming } = useDisclosure({ defaultIsOpen: true })
   const { isOpen: resumeOpen, onOpen: openResume, onClose: closeResume } = useDisclosure()
 
   useEffect(() => {
     getBoardConstants().then(setBoardConstants).catch(() => {})
   }, [])
+
+  // Prefill the editable settings fields from the backend's current values,
+  // once, the first time they arrive -- not on every poll, so the field
+  // doesn't fight the user while they're mid-edit.
+  const settingsInitialized = useRef(false)
+  useEffect(() => {
+    if (settingsInitialized.current || !status?.cable) return
+    const c = status.cable
+    if (c.homing_current_threshold_a == null) return
+    setHomingThresholdText(String(c.homing_current_threshold_a))
+    setHomingVelocityText(String(c.homing_velocity_turns_s))
+    setHomingLimitText(String(c.homing_current_limit_a))
+    setSpoolRadiusText(String(c.r0))
+    settingsInitialized.current = true
+  }, [status?.cable])
 
   const sessionRunning = Boolean(control?.running && control?.mode === 'exercise')
   const forceSessionRunning = Boolean(control?.running && control?.mode === 'force')
@@ -173,6 +201,52 @@ const ExerciseTab = ({ isActive = true }) => {
       return
     }
     run(moveCable, targetLengthNumber)
+  }
+
+  const homingThresholdNumber = Number(homingThresholdText)
+  const homingVelocityNumber = Number(homingVelocityText)
+  const homingLimitNumber = Number(homingLimitText)
+  const homingSettingsValid =
+    homingThresholdText !== '' && Number.isFinite(homingThresholdNumber) && homingThresholdNumber > 0 &&
+    homingVelocityText !== '' && Number.isFinite(homingVelocityNumber) && homingVelocityNumber > 0 &&
+    homingLimitText !== '' && Number.isFinite(homingLimitNumber) && homingLimitNumber > 0
+
+  const handleUpdateHomingSettings = async () => {
+    if (!homingSettingsValid) {
+      setHomingSettingsError('Threshold, velocity, and current limit must all be positive numbers')
+      return
+    }
+    setHomingSettingsError(null)
+    setHomingSettingsBusy(true)
+    try {
+      await updateHomingSettings({
+        currentThresholdA: homingThresholdNumber,
+        velocityTurnsS: homingVelocityNumber,
+        currentLimitA: homingLimitNumber,
+      })
+    } catch (e) {
+      setHomingSettingsError(e.message)
+    } finally {
+      setHomingSettingsBusy(false)
+    }
+  }
+
+  const spoolRadiusNumber = Number(spoolRadiusText)
+  const spoolRadiusValid = spoolRadiusText !== '' && Number.isFinite(spoolRadiusNumber) && spoolRadiusNumber > 0
+  const handleUpdateSpoolRadius = async () => {
+    if (!spoolRadiusValid) {
+      setSpoolRadiusError('Spool radius must be a positive number')
+      return
+    }
+    setSpoolRadiusError(null)
+    setSpoolRadiusBusy(true)
+    try {
+      await updateSpoolRadius(spoolRadiusNumber)
+    } catch (e) {
+      setSpoolRadiusError(e.message)
+    } finally {
+      setSpoolRadiusBusy(false)
+    }
   }
 
   const handleResetConfirmed = async () => {
@@ -365,18 +439,25 @@ const ExerciseTab = ({ isActive = true }) => {
                 )}
               </HStack>
 
-              <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4}>
+              <SimpleGrid columns={{ base: 2, md: 5 }} spacing={4}>
                 <Stat>
                   <StatLabel color="gray.300">Cable length</StatLabel>
                   <StatNumber color="odrive.300" fontSize="xl">
                     {control?.extra?.cable_length_m != null ? control.extra.cable_length_m.toFixed(3) : '—'}
                   </StatNumber>
-                  <Text fontSize="xs" color="gray.400">m</Text>
+                  <Text fontSize="xs" color="gray.400">m, from home</Text>
                 </Stat>
                 <Stat>
-                  <StatLabel color="gray.300">Position</StatLabel>
-                  <StatNumber color="odrive.300" fontSize="xl">{(latest?.position ?? 0).toFixed(3)}</StatNumber>
-                  <Text fontSize="xs" color="gray.400">turns</Text>
+                  <StatLabel color="gray.300">Cable position</StatLabel>
+                  <StatNumber color="odrive.300" fontSize="xl">
+                    {cable?.cable_position_turns != null ? cable.cable_position_turns.toFixed(3) : '—'}
+                  </StatNumber>
+                  <Text fontSize="xs" color="gray.400">turns, zeroed at home</Text>
+                </Stat>
+                <Stat>
+                  <StatLabel color="gray.300">Encoder position</StatLabel>
+                  <StatNumber color="gray.400" fontSize="xl">{(latest?.position ?? 0).toFixed(3)}</StatNumber>
+                  <Text fontSize="xs" color="gray.400">turns, absolute</Text>
                 </Stat>
                 <Stat>
                   <StatLabel color="gray.300">Current (Iq)</StatLabel>
@@ -399,44 +480,121 @@ const ExerciseTab = ({ isActive = true }) => {
           </CardBody>
         </Card>
 
-        {/* Homing -- first live run must be attended, abortable, observable (spec §10) */}
-        <Card bg="gray.800" variant="elevated">
-          <CardHeader>
-            <HStack justify="space-between">
-              <Heading size="md" color="white">Homing</Heading>
-              <Badge colorScheme={action === 'homing' ? 'orange' : isHomed ? 'green' : 'gray'} variant="solid">
-                {action === 'homing' ? (HOMING_STATE_LABEL[homingState] ?? 'Homing…') : isHomed ? 'Homed' : 'Not homed'}
-              </Badge>
-            </HStack>
-          </CardHeader>
-          <CardBody>
-            <VStack align="stretch" spacing={3}>
-              <Text fontSize="sm" color="gray.400">
-                Slow, current-limited reel-in until the cable goes taut. Watch position and current above —
-                Abort or the always-available STOP will halt it immediately.
-              </Text>
-              <HStack>
-                <Button
-                  size="sm"
-                  colorScheme="odrive"
-                  onClick={handleHome}
-                  isDisabled={!sessionRunning || busyAction || busy}
-                >
-                  Home
-                </Button>
-                <Button
-                  size="sm"
-                  colorScheme="red"
-                  variant="outline"
-                  onClick={handleAbortHoming}
-                  isDisabled={action !== 'homing' || busy}
-                >
-                  Abort Homing
-                </Button>
-              </HStack>
-            </VStack>
-          </CardBody>
-        </Card>
+        {/* Homing -- collapsible (requested 23 July 2026, declutter once set up);
+            first live run must still be attended, abortable, observable (spec §10) */}
+        <Box>
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={homingOpen ? <ChevronDownIcon /> : <ChevronRightIcon />}
+            onClick={toggleHoming}
+            color="odrive.300"
+          >
+            {homingOpen ? 'Hide' : 'Show'} Homing
+          </Button>
+          <Collapse in={homingOpen} animateOpacity>
+            <Card bg="gray.800" variant="elevated" mt={2}>
+              <CardHeader>
+                <HStack justify="space-between">
+                  <Heading size="md" color="white">Homing</Heading>
+                  <Badge colorScheme={action === 'homing' ? 'orange' : isHomed ? 'green' : 'gray'} variant="solid">
+                    {action === 'homing' ? (HOMING_STATE_LABEL[homingState] ?? 'Homing…') : isHomed ? 'Homed' : 'Not homed'}
+                  </Badge>
+                </HStack>
+              </CardHeader>
+              <CardBody>
+                <VStack align="stretch" spacing={3}>
+                  <Text fontSize="sm" color="gray.400">
+                    Slow, current-limited reel-in until the cable goes taut. Watch position and current above —
+                    Abort or the always-available STOP will halt it immediately.
+                  </Text>
+                  <HStack>
+                    <Button
+                      size="sm"
+                      colorScheme="odrive"
+                      onClick={handleHome}
+                      isDisabled={!sessionRunning || busyAction || busy}
+                    >
+                      Home
+                    </Button>
+                    <Button
+                      size="sm"
+                      colorScheme="red"
+                      variant="outline"
+                      onClick={handleAbortHoming}
+                      isDisabled={action !== 'homing' || busy}
+                    >
+                      Abort Homing
+                    </Button>
+                  </HStack>
+
+                  <Box borderTop="1px solid" borderColor="gray.700" pt={3}>
+                    <Text fontSize="xs" color="gray.400" mb={2}>
+                      Homing settings — live-adjustable, persisted, take effect on the next Home (not
+                      retroactively on one already running).
+                    </Text>
+                    {homingSettingsError && (
+                      <Alert status="error" variant="left-accent" mb={2}>
+                        <AlertIcon />
+                        <AlertDescription>{homingSettingsError}</AlertDescription>
+                      </Alert>
+                    )}
+                    <HStack spacing={4} wrap="wrap" align="flex-end">
+                      <Box>
+                        <Text fontSize="xs" color="gray.400" mb={1}>Current threshold</Text>
+                        <InputGroup size="sm" w="130px">
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            fontFamily="mono"
+                            value={homingThresholdText}
+                            onChange={(e) => setHomingThresholdText(e.target.value)}
+                          />
+                          <InputRightAddon px={2} fontSize="xs">A</InputRightAddon>
+                        </InputGroup>
+                      </Box>
+                      <Box>
+                        <Text fontSize="xs" color="gray.400" mb={1}>Reel-in velocity</Text>
+                        <InputGroup size="sm" w="140px">
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            fontFamily="mono"
+                            value={homingVelocityText}
+                            onChange={(e) => setHomingVelocityText(e.target.value)}
+                          />
+                          <InputRightAddon px={2} fontSize="xs">turns/s</InputRightAddon>
+                        </InputGroup>
+                      </Box>
+                      <Box>
+                        <Text fontSize="xs" color="gray.400" mb={1}>Current limit</Text>
+                        <InputGroup size="sm" w="130px">
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            fontFamily="mono"
+                            value={homingLimitText}
+                            onChange={(e) => setHomingLimitText(e.target.value)}
+                          />
+                          <InputRightAddon px={2} fontSize="xs">A</InputRightAddon>
+                        </InputGroup>
+                      </Box>
+                      <Button
+                        size="sm"
+                        colorScheme="odrive"
+                        variant="outline"
+                        onClick={handleUpdateHomingSettings}
+                        isDisabled={!homingSettingsValid || homingSettingsBusy}
+                      >
+                        Update
+                      </Button>
+                    </HStack>
+                  </Box>
+                </VStack>
+              </CardBody>
+            </Card>
+          </Collapse>
+        </Box>
 
         {/* Max-extension calibration */}
         <Card bg="gray.800" variant="elevated">
@@ -752,13 +910,40 @@ const ExerciseTab = ({ isActive = true }) => {
                     </Button>
                   </HStack>
                   <SimpleGrid columns={2} spacing={3}>
-                    <Stat>
-                      <StatLabel color="gray.300">Spool radius (r0)</StatLabel>
-                      <StatNumber color="odrive.300" fontSize="md">
-                        {cable?.r0 != null ? cable.r0.toFixed(4) : '—'}
-                      </StatNumber>
-                      <Text fontSize="xs" color="gray.400">m</Text>
-                    </Stat>
+                    <Box>
+                      <Text fontSize="xs" color="gray.400" mb={1}>Spool radius (r0)</Text>
+                      {spoolRadiusError && (
+                        <Alert status="error" variant="left-accent" mb={2} py={1}>
+                          <AlertIcon />
+                          <AlertDescription fontSize="xs">{spoolRadiusError}</AlertDescription>
+                        </Alert>
+                      )}
+                      <HStack>
+                        <InputGroup size="sm" w="130px">
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            fontFamily="mono"
+                            value={spoolRadiusText}
+                            onChange={(e) => setSpoolRadiusText(e.target.value)}
+                          />
+                          <InputRightAddon px={2} fontSize="xs">m</InputRightAddon>
+                        </InputGroup>
+                        <Button
+                          size="sm"
+                          colorScheme="odrive"
+                          variant="outline"
+                          onClick={handleUpdateSpoolRadius}
+                          isDisabled={!spoolRadiusValid || spoolRadiusBusy}
+                        >
+                          Update
+                        </Button>
+                      </HStack>
+                      <Text fontSize="0.65rem" color="gray.500" mt={1}>
+                        Ruler-measured base radius. Affects Move, length telemetry, and Force Feedback
+                        immediately.
+                      </Text>
+                    </Box>
                     <Stat>
                       <StatLabel color="gray.300">Correction factor (k)</StatLabel>
                       <StatNumber color="odrive.300" fontSize="md">

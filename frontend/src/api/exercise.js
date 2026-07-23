@@ -14,6 +14,8 @@
 //   POST /api/exercise/stop
 //   POST /api/exercise/reset_position          -- idle-gated, confirm in the UI first
 //   POST /api/exercise/calibrate_k             { measured_length_m }
+//   POST /api/exercise/update_homing_settings  { current_threshold_a?, velocity_turns_s?, current_limit_a? }
+//   POST /api/exercise/update_spool_radius     { r0 }
 
 async function getJson(url, options) {
   const res = await fetch(url, options)
@@ -83,4 +85,16 @@ export function resetExercisePosition() {
 
 export function calibrateSpoolK(measuredLengthM) {
   return postJson('/api/exercise/calibrate_k', { measured_length_m: measuredLengthM })
+}
+
+export function updateHomingSettings({ currentThresholdA, velocityTurnsS, currentLimitA } = {}) {
+  const body = {}
+  if (currentThresholdA != null) body.current_threshold_a = currentThresholdA
+  if (velocityTurnsS != null) body.velocity_turns_s = velocityTurnsS
+  if (currentLimitA != null) body.current_limit_a = currentLimitA
+  return postJson('/api/exercise/update_homing_settings', body)
+}
+
+export function updateSpoolRadius(r0) {
+  return postJson('/api/exercise/update_spool_radius', { r0 })
 }
