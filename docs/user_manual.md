@@ -199,28 +199,45 @@ dangerous than the first — this hardware has no mechanical fail-safe
 1. **Start Exercise Session** — arms the session; the motor does not move
    yet. This is deliberate: nothing in this tab ever moves the cable except
    an explicit action below.
-2. **Home** — slow, current-limited reel-in until the cable goes taut,
-   which becomes the `0` length reference. Watch the live position/current
-   readout while this runs; **Abort Homing** stops it immediately, and the
-   always-present **STOP** works throughout too. If it fails (cable not
-   attached, slipping, or genuinely stuck), it faults with a clear reason
-   instead of reeling in forever.
+2. **Home** (its own collapsible sub-section, open by default) — slow,
+   current-limited reel-in until the cable goes taut, which becomes the `0`
+   length reference. Watch the live position/current readout while this
+   runs; **Abort Homing** stops it immediately, and the always-present
+   **STOP** works throughout too. If it fails (cable not attached,
+   slipping, or genuinely stuck), it faults with a clear reason instead of
+   reeling in forever. Underneath, **Homing settings** (current threshold,
+   reel-in velocity, current limit) are live-adjustable and persist across
+   backend restarts — tune them here rather than editing
+   `config/board_constants.py` and restarting; changes apply to the *next*
+   Home, not one already running.
 3. **Max Extension** — once homed, applies a light constant tension (just
    enough to keep the cable taut, trivially overcome by hand) while you pull
    the cable out by hand to a safe maximum, then **Set Max Here**. The
    enforced limit is stored slightly inside the point you marked, as a
    safety margin. **Cancel** discards the attempt without storing anything.
-4. **Move** — command the cable to a target length in metres. Requires both
-   Home and Max Extension to be set; both ends are enforced by the motor
-   itself, not just the input field.
+   The **hold force** itself is also a live-adjustable, persisted setting
+   underneath, same as homing settings.
+4. **Move** — command the cable to a target length in metres, with its own
+   Move Velocity and Accel/Decel fields (same idea as Control tab's
+   Position mode) and a live turns estimate under the length field.
+   Requires both Home and Max Extension to be set; both ends are enforced
+   by the motor itself, not just the input field.
 5. **Advanced: Spool Calibration** (collapsed by default — click to expand)
    — corrects for the spool's effective radius changing as cable winds on
    or off. Reel out to some position (via Move), physically measure the
    actual cable length with a tape measure, and enter it — the correction
-   factor is computed for you. You never enter a raw multiplier.
+   factor is computed for you. You never enter a raw multiplier. The base
+   **spool radius (r0)** itself is also editable here, live and persisted,
+   separate from the wrap-growth correction factor.
 6. **Manual Position Reset** — clears the home reference and max-extension
    limit (e.g. after the cable slips, or a bad homing run). Confirmation-
    gated, and only available while the Exercise session is stopped.
+
+The main status card distinguishes **Cable position** (turns, zeroed at
+Home — `—` until homed) from **Encoder position** (turns, the raw absolute
+reading, whatever arbitrary value it was at power-on) — they're deliberately
+shown as two separate stats so it's never ambiguous which one you're
+looking at.
 
 **The home reference and max-extension limit do not survive a backend
 restart** — they're intentionally never written to disk (a stale reference
@@ -231,12 +248,11 @@ session — you shouldn't have to recalibrate it every time.
 
 #### 2.6.1 Force Feedback (Layer B, Session B1 — concentric only)
 
-A second card in the same tab, below Manual Position Reset. **Requires
-Home and Max Extension to already be set** (§2.6) — start an Exercise
-session and do those first if you haven't. Force Feedback is its own
-session on the same underlying motor connection, so it and the Exercise
-session above can't run at the same time; stop one before starting the
-other.
+A card next to Move (the two sit side by side). **Requires Home and Max
+Extension to already be set** (§2.6) — start an Exercise session and do
+those first if you haven't. Force Feedback is its own session on the same
+underlying motor connection, so it and the Exercise session above can't run
+at the same time; stop one before starting the other.
 
 > Displayed forces are labelled **uncalibrated estimates** in the UI, and
 > will be for as long as that label is showing — the motor's actual torque
@@ -249,22 +265,28 @@ other.
    below a speed cap, resistance climbs sharply above it — a firm "wall,"
    not a hard limit). Set the **Force** (Newtons — a kgf estimate is shown
    alongside for intuition) and, for Isokinetic, the **Velocity cap**.
-3. **Engage** — deliberately a different button, in a different colour,
+3. Optionally set an **active range** (Start/End, in metres) — resistance
+   only applies within that sub-range of the home-to-max travel, tapering
+   off near both bounds the same way it already tapers near the
+   max-extension limit. Leave either blank to use the full range (the
+   default, unchanged from before this existed).
+4. **Engage** — deliberately a different button, in a different colour,
    from Start/STOP above it: this is the moment resistance actually
    becomes live. Force ramps in smoothly, never steps. **Update** retargets
-   live without disengaging; **Disengage** ramps back to zero.
-4. If you hold still for a moment mid-rep, resistance eases to a light
+   live (including the active range) without disengaging; **Disengage**
+   ramps back to zero.
+5. If you hold still for a moment mid-rep, resistance eases to a light
    holding tension rather than staying at full force — you'll feel this as
    the "Holding" state.
-5. If the handle is released while resistance is live, the machine detects
+6. If the handle is released while resistance is live, the machine detects
    the sudden reel-in and **hard-stops immediately** (zero torque) — this
    shows as a **FAULT**. It does not recover on its own. **Resume**
    (confirmation-gated) clears the fault and returns to Armed — your force
    settings are kept, and Home/Max Extension are untouched — but resistance
    stays off until you Engage again.
-6. As the cable nears the max-extension limit under load, resistance eases
+7. As the cable nears the max-extension limit under load, resistance eases
    off on its own rather than cutting out abruptly at the limit.
-7. The live display shows commanded vs. estimated actual force, cable
+8. The live display shows commanded vs. estimated actual force, cable
    velocity, and whether the **power limiter** is currently reducing force
    to protect the brake resistor from overheating — this can activate
    during fast reps and is normal, not a fault.

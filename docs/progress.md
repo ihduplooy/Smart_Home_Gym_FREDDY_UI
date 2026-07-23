@@ -1517,3 +1517,103 @@ not a default I assumed).
         literally frames it as resolving this item): zero torque while
         ARMED, resistance only ever live in ENGAGED_CONCENTRIC/HOLDING,
         entered only by an explicit "engage" action.
+
+## First live-hardware session, 23 July 2026 — two bugs fixed, then a "more control" feature phase
+
+The user ran the Exercise tab against real hardware for the first time this
+session (bench, no reduction gearing yet — see `docs/decisions.md`'s "First
+live run against the real board" entry for full root-cause detail on both
+bugs). Two crashes were reported with screenshots
+(`enable_torque_mode_vel_limit not found` and `Exercise target must be a
+dict, got 0.5`); both fixed same-day and documented in `docs/decisions.md`.
+Homing worked; the user then asked, in one long combined message, for
+substantially more on-screen control rather than editing
+`config/board_constants.py` and restarting the backend for every bench
+tuning pass. Built directly off that request, item by item:
+
+- [x] **Live-adjustable homing tuning** (current threshold, reel-in
+      velocity, current limit) — `CableState.set_homing_settings()`,
+      validated atomically (limit > threshold, limit ≤
+      `board_constants.MOTOR_CURRENT_LIM`, no partial application on a
+      rejected call), persisted through the same sidecar `k` already used
+      (generalized `_load_settings`/`_save_settings` from a single value to
+      a settings dict — see `core/cable/state.py`'s module docstring).
+      `HomingStateMachine` gained optional constructor overrides (default
+      `None` -> `board_constants`); the four safety-margin constants
+      (debounce/grace/travel-bound/timeout) deliberately stayed
+      `board_constants`-only — not requested, and they're safety margins,
+      not calibration values.
+- [x] **Live-adjustable spool radius (r0)** — `CableState.set_r0()`, same
+      persistence pattern. Caught and fixed a consistency gap before
+      shipping: `ForceMode` still read `board_constants.SPOOL_RADIUS_M`
+      directly in six places (torque conversion, two velocity conversions,
+      power limiter, regen estimate) — the live setting would have been
+      stored but silently never used. `force_to_torque()`/`torque_to_force()`
+      gained an optional `r0` override to fix this without breaking the
+      Profiles-tab callers that have no `CableState`.
+- [x] **Live-adjustable max-extension calibration hold force** —
+      `CableState.set_calib_hold_force()`, same pattern, exposed via
+      `POST /api/exercise/update_calib_hold_force`.
+- [x] **Cable position vs. encoder position**, split into two distinct
+      status fields (`backend/app/exercise_routes.py::_cable_status_dict`):
+      `cable_position_turns` (zeroed at home, `None` until homed) alongside
+      the raw absolute `latest_sample.position` (whatever arbitrary value
+      the encoder read at power-on) — the ambiguity was the user's specific
+      complaint ("wasn't sure if I was looking at 0 from home or the raw
+      number").
+- [x] **Homing tucked into a collapsible sub-section**, `Collapse`/
+      `useDisclosure` (`defaultIsOpen: true` — still visible by default for
+      an unattended first run per spec §10), same UI pattern already
+      established for Advanced Spool Calibration.
+- [x] **Move + Force Feedback laid out side by side**, `SimpleGrid`,
+      resolved via `AskUserQuestion` rather than guessed: kept as two
+      separate cards (they're still mutually-exclusive modes on the shared
+      `ControlSession`, a merged card would blur that), not a merged
+      toggle. Move gained Control-tab-style controls it never had — Move
+      Velocity and Accel/Decel fields (the backend route already accepted
+      `move_velocity_turns_s`/`accel_decel_turns_s2`, just wasn't exposed)
+      plus a client-side turns estimate under the length field (r0-only,
+      ignores the `k` wrap-growth correction, same simplification already
+      used for the kgf force hint — informational, not authoritative).
+- [x] **Force Feedback configurable start/end travel sub-range**
+      (`core/cable/force_mode.py`) — `engage`/`update_params` accept
+      optional `start_length_m`/`end_length_m`, converted to absolute
+      encoder turns and validated against the calibrated `[home, max]`
+      range (rejected outright if outside it or zero-width, never silently
+      clamped). Omitted -> full range, unchanged from before this feature.
+      Resolved via `AskUserQuestion`: taper off near both range edges, the
+      same as the existing max-extension taper, not a hard disengage or a
+      visual-only warning. Reuses the existing pure `taper_factor()` at
+      both edges rather than adding a second pure function. One subtlety
+      caught by the existing test suite before shipping: the end edge
+      always tapers (unchanged safety behaviour, default or custom), but
+      the start edge only tapers when it's a real custom boundary away from
+      home — tapering a default (home-anchored) start by default would
+      have silently changed existing behaviour for every caller who never
+      asked for a sub-range (surfaced immediately as `test_force_mode.py`
+      failures going from full-force to force=0 at the very first tick,
+      since the existing tests engage and tick without ever moving away
+      from home).
+- [x] **Full regression green**: `pytest core/tests` 266/266 (242 Layer B
+      baseline + 24 new across this whole feature phase: homing-settings/
+      r0/calib-hold-force persistence and validation tests in
+      `test_cable_state.py`, plus 8 range-feature tests in
+      `test_force_mode.py`), `npx eslint src/` clean, `npx vitest run`
+      40/40 unaffected (no component-level tests exist for
+      `ExerciseTab.jsx`; covered by browser verification below instead).
+      **Verified in a real browser** (headless Chrome via CDP, against the
+      real (non-mock) backend already running from earlier in this session,
+      with no ODrive device attached — confirmed via `GET /api/devices`
+      returning `[]` before touching anything, so no risk to real
+      hardware): navigated to the Exercise tab, confirmed zero console
+      errors/exceptions, and confirmed every new field renders — Move
+      Velocity/Accel/Decel fields and the turns estimate, the Force
+      Feedback Start/End range fields with `home`/`max` placeholders, the
+      Max Extension hold-force field, and the Cable position / Encoder
+      position split. Screenshotted the Move/Force Feedback side-by-side
+      layout to confirm it holds at typical desktop width. Did not click
+      any state-mutating action (Start Session, Home, Engage, etc.) against
+      this backend — GET-only polling and pure rendering checks, since it's
+      the same real (non-mock) `CableState`/sidecar-file instance the user's
+      own bench session already persisted real values into.
+- [x] `docs/progress.md` (this entry) and `docs/decisions.md` updated.

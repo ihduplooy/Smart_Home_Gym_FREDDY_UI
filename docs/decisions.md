@@ -2121,3 +2121,90 @@ scoping the sync (and the tab's own `running` flag) to the three modes
 Control's UI actually understands, with an "another mode running" warning
 banner matching the precedent already used in Profiles/Exercise — the same
 fix class, not new UI.
+
+### "More control" feature phase, same day (23 July 2026)
+
+After the two bugs above were fixed, the user's next message was one long,
+itemized "I want control" request — reproduced in full in `docs/progress.md`'s
+matching entry. The design decisions worth recording separately from the
+implementation log:
+
+**Persistence: extend, don't duplicate.** Every new live-adjustable value
+(homing threshold/velocity/current-limit, spool radius `r0`, max-extension
+calibration hold force) went through the exact same mechanism the spool
+correction factor `k` already used — `CableState` + the gitignored JSON
+sidecar — generalized from a single hardcoded value to a `_PERSISTED_DEFAULTS`
+key -> `board_constants` fallback dict. The alternative (a second config
+file, or per-value ad hoc persistence) was rejected outright: these are all
+the same *kind* of thing — bench/physical-spool properties the user tunes
+once real hardware tells them the `board_constants.py` defaults are off —
+and `k` already proved the pattern works.
+
+**Where live-adjustability stops.** `HomingStateMachine` gained *optional*
+constructor overrides (`velocity_turns_s`, `current_threshold_a` — default
+`None` falls back to `board_constants`), but its other four constants
+(debounce samples, startup grace period, travel-bound, timeout) deliberately
+did **not** become adjustable. Neither the user's request nor the failure
+mode motivating them (accidental over-travel, a homing run that never
+terminates) named these; they're safety margins around the detection logic,
+not calibration values the physical bench setup changes. Scope was drawn at
+exactly what was asked, not "the whole homing state machine now takes a
+settings object."
+
+**Consistency gap caught before shipping: r0 in `ForceMode`.** Making `r0`
+live-adjustable via `CableState.set_r0()` is only correct if everything that
+converts using it actually reads the live value. `ForceMode` still called
+`board_constants.SPOOL_RADIUS_M` directly in six places (torque conversion,
+two velocity conversions, power limiter, regen estimate) — the setting would
+have persisted correctly and displayed correctly, while every force number
+the motor actually produced stayed silently wrong. Fixed by threading
+`self.cable_state.r0` through all six call sites and adding an optional `r0`
+parameter to `force_to_torque()`/`torque_to_force()` (default: still
+`board_constants.SPOOL_RADIUS_M`, so Profiles-tab callers — which have no
+`CableState` — are unaffected). A dedicated regression test
+(`test_commanded_torque_uses_cable_state_r0_not_board_constants`) asserts the
+actual commanded torque changes with a live-adjusted `r0`, not just that the
+value is stored.
+
+**Force Feedback range: taper both edges, but not always the start edge.**
+The user's approved design (`AskUserQuestion`, "Taper off near the range
+edges, like the max-extension taper") reuses the existing pure
+`taper_factor()` at both the configured start and end boundaries rather than
+adding a second pure function — `min()` of the two edge tapers. The one
+non-obvious call: when the range's start defaults to `home_turns` (i.e. the
+caller never set `start_length_m`), that edge does **not** taper, even
+though it's still "an edge" of the active range in the same sense the end
+edge is. Reasoning: the end-edge taper is a *safety* behaviour (easing off
+before the enforced/physical limit, present since the original Layer B
+build, independent of this feature) — it makes sense unconditionally,
+default range or not. The start edge's taper is purely a UX smoothing
+behaviour for a range the user explicitly carved out away from home; home
+itself was never a "soft" zone needing deceleration (there's nothing on the
+other side of it to crash into within concentric operation — homing itself
+already handles that boundary), and applying it by default would have
+silently made every existing caller's first few centimetres of pull
+force-free. This was not a hypothetical concern — it broke seven existing
+tests immediately (`test_force_ramps_in_not_instant` and siblings, which
+engage and tick from a stationary position at `home_turns`, going from
+"full commanded force" to "zero, taper stuck at the edge" once the first,
+naive two-edge-always-tapers implementation landed) before the
+`math.isclose(range_start_turns, home_turns)` guard was added. Left as an
+explicit named comment at the guard site (`core/cable/force_mode.py`,
+`_tick_engaged`) since the reasoning isn't derivable from the code alone.
+
+**Move/Force layout: `AskUserQuestion`, not a guess.** Three points in this
+feature phase had genuine design ambiguity affecting safety-relevant
+behaviour or a real UX trade-off rather than a literal, named request:
+Force Feedback's range-edge behaviour (above), whether Move and Force
+Feedback should merge into one card with a mode toggle or stay separate
+cards placed side by side, and whether the max-extension calibration hold
+force should become a live setting at all (vs. staying a fixed constant,
+since it's a safety-adjacent tension value, not just a UX number). All three
+came back as the offered "Recommended" option — separate cards side by side
+(they remain genuinely mutually-exclusive modes on the shared
+`ControlSession`; merging would have blurred that), and yes, expose the
+calibration hold force the same way homing settings already are. Recorded
+here because these were decisions with real alternatives, not
+straightforwardly implied by what was literally typed — unlike the homing/
+r0/cable-position/collapsible-Homing items, which were named explicitly
+enough to just build.
