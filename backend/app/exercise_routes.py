@@ -29,6 +29,8 @@ log = logging.getLogger(__name__)
 
 def _cable_status_dict() -> dict:
     cs = control_routes.cable_state
+    latest = control_routes.control_session.status().get("latest_sample")
+    cable_position_turns = (latest["position"] - cs.home_turns) if (latest and cs.is_homed) else None
     return {
         "is_homed": cs.is_homed,
         "has_max": cs.has_max,
@@ -40,6 +42,14 @@ def _cable_status_dict() -> dict:
         "last_homing_fault": cs.last_homing_fault,
         "k": cs.k,
         "r0": cs.r0,
+        "homing_current_threshold_a": cs.homing_current_threshold_a,
+        "homing_velocity_turns_s": cs.homing_velocity_turns_s,
+        "homing_current_limit_a": cs.homing_current_limit_a,
+        # Zeroed-at-home position, distinct from the raw absolute encoder
+        # reading in latest_sample.position -- requested 23 July 2026 (the
+        # raw encoder value is whatever arbitrary number it was at power-on,
+        # not 0 at home, which was confusing to read live).
+        "cable_position_turns": cable_position_turns,
     }
 
 
@@ -162,3 +172,42 @@ def register(app) -> None:
 
         cs.set_k(k)
         return jsonify({"cable": _cable_status_dict()})
+
+    @app.route("/api/exercise/update_homing_settings", methods=["POST"])
+    def exercise_update_homing_settings():
+        """Live-adjustable homing tuning (requested 23 July 2026, after the
+        first live-hardware session) -- current detection threshold,
+        reel-in velocity, and the reduced current limit applied during
+        homing. Any subset; validated together (limit must exceed
+        threshold, stay under the board's operating current limit) and
+        persisted the same way spool correction factor k already is.
+        Takes effect on the *next* Home action, not retroactively on one
+        already in progress."""
+        body = request.get_json(silent=True) or {}
+        try:
+            control_routes.cable_state.set_homing_settings(
+                current_threshold_a=body.get("current_threshold_a"),
+                velocity_turns_s=body.get("velocity_turns_s"),
+                current_limit_a=body.get("current_limit_a"),
+            )
+            return jsonify({"cable": _cable_status_dict()})
+        except (ValueError, TypeError) as e:
+            return jsonify({"error": str(e)}), 400
+
+    @app.route("/api/exercise/update_spool_radius", methods=["POST"])
+    def exercise_update_spool_radius():
+        """Live-adjustable spool radius (requested 23 July 2026) -- affects
+        every force<->torque and cable-velocity conversion from this point
+        on (core/profiles/units.py, core/cable/force_mode.py), not just
+        display. Prefer the Advanced Spool Calibration flow
+        (/api/exercise/calibrate_k) for the wrap-growth correction factor;
+        this route is for the base radius itself."""
+        body = request.get_json(silent=True) or {}
+        r0 = body.get("r0")
+        if r0 is None:
+            return jsonify({"error": "r0 required"}), 400
+        try:
+            control_routes.cable_state.set_r0(float(r0))
+            return jsonify({"cable": _cable_status_dict()})
+        except (ValueError, TypeError) as e:
+            return jsonify({"error": str(e)}), 400
