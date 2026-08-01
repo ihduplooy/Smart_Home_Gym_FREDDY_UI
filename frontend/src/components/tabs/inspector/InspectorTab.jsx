@@ -10,8 +10,8 @@ import {
 } from '@chakra-ui/react'
 import * as backend from '../../../api/backend'
 import PropertyTree from './property-tree/PropertyTree'
+import AxisTelemetryCharts from './AxisTelemetryCharts'
 import LiveCharts from './LiveCharts'
-import MotorControlsCard from '../../MotorControlsCard'
 import { useApiPropertyTree } from '../../../hooks/useApiPropertyTree'
 import '../../../styles/InspectorTab.css'
 
@@ -50,7 +50,7 @@ const InspectorTab = ({ isConnected, isActive = true }) => {
           </Alert>
         )}
         <Grid templateColumns={{ base: '1fr', lg: '1fr 1.5fr' }} gap={4} h="100%" minH="0">
-          {/* Left: property tree + motor controls */}
+          {/* Left: property tree */}
           <GridItem display="flex" flexDirection="column" minH="0">
             <Box flex="1" minH="0">
               <PropertyTree
@@ -60,15 +60,17 @@ const InspectorTab = ({ isConnected, isActive = true }) => {
                 updateProperty={updateProperty}
               />
             </Box>
-            <Box flexShrink={0} mt={3}>
-              <MotorControlsCard isActive={isActive} compact />
-            </Box>
           </GridItem>
 
-          {/* Right: live charts */}
+          {/* Right: axis0 telemetry graphs (fixed) + live charts (user-picked) */}
           <GridItem display="flex" flexDirection="column" minH="0" overflow="hidden">
-            <Box flex="1" minH="0" overflow="hidden">
-              <LiveCharts isActive={isActive} />
+            <Box flex="1" minH="0" overflow="auto">
+              <Box p={4}>
+                <AxisTelemetryCharts isActive={isActive} />
+              </Box>
+              <Box h="600px">
+                <LiveCharts isActive={isActive} />
+              </Box>
             </Box>
           </GridItem>
         </Grid>

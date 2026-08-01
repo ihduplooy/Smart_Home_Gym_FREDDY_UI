@@ -16,7 +16,33 @@
 //   POST /api/exercise/calibrate_k             { measured_length_m }
 //   POST /api/exercise/update_homing_settings  { current_threshold_a?, velocity_turns_s?, current_limit_a? }
 //   POST /api/exercise/update_spool_radius     { r0 }
+//   POST /api/exercise/update_spool_k          { k } -- direct entry, still bounds-checked
 //   POST /api/exercise/update_calib_hold_force { force_n }
+//   POST /api/exercise/update_force_settings   { letgo_velocity_turns_s?, letgo_debounce_samples?,
+//                                                 hold_duration_s?, force_ramp_in_s?, force_ramp_out_s?,
+//                                                 isokinetic_governor_gain?, isokinetic_velocity_filter_alpha?,
+//                                                 max_extension_force_taper_m?, position_guard_warning_turns?,
+//                                                 position_guard_hard_turns? }
+//
+// Train tab calibration overhaul -- manual max-extension entry and the
+// experimental multi-point spool-growth calibration (see status.cable
+// .spool_model for the currently-active model/equations/segments):
+//   POST /api/exercise/set_max_extension_manual        { length_m }
+//   POST /api/exercise/start_spool_growth_calibration
+//   POST /api/exercise/record_growth_point             { length_m }
+//   POST /api/exercise/remove_growth_point              { index }
+//   POST /api/exercise/clear_growth_points
+//   POST /api/exercise/cancel_spool_growth_calibration
+//   POST /api/exercise/save_growth_calibration
+//   POST /api/exercise/clear_growth_calibration
+//
+// Force Feedback (formerly a separate "force" session, merged 24 July 2026
+// into this same Exercise session -- see backend/app/force_routes.py):
+//   POST /api/force/engage          { mode, concentric_force_n, eccentric_force_n, velocity_target_turns_s?,
+//                                      start_length_m?, end_length_m? }
+//   POST /api/force/update_params   same shape as engage
+//   POST /api/force/disengage
+//   POST /api/force/resume
 
 async function getJson(url, options) {
   const res = await fetch(url, options)
@@ -100,6 +126,68 @@ export function updateSpoolRadius(r0) {
   return postJson('/api/exercise/update_spool_radius', { r0 })
 }
 
+export function updateSpoolK(k) {
+  return postJson('/api/exercise/update_spool_k', { k })
+}
+
 export function updateCalibHoldForce(forceN) {
   return postJson('/api/exercise/update_calib_hold_force', { force_n: forceN })
+}
+
+export function setMaxExtensionManual(lengthM) {
+  return postJson('/api/exercise/set_max_extension_manual', { length_m: lengthM })
+}
+
+export function startSpoolGrowthCalibration() {
+  return postJson('/api/exercise/start_spool_growth_calibration')
+}
+
+export function recordGrowthPoint(lengthM) {
+  return postJson('/api/exercise/record_growth_point', { length_m: lengthM })
+}
+
+export function removeGrowthPoint(index) {
+  return postJson('/api/exercise/remove_growth_point', { index })
+}
+
+export function clearGrowthPoints() {
+  return postJson('/api/exercise/clear_growth_points')
+}
+
+export function cancelSpoolGrowthCalibration() {
+  return postJson('/api/exercise/cancel_spool_growth_calibration')
+}
+
+export function saveGrowthCalibration() {
+  return postJson('/api/exercise/save_growth_calibration')
+}
+
+export function clearGrowthCalibration() {
+  return postJson('/api/exercise/clear_growth_calibration')
+}
+
+export function updateForceSettings({
+  letgoVelocityTurnsS,
+  letgoDebounceSamples,
+  holdDurationS,
+  forceRampInS,
+  forceRampOutS,
+  isokineticGovernorGain,
+  isokineticVelocityFilterAlpha,
+  maxExtensionForceTaperM,
+  positionGuardWarningTurns,
+  positionGuardHardTurns,
+} = {}) {
+  const body = {}
+  if (letgoVelocityTurnsS != null) body.letgo_velocity_turns_s = letgoVelocityTurnsS
+  if (letgoDebounceSamples != null) body.letgo_debounce_samples = letgoDebounceSamples
+  if (holdDurationS != null) body.hold_duration_s = holdDurationS
+  if (forceRampInS != null) body.force_ramp_in_s = forceRampInS
+  if (forceRampOutS != null) body.force_ramp_out_s = forceRampOutS
+  if (isokineticGovernorGain != null) body.isokinetic_governor_gain = isokineticGovernorGain
+  if (isokineticVelocityFilterAlpha != null) body.isokinetic_velocity_filter_alpha = isokineticVelocityFilterAlpha
+  if (maxExtensionForceTaperM != null) body.max_extension_force_taper_m = maxExtensionForceTaperM
+  if (positionGuardWarningTurns != null) body.position_guard_warning_turns = positionGuardWarningTurns
+  if (positionGuardHardTurns != null) body.position_guard_hard_turns = positionGuardHardTurns
+  return postJson('/api/exercise/update_force_settings', body)
 }

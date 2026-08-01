@@ -99,6 +99,26 @@ export async function invokeCommand(serial, path, args = []) {
   return postJson(`/api/devices/${enc(serial)}/command`, { path, args })
 }
 
+/** Idle every axis on the cached device and stop any Control session — the sidebar's always-available panic button. */
+export function emergencyStop() {
+  return postJson('/api/emergency-stop', {})
+}
+
+/** Soft reset: forget the cached device/lock and stop any Control session, without restarting the backend process. */
+export function resetInterface() {
+  return postJson('/api/reset', {})
+}
+
+/** Restart just the backend process (rides the dev-server's file-watch reloader). */
+export function restartBackend() {
+  return postJson('/api/restart-backend', {})
+}
+
+/** Idle every axis, then kill both the backend and frontend dev-server processes for real — the in-UI "Quit Freddy". */
+export function quitBackend() {
+  return postJson('/api/quit', {})
+}
+
 /** Build the WebSocket URL for telemetry streaming. */
 export function telemetryUrl(serial) {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'

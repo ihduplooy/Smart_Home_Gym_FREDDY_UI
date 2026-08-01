@@ -101,6 +101,7 @@ class SimHardware(HardwareInterface):
             velocity=self._velocity,
             current_iq=current_iq,
             torque_est=torque_est,
+            bus_voltage_v=board_constants.SIM_BUS_VOLTAGE_V,
         )
 
     def set_mode(self, mode: ControlMode) -> None:

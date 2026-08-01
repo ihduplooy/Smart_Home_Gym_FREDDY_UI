@@ -26,11 +26,16 @@ class TelemetrySample:
     t: float  # monotonic seconds
     position: float  # turns
     velocity: float  # turns/s
-    current_iq: float  # A
+    current_iq: float  # A — phase current (Iq_measured), not bus current
     torque_est: float  # Nm — torque_constant * current_iq
     # TODO(2A): torque_constant (config/board_constants.MOTOR_TORQUE_CONSTANT)
     # is a placeholder pending motor characterisation (open item #2), so
     # torque_est is only as accurate as that constant.
+    # Testing tab (Testing tab Build Spec §3): added for the Testing tab's
+    # power-draw telemetry channel. Defaulted so the many existing
+    # TelemetrySample(...) construction call sites across core/tests/ (built
+    # before this field existed) don't need updating.
+    bus_voltage_v: float = 0.0  # V — odrv0.vbus_voltage (real); fixed placeholder (sim)
 
 
 class HardwareInterface(ABC):

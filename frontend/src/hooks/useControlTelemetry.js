@@ -1,9 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
 import { getControlStatus, getControlTelemetry } from '../api/control'
+import { appendAndTrimByAge } from '../utils/telemetryBuffer'
 
-// Bounded so recharts stays smooth; ~30s of history at the ~150ms poll rate
-// below.
-const MAX_CHART_POINTS = 300
+// Rolling buffer duration (train_tab_build_spec.md "calibration overhaul"
+// item 6a) -- evicted by sample AGE via utils/telemetryBuffer.js's
+// appendAndTrimByAge(), the same age-based strategy useTrainTelemetry.js
+// already used, replacing a fixed MAX_CHART_POINTS=300 point-count cap that
+// silently held only ~6s of real history at the telemetry loop's 50Hz tick
+// rate regardless of what MiniChart's own "60s"/"All" range buttons
+// claimed to offer (see docs/decisions.md, "Train tab" entry, for the
+// original bug report this same fix already addressed for Train). No
+// per-tab-adjustable setting for Control the way Train's is (CableState-
+// backed) -- a fixed constant matching Train's own default is enough for
+// now; Control has no natural persisted-settings home to put one in.
+// Exported so ControlTab.jsx can pass the exact same duration to
+// TelemetryTimeSeriesChart's `bufferS` prop (its range buttons cap
+// themselves at bufferS) rather than a second hardcoded copy that could
+// drift out of sync with the buffer this hook actually keeps.
+export const CONTROL_TELEMETRY_BUFFER_S = 90
 
 // REST fallback for /ws/control-telemetry (see backend/app/control_routes.py
 // and docs/decisions.md, Session 2): Werkzeug's dev server hands each
@@ -47,9 +61,20 @@ export function useControlTelemetry(enabled) {
         setStatus(nextStatus)
         setConnected(true)
         if (samples.length) {
+          // Stamp each new sample with the target position active *at poll
+          // time* -- position-mode targets only change on an explicit
+          // retarget (rare relative to the ~150ms poll rate), so treating
+          // every sample in this batch as sharing the latest target is an
+          // accurate-enough history for the chart overlay without the
+          // backend needing to record a target alongside every ring-buffer
+          // sample itself.
+          const targetPosition =
+            nextStatus?.mode === 'position' && nextStatus?.target && typeof nextStatus.target === 'object'
+              ? nextStatus.target.position
+              : null
+          const stamped = samples.map((s) => ({ ...s, target_position: targetPosition }))
           lastTRef.current = samples[samples.length - 1].t
-          const next = seriesRef.current.concat(samples)
-          if (next.length > MAX_CHART_POINTS) next.splice(0, next.length - MAX_CHART_POINTS)
+          const next = appendAndTrimByAge(seriesRef.current, stamped, CONTROL_TELEMETRY_BUFFER_S)
           seriesRef.current = next
           setSeries(next)
         }

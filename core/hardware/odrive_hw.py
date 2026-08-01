@@ -107,7 +107,41 @@ class OdriveHardware(HardwareInterface):
         # (e.g. the global Stop firing mid-homing) must not be able to leak
         # a lowered limit into the next Control/Profiles session.
         with self._lock_provider():
+            self._clear_errors()
             self._axis.motor.config.current_lim = board_constants.MOTOR_CURRENT_LIM
+
+    def _clear_errors(self) -> None:
+        """Axis/motor/encoder/controller error flags on the real board are
+        STICKY -- they persist across Python-side reconnects and only clear
+        via clear_errors() or a physical power cycle. Without this, a fault
+        from a PAST session (e.g. a real MOTOR_ERROR_CONTROL_DEADLINE_MISSED
+        that genuinely happened once) stays set forever and gets immediately
+        re-reported as "hardware errors detected" the instant the very next
+        session's first telemetry tick reads it back —
+        ControlSession._telemetry_loop's auto-stop safety net then fires
+        within milliseconds of every future Start, even though nothing is
+        actually wrong right now. Found live, 1 August 2026: the backend log
+        showed /api/control/start succeed, then the auto-stop fire 3ms
+        later — too fast to be a fresh real-time violation, and the exact
+        same error pair on every retry pointed at a stale flag, not a
+        recurring fault.
+
+        0.5.x exposes a single top-level odrv.clear_errors(); 0.6.x moved it
+        to a per-axis axis{n}.clear_errors() (see frontend's
+        useMotorControl.js, which already branches on this same difference
+        for the Dashboard's own Clear Errors button). Try both, non-fatal
+        either way — matches this file's established precedent for a
+        property/command that may not exist on a given firmware line (e.g.
+        enable_torque_mode_vel_limit below)."""
+        try:
+            self._odrv.clear_errors()
+            return
+        except AttributeError:
+            pass
+        try:
+            self._axis.clear_errors()
+        except Exception:
+            log.warning("Could not clear stale ODrive error flags on connect()")
 
     def disconnect(self) -> None:
         self._odrv = None
@@ -127,6 +161,7 @@ class OdriveHardware(HardwareInterface):
                 velocity=float(axis.encoder.vel_estimate),
                 current_iq=current_iq,
                 torque_est=board_constants.MOTOR_TORQUE_CONSTANT * current_iq,
+                bus_voltage_v=float(self._odrv.vbus_voltage),
             )
 
     def set_mode(self, mode: ControlMode) -> None:

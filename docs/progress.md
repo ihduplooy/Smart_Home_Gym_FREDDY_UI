@@ -1617,3 +1617,804 @@ tuning pass. Built directly off that request, item by item:
       the same real (non-mock) `CableState`/sidecar-file instance the user's
       own bench session already persisted real values into.
 - [x] `docs/progress.md` (this entry) and `docs/decisions.md` updated.
+
+## Train tab, 25 July 2026
+
+Built from `train_tab_build_spec.md`, a fresh, from-scratch resistance-training
+tab built on plain torque control — deliberately *not* `ForceMode`'s (now
+`ExerciseMode`'s) governor/ramp/hold/let-go machinery. The spec itself said
+it was written from memory and asked its §0 assumptions be checked first;
+several were stale (`ForceMode` merged into `ExerciseMode`, `MODES_BY_NAME`
+only has 4 entries with "exercise" injected via `mode_factories`, `core/
+profiles/` isn't a stub). Full reasoning and the design decisions this forced
+(Move/jog built inside `TrainMode` rather than editing `ExerciseMode`; the
+real root cause of the graph time-window bug) are in `docs/decisions.md`
+("Train tab — build spec §0 research pass").
+
+### §8 Definition of Done
+
+- [x] `core/cable/train_profiles.py` (pure, hardware-free: `TrainSegment`/
+      `TrainProfile`, constant/linear/bell shapes, one `preview()` evaluator)
+      + `core/cable/train_mode.py` (`TrainMode(BaseMode)`) built, unit-tested
+      against the sim/fake-hardware harness (30 + 14 new tests).
+- [x] `TrainMode` registered on `ControlSession` via a `mode_factories`
+      override in `backend/app/control_routes.py` (`"train":
+      lambda: TrainMode(cable_state)`), same pattern `"exercise"` already
+      uses — not `MODES_BY_NAME` itself. Confirmed mutually exclusive
+      alongside the other five modes and sharing the exact same `CableState`
+      singleton as `ExerciseMode` (`ex.cable_state is tr.cable_state is
+      control_routes.cable_state`).
+- [x] Max-extension enforcement toggle: `CableState.train_max_extension_
+      enforced` (persisted, default `True`), live-adjustable via
+      `POST /api/train/update_settings`, scoped to `TrainMode`'s tick only
+      (reuses the existing `check_runtime_guard`/`position_guard_hard_turns`
+      — no new tolerance invented).
+- [x] Move panel extended with a torque parameter — built as `TrainMode`'s
+      own `move` action (`hardware.set_position_target(..., torque_limit=
+      ...)`), not added to `ExerciseMode`. Reasoning (the §3-vs-§6/DoD
+      tension this created, and why torque *limit* was chosen over a raw
+      torque jog) logged in `docs/decisions.md`.
+- [x] Resistance profile editor: segments, 3 shapes (constant/linear/bell),
+      live preview graph (`frontend/src/components/tabs/train/
+      TrainProfileEditor.jsx`, debounced against `POST /api/train/
+      preview_profile`).
+- [x] Both Train graphs built fresh (`TrainTimeSeriesChart.jsx`,
+      `TrainPositionChart.jsx`) — do not import or modify `MiniChart.jsx`.
+      Time-windowing fixed at the actual root cause (a fixed 300-point
+      buffer cap at a 50 Hz tick rate silently held only ~6s regardless of
+      the "60s"/"All" buttons): `useTrainTelemetry.js`'s rolling buffer
+      evicts by sample *age* against a new persisted `train_telemetry_
+      buffer_s` setting (default 90s) instead. Toggleable lines (Position
+      actual/target, Velocity, Torque) and the target-position dotted
+      overlay confirmed working in the browser pass below.
+- [x] Every new numeric default is a persisted, `CableState`-backed setting
+      (`train_max_extension_enforced`, `train_telemetry_buffer_s`) — the
+      standing rule's own named example (graph buffer size). Per-jog
+      transient parameters (move length/velocity/accel/torque-limit) follow
+      the existing Exercise Move-panel precedent of live text-field defaults
+      instead — reasoning in `docs/decisions.md`.
+- [x] Exercise/Control/Profiles tabs confirmed unchanged: `git status`
+      diffed against this session's own start — the only files this session
+      touched are `core/cable/train_*.py` (new), `core/cable/state.py`
+      (additive settings only), `core/cable/__init__.py` (new exports),
+      `backend/app/control_routes.py`/`app.py` (new mode/route registration,
+      additive), `backend/app/train_routes.py` (new), `config/
+      board_constants.py` (new Train constants, additive), `core/tests/
+      test_train_*.py` (new), `frontend/src/components/tabs/train/*` (new),
+      `frontend/src/api/train.js` (new), `frontend/src/hooks/
+      useTrainTelemetry.js` (new), `frontend/src/utils/trainGeometry.js`
+      (new), `frontend/src/components/MainTabs.jsx` (new tab entry only).
+      `exercise_mode.py`, `force_routes.py`, `ExerciseTab.jsx`,
+      `ControlTab.jsx`, `MiniChart.jsx`, `ProfilesTab.jsx` all carry only
+      the pre-existing uncommitted diff that predates this session
+      (verified against the diff captured before any Train work began).
+- [x] Full regression green: `pytest core/tests` 335/335 (291 pre-existing +
+      44 new: `test_train_profiles.py`, `test_train_mode.py`), `eslint .`
+      clean, `vitest run` 40/40 unaffected (no component-level tests exist
+      for any tab in this repo; covered by the browser pass below), `vite
+      build` succeeds (new `TrainTab` chunk bundles at 26.6kB).
+      **Verified in a real browser** against `ODRIVE_MOCK=1` (`npm run
+      mock_dev`, headless Chromium via Playwright — no `chromium-cli` in
+      this environment, installed directly instead). One real complication
+      hit and resolved along the way: a *different*, already-running backend
+      process was found bound to port 5050 mid-setup, connected to **real**
+      ODrive hardware (`hardware_source: "real"`, a genuine device serial,
+      non-zero velocity/current history) — not mock. Flagged to the user
+      immediately rather than guessing; the user chose to stop it (via the
+      project's own `Stop Freddy.command`, the sanctioned graceful path,
+      not a raw kill) so the mock instance could run safely instead. Confirmed
+      the mock was actually active before clicking anything state-mutating
+      (`GET /api/devices` returning the mock's fake serial `123456789abc`,
+      distinct from the real device's `367836843335`). Then exercised the
+      full flow end to end: homed (mock homing needed the current threshold
+      live-lowered first, since `ODRIVE_MOCK` doesn't simulate a real
+      current spike — same limitation `SimHardware`/homing tests already
+      route around; restored the threshold and every other live-adjusted
+      setting back to their original bench-tuned values afterward), added a
+      second (bell-shaped) profile segment and watched the live preview
+      update, started a Train session, applied a profile change mid-run,
+      jogged via Move and watched the target-position dotted overlay and
+      the force-vs-position live overlay both populate correctly, toggled a
+      chart line, and stopped — zero console errors the entire time
+      (`console --errors` equivalent: Playwright's `console`/`pageerror`
+      listeners, empty on the final clean run).
+- [x] `docs/progress.md` (this entry) and `docs/decisions.md` updated.
+
+## Train tab refinements, 25 July 2026
+
+First round of feedback after the user actually used the tab. Full
+reasoning behind each non-obvious call in `docs/decisions.md` ("Train tab
+refinements"). Summary of what changed:
+
+1. **Homing**: added Homing velocity + Current threshold fields to Train's
+   Settings/Startup section (`TrainSettingsSection.jsx`), same
+   `updateHomingSettings()` call and persisted fields Exercise's own UI
+   already uses.
+2. **Max-extension calibration**: "Enforce max-extension guard during
+   Train" toggle moved into this section, right under Start/Confirm/Cancel.
+3. **Setup session**: added a prominent, unmissable "Stop setup session"
+   button in the Settings/Startup card header (was previously a small ghost
+   button easy to miss).
+4. **Manual Move removed entirely** (not just decoupled) from Train, in
+   favour of the Control tab's own Position mode. This simplified
+   `TrainMode` back to a single state (`core/cable/train_mode.py`) — no
+   `_apply_move`/`_apply_stop_move`/`_tick_moving`, no `"moving"` action,
+   `/api/train/move`+`/api/train/stop_move` routes removed,
+   `moveTrainCable`/`stopTrainMove` removed from the API client. 7 tests
+   removed from `test_train_mode.py`, one added (asserts `"move"`/
+   `"stop_move"` now correctly rejected as unknown actions) — 328/328
+   passing after.
+   - **Control tab enhancement** (the other half of this ask): Position
+     mode's Move Distance field gained a `turns`/`m` unit toggle.
+     Frontend-only — converts metres to turns client-side via the live
+     cable `r0`/`k` (new `turnsDeltaFromLength()` in `frontend/src/utils/
+     cableGeometry.js`, renamed from `trainGeometry.js` since it's now
+     shared) before sending the same turns-based target `PositionMode`
+     always took. Zero backend changes; existing turns-only behaviour is
+     unaffected (default unit is still turns).
+5. **Resistance profile**: untouched, exactly as requested.
+6. **Force calibration**: flagged as a real, known issue (displayed vs.
+   felt force mismatch; planned ~7N vs. measured ~-80N on the graphs) —
+   not patched. Likely root cause and why, recorded in `docs/decisions.md`
+   for whoever picks up the calibration procedure next (points at
+   `MOTOR_TORQUE_CONSTANT`, already flagged elsewhere as an unmeasured
+   fallback — open item #13).
+7. **Graphs**: both Train graphs now have proper axis labels, and every
+   plotted quantity (Position/Velocity/Torque on the time-series chart;
+   Planned/Actual on the force-vs-position chart) gets its own independent
+   Y axis with an Auto/manual-range control (`AxisRangeControl.jsx`,
+   `domainFromRange()` in `utils/chartDisplay.js`) — not just a shared axis
+   with adjustable bounds. This alone fixes the "small quantity unreadable
+   next to a large one" complaint even with every axis left on Auto.
+
+### Verification
+
+`pytest core/tests` 328/328, `eslint .` clean, `vitest run` 40/40
+unaffected, `vite build` succeeds. Real-browser pass against
+`ODRIVE_MOCK=1` (Playwright, as before) confirmed: new homing fields
+present and functional, max-extension toggle relocated, Stop Setup Session
+button visible/functional, Move panel fully absent (`0` matches for "Move
+(manual jog)"), Control tab's metres toggle converts and submits correctly,
+and — with an active Train session and all three time-series lines
+enabled — all three independently-scaled, independently-labelled Y axes
+render correctly. One real bug caught and fixed during this pass: a second
+right-side Y axis had its ticks/label clipped at the chart edge (the
+`LineChart`'s `margin.right` wasn't growing to fit it) — fixed by computing
+the margin from the active right-axis count. Zero console errors throughout.
+
+Hit the same live-hardware-safety situation as the original build session:
+a real backend came up on port 5050 mid-verification (the user's own
+`Start Freddy.command` session, restarted between turns). Confirmed with
+the user before touching it — they clarified no motor is physically
+connected this time, so it was safe to interact with directly, but a
+firmware/property-tree quirk on that specific board (`RemoteObject` object
+has no attribute `axis0'` — likely still in bootloader mode, given it
+reports firmware `0.0.0`) meant no session could actually be exercised
+against it anyway. Switched to a disposable `ODRIVE_MOCK=1` instance for
+the actual verification, as before, and restored every setting touched
+along the way (`k`, `train_max_extension_enforced`, `train_telemetry_
+buffer_s`, homing threshold/limit) back to the user's real bench-tuned
+values afterward — including catching and fixing a subtlety missed the
+first time: restoring a setting via a one-off script only fixes the JSON
+sidecar on disk, not a *running* server process's own in-memory
+`CableState`, which will silently overwrite the file with its own stale
+values on the next unrelated settings save. Restored `k` correctly this
+time by fixing the sidecar only after stopping every backend process, once
+nothing was left alive to clobber it.
+- [x] `docs/progress.md` (this entry) and `docs/decisions.md` updated.
+
+## Frontend consolidation to four tabs, 28 July 2026
+
+*Written by reading the working tree directly rather than a live build
+session transcript — this entry and the matching one in `docs/decisions.md`
+document a body of uncommitted changes that were sitting in the repo
+undocumented (no corresponding `progress.md`/`decisions.md` entries existed
+for any of it before now). Flagged so the gap is visible rather than
+silently backfilled as if it had been logged at the time.*
+
+Since the "Train tab refinements" entry above (which still describes an
+eight-tab app with a separate Exercise tab), the frontend has been reduced
+to **four tabs**: Configuration, Control, Train, Inspector.
+`ExerciseTab.jsx`, `DashboardTab.jsx`, `PresetsTab.jsx`, `ProfilesTab.jsx`
+(and their supporting files — `useExerciseStatus.js`,
+`presetsOperations.js`, `DashboardTab.css`, `frontend/src/api/profiles.js`)
+are deleted from disk and no longer referenced from `MainTabs.jsx`'s
+`TAB_CONFIG`.
+
+**Nothing was removed at the backend/`core/` level** — `ExerciseMode`
+(including the force-feedback machinery merged into it during the "more
+control" phase, per the §0 discrepancies note in `docs/decisions.md`),
+`core/profiles/`'s four resistance-profile stubs, and their respective
+routes (`exercise_routes.py`, `force_routes.py`, `control_routes.py`'s
+`"profile"` mode) are all still registered on the Flask app
+(`backend/app/app.py` still imports and registers all four route modules)
+and still covered by `core/tests`. What changed is **reachability**:
+
+- **Force Feedback (Engage/Disengage, constant/isokinetic torque
+  resistance, the ARMED/ENGAGED/HOLDING state machine documented in the
+  "First live-hardware session" entry's §2.6.1 write-up above) currently
+  has no frontend UI at all.** `frontend/src/api/force.js` still exists but
+  is no longer imported by any component (confirmed:
+  `grep -rn "from.*api/force" frontend/src` returns nothing) — it's
+  reachable only via raw HTTP calls to `/api/force/*`, not through Freddy's
+  UI. This looks like an unintentional gap left by the tab cleanup rather
+  than a deliberate decision (no `docs/decisions.md` entry motivates it),
+  and is carried forward as a new open item in the master plan doc.
+- **The Session-3 resistance-profile stubs (constant/bell-curve/overload/
+  VBT via `ProfileMode`) are in the same position** — `core/profiles/` and
+  `"profile"` mode are alive and tested, but `ProfilesTab.jsx` is gone and
+  nothing else in the UI starts a `"profile"` session. Superseded in
+  practice by Train's own position-based segment profiles
+  (`core/cable/train_profiles.py`), which cover the same "dynamic
+  resistance vs. position" need through a different, simpler mechanism —
+  but the old phase/rep-aware profiles (bell-curve strength-curve matching,
+  VBT auto-regulation, eccentric-overload wrapper) are not equivalent to
+  Train's segments, and are now effectively unreachable, not just replaced.
+- **Homing, max-extension calibration, and spool calibration** (all
+  originally Exercise-tab UI) are still fully reachable — they moved into
+  Train's own "Settings / Startup" collapsible section
+  (`TrainSettingsSection.jsx`), which drives the exact same
+  `startExerciseSession`/`homeExercise`/`startMaxCalibration`/
+  `calibrateSpoolK`/`updateHomingSettings` routes the old `ExerciseTab.jsx`
+  called, against the same shared `CableState`. This is not a regression —
+  the "Train tab refinements" entry above already documents this
+  consolidation starting; this pass finished it by deleting the
+  now-fully-redundant standalone Exercise tab.
+
+**Other additions bundled into this same uncommitted state**, not
+previously logged:
+
+- **Train profile save/load** (`TrainProfileEditor.jsx` gained Save/Load/
+  Delete against `frontend/src/utils/trainProfilesManager.js`) — named
+  segment layouts persist in `localStorage` (`freddy.trainProfiles.v1`),
+  same pattern as the old `presetsManager.js` but for the
+  `{name, segments}` `TrainProfile` shape. Not written to `CableState` /
+  the backend at all — purely a frontend convenience so a profile doesn't
+  need retyping every session.
+- **Always-available sidebar controls** (`DeviceList.jsx`, persistent
+  regardless of active tab): a **Go Home** button that jogs the cable back
+  to its homed position via `ExerciseMode`'s existing move action (only
+  enabled once homed; arms a session if none is running and releases it
+  again on arrival), a **Reset** button that forgets the backend's cached
+  device handle/lock for a soft reconnect without a full restart, and the
+  existing **EMERGENCY STOP**. `App.jsx` separately has a **Restart
+  Freddy** button (full backend process restart, heavier than Reset).
+- **One-click launchers**: `Start Freddy.command` (kills any stale
+  backend/frontend on ports 5050/3000, starts both fresh against real
+  hardware — no `ODRIVE_MOCK` — waits for both to come up, then opens
+  Safari) and `Stop Freddy.command` (kills both ports) at the project
+  root, replacing the earlier `Start UI.command` mentioned in older docs
+  (never actually committed; not present on disk any more).
+- **`config/diagnose_encoder_spi.py` + `config/odrive_diag_common.py`**:
+  read-only bench diagnostic tooling (`AXIS_STATE_LOCKIN_SPIN` open-loop
+  drive test + a slowed-down encoder-calibration attempt) built during the
+  investigation that root-caused the AS5047P "super-sulk" fault (see the
+  master plan doc's §11.1) and left in the repo as a reusable diagnostic,
+  not folded into `odrive_config.py` itself.
+- **`INDEX.md`** (directory-tree reference, generated 21 July) is now stale
+  against the current tree — regenerated as part of this same doc pass.
+
+### Verification
+
+Not independently re-run as part of this doc-only pass — the last known
+green baseline is "Train tab refinements"'s `pytest core/tests` 328/328 /
+`eslint .` clean / `vitest run` 40/40 / `vite build` succeeds, and no
+`core/`-level code changed since (only frontend deletions + additive
+frontend/doc files). Worth a fresh full run at the start of the next
+session before trusting that number, since it predates the tab deletions.
+- [x] `docs/progress.md` (this entry), `docs/decisions.md`, `README.md`,
+      `INDEX.md`, and the master plan doc (`skripsie_project_plan_1_6.md`)
+      updated to match.
+
+## Train tab — calibration overhaul, 29 July 2026
+
+Six change requests against the Train tab. See `docs/decisions.md`'s
+matching entry for the reasoning behind each — two (guard toggles, spool
+growth calibration) needed investigation before any code change, and that
+investigation changed what "the fix" actually was for both.
+
+- [x] **Hard Reset control** — `TrainTab.jsx` gained a Reset button
+      (disabled while a session is running) behind a new confirm modal
+      (`frontend/src/components/modals/TrainResetModal.jsx`, same
+      self-contained shape as `EraseConfigModal.jsx`). Calls the existing
+      `/api/exercise/reset_position` (clears home/max/marked-max, leaves
+      r0/k/growth/homing settings and saved named profiles untouched) plus
+      clears pending (unsaved) spool-growth calibration points; the
+      frontend additionally resets its own draft profile (remount key),
+      action-error state, and an active telemetry freeze. Found and fixed
+      a real gating gap while wiring this up: the route's idle-check only
+      ever blocked a running *Exercise* session, not Train — widened to
+      any running session (`_any_session_running`, was
+      `_exercise_action_running`).
+- [x] **Guard-toggle "bug"** — investigated (re-read `TrainMode.tick()`,
+      re-ran all 21 existing guard tests, all green); no code defect
+      found. Shipped a UI-clarity fix instead
+      (`TrainSettingsSection.jsx`): the "only applies to a running Train
+      session, not Exercise's own guard" caveat now sits directly under
+      each toggle rather than trailing below both.
+- [x] **Spool radius compensation** — `TrainMode.tick()`'s force→torque
+      conversion now uses `SpoolGeometry.r_eff_at_turns_delta()` (the
+      position's actual effective radius under whichever spool model is
+      calibrated — k or the piecewise growth fit) instead of the static
+      r0, floored at `SPOOL_MIN_EFFECTIVE_RADIUS_M` (load-bearing: the
+      piecewise model's open-ended final segment can extrapolate through
+      zero given a negative slope and a disabled guard — see decisions.md).
+      `core/tests/test_train_mode.py` gained 3 new tests. Also fixed the
+      same bug's frontend twin: `cableGeometry.js` gained a piecewise
+      mirror (`createSpoolGeometry`, cross-checked against
+      `geometry.py`'s `SpoolGeometry` — `cableGeometry.test.js`, 11
+      tests) and `useTrainTelemetry.js` now uses it for the live chart's
+      position/force conversion instead of the old flat-r0/k-only mirror.
+      Confirmed via the existing `SpoolGrowthCalibration.jsx` flow itself
+      needs no code fix — its Start button is precondition-gated (setup
+      session + homed) the same as the neighboring max-calibration button,
+      not blocked by anything.
+- [x] **Resistance profile segment editor** (`TrainProfileEditor.jsx`) —
+      segments can now be split in place (new "Split" button per segment,
+      midpoint cut, both halves immediately editable; bell segments get
+      their `peak_pos_m` recentered per half so validation passes
+      immediately) instead of requiring the whole profile to be rebuilt
+      to insert one in the middle. `addSegment()`'s existing
+      start-position auto-continue gained a force counterpart: a new
+      segment's force now seeds from the previous segment's own
+      end-force instead of a hardcoded default.
+- [x] **Telemetry pause/freeze** — new `frontend/src/hooks/
+      useFreezableSeries.js`, a thin, reusable wrapper (not baked into
+      the chart or the polling hook) around any live series array; wired
+      into the Train tab's time-series chart via a Pause/Resume button.
+      Reset (above) clears an active freeze.
+- [x] **Telemetry logic audit + reuse** — audited `useTrainTelemetry.js`
+      first (already correct: age-based buffer eviction against
+      `cable.train_telemetry_buffer_s`, not a fixed point count) and
+      extracted its merge/cutoff logic into `frontend/src/utils/
+      telemetryBuffer.js::appendAndTrimByAge()` (6 new tests). Control
+      tab's `useControlTelemetry.js` had the exact older bug
+      (`MAX_CHART_POINTS = 300`, ~6s of real history at 50Hz regardless
+      of its range buttons) — now uses the same shared function.
+      Inspector's `LiveCharts.jsx` keeps its WebSocket/Redux transport
+      (genuinely different requirements — arbitrary per-property
+      selection at ~10ms vs. Train/Control's small fixed set at 150ms
+      REST poll; not swapped out) but its own fixed-point display window
+      (`WINDOW_POINTS = 240`) was replaced with a new age-based
+      `chartDisplay.js::filterByAgeMs()` helper at an equivalent default
+      duration — `chartDisplay.test.js` added (11 tests; first coverage
+      for this file, now shared by three components).
+
+### Verification
+
+- [x] `pytest core/tests/` — 373/373 (was 373 before this session's new
+      tests were added and counted; net +3 in `test_train_mode.py`, no
+      regressions elsewhere).
+- [x] `vitest run` (frontend) — 72 passed, 2 skipped (pre-existing
+      live-hardware-only integration tests), 0 failed. New files:
+      `cableGeometry.test.js` (11), `telemetryBuffer.test.js` (6),
+      `chartDisplay.test.js` (11, first coverage for that file).
+- [x] `vite build` — succeeds, no new warnings beyond the pre-existing
+      chunk-size and dynamic/static `deviceSocket.js` import notices.
+- [ ] Manual pass on real hardware — not done as part of this session
+      (no device attached). Still needed before trusting this on the
+      actual thicker-strap rig: Reset button end-to-end, guard toggles
+      during an actual running Train session (not just Exercise setup),
+      the spool growth calibration flow with real measured lengths across
+      the ~0.06m→~0.04m range, segment split + force continuity in the
+      editor, pause/resume on the Train chart, and a visual check that
+      Control's chart range buttons and Inspector's charts now show their
+      claimed durations.
+
+## Same graphs everywhere: Control/Inspector get Train's chart style, 29 July 2026
+
+Follow-up to the calibration-overhaul session above — see
+`docs/decisions.md`'s matching entry for the full reasoning, including
+the `AskUserQuestion` resolution on why Control got a literal one-chart
+merge while Inspector kept per-property cards with upgraded controls.
+
+- [x] **`components/shared/TelemetryTimeSeriesChart.jsx`** (+ moved
+      `AxisRangeControl.jsx`) — Train's chart, generalized from a
+      hardcoded 3-line config to a `lines` prop, with pause/freeze now
+      owned internally (`useFreezableSeries`) instead of by the caller.
+      New `axisKey` support lets two lines share one Y axis (used for
+      Control's target-position overlay).
+- [x] **Control tab** — `ControlTab.jsx` now renders one
+      `TelemetryTimeSeriesChart` (Position/Target position/Velocity/
+      Torque, all in one card with the full Train-style control set)
+      instead of three separate `MiniChart.jsx` cards.
+      `useControlTelemetry.js`'s buffer duration constant
+      (`CONTROL_TELEMETRY_BUFFER_S`) exported so the chart's range
+      buttons cap themselves against the real buffer. `MiniChart.jsx`
+      deleted (no remaining callers).
+- [x] **Train tab** — `TrainTab.jsx` updated to the shared component;
+      its own Pause/Resume button and "Frozen" badge (previously in the
+      tab's top button row) removed in favor of the ones now built into
+      the chart card itself. Reset remounts the chart via a `key` bump
+      to drop an active freeze (no imperative API on the chart).
+- [x] **Inspector tab** — `LiveCharts.jsx`'s per-property `PropertyChart`
+      cards gained axis-range/invert/smoothing controls (smoothing now
+      user-controlled, default Off, replacing a fixed always-on
+      `SMOOTHING_WINDOW=5`), plus one shared header Pause (freezes every
+      property's data at once) and a shared `1s/2.5s/5s/10s/All`
+      duration control. Card height 220px → 320px. Transport
+      (WebSocket→Redux) unchanged — kept for its arbitrary per-property
+      selection at a much higher rate than Train/Control's REST poll.
+      `chartDisplay.js::filterByAgeMs()` gained `ms == null` = "no
+      filter" to support "All."
+- [x] **Bug found and fixed via a real-browser smoke pass, not the unit
+      test suite**: `TrainTab.jsx`'s Reset used two separate `useState(0)`
+      counters as `key` props on two sibling components
+      (`TrainProfileEditor`, the chart) — always bumped together, so
+      always numerically equal, so React warned about duplicate sibling
+      keys on every render. `vitest` never renders this tree, so nothing
+      caught it until an actual Chromium render did. Fixed by
+      string-prefixing each key.
+
+### Verification
+
+- [x] `pytest core/tests/` — 373/373, unaffected (this pass was
+      frontend-only).
+- [x] `vitest run` — 73/73 passed, 2 skipped (pre-existing
+      live-hardware-only), unchanged from before this pass.
+- [x] `vite build` — succeeds.
+- [x] **Real-browser smoke pass** (Playwright + headless Chromium against
+      `npm run mock_dev`, no project run-skill existed yet so one was
+      improvised per the `run` skill's browser-driven fallback pattern —
+      worth turning into a proper project skill via
+      `/run-skill-generator` next time this comes up) — all three tabs
+      (Control/Train/Inspector) navigated, zero console errors after the
+      key-collision fix, and interactive checks (select an Inspector
+      property, Pause → "Resume"/"Frozen" badge, change duration) all
+      behaved as designed. Screenshots confirmed Control's combined
+      chart, Train's chart with pause now in its own header, and
+      Inspector's per-property card controls all render correctly.
+- [ ] Still not verified against real hardware / real telemetry actually
+      flowing (mock backend reports no device connected in this
+      environment) — the interactive controls were exercised structurally
+      (empty-data state) but not against a live-updating chart.
+
+---
+
+# Testing tab — controlled experiments (Static Weight Hold)
+
+Tracks the "Testing Tab — Build Spec" (30 July 2026). New `core/experiments/`
+package, a Testing tab mirroring the Train tab pattern, and the static weight
+hold experiment described in the spec. Full reasoning for every judgment call
+is in `docs/decisions.md` ("Testing tab" section) — this file tracks
+completion + verification method only.
+
+## §8 — Open questions, resolved by reading the code (no guessing)
+
+- [x] **#1 — where Train persists calibration**: `core/cable/state.py::CableState`.
+      `home_turns`/`max_turns` are in-memory only, by explicit existing design
+      (a fresh backend process always comes up un-homed) — not a new gap this
+      feature introduces; the Testing tab gates on the exact same
+      `is_homed`/`has_max` Train already gates on. Flagged to Ivan in
+      decisions.md rather than silently assumed fine.
+- [x] **#2 — 50 Hz loop extension point**: confirmed clean via
+      `mode_factories` (no refactor needed) — `ExperimentMode` registered in
+      `backend/app/control_routes.py` exactly like `"train"`/`"exercise"`,
+      same shared `cable_state`/`control_session` singletons (proof of "no
+      second ODrive connection").
+- [x] **#3 — phase vs. bus current**: only phase current (`current_iq`,
+      `Iq_measured`) was exposed; added `TelemetrySample.bus_voltage_v` (new
+      field, defaulted so ~20 existing test call sites are unaffected),
+      populated from `odrv0.vbus_voltage` (real) / `SIM_BUS_VOLTAGE_V`
+      placeholder (sim).
+- [x] **#4 — Stop shutdown behavior**: confirmed `HardwareInterface.stop()`
+      zeros velocity/torque and requests `AXIS_STATE_IDLE` — the experiment's
+      COMPLETE/ABORTED paths call this directly, no new shutdown sequence.
+
+## §2 — `core/experiments/` package
+
+- [x] Built per the spec's suggested shape: `base.py` (`ExperimentState`,
+      `ExperimentConfig`, `ExperimentStepResult`, the `Experiment` ABC —
+      deliberately hardware-free, mirroring `ResistanceProfile`'s pure-function
+      shape rather than `TrainMode`'s hardware-writing `tick()`),
+      `static_hold.py` (`StaticWeightHoldExperiment`), `registry.py`
+      (`EXPERIMENT_REGISTRY`, mirrors `PROFILE_REGISTRY`), `telemetry.py`
+      (`estimated_power_w()` helper only — CSV schema itself stays in
+      `core/telemetry/csv_logger.py`), `mode.py` (`ExperimentMode(BaseMode)`,
+      lives in `core/experiments/` following `TrainMode`'s own
+      cross-package-BaseMode-subclass precedent).
+- [x] RAMPING → LIFTING → HOLDING → COMPLETE/ABORTED implemented exactly per
+      §2.2–§2.4, including the literal `clamp(torque_command, 0,
+      max_torque_nm)` HOLDING formula (flagged as spec's deliberate v1
+      simplification, not an oversight) and the flat frozen-torque LIFTING
+      approach. `max_torque_nm`/`max_duration_s` enforced every `step()` tick.
+      Sign convention (no `CABLE_SIGN` flip on this experiment's torque) and
+      the COMPLETE-vs-ABORTED spec inconsistency (resolved: timeout →
+      COMPLETE, torque breach → ABORTED) both documented in-code and in
+      decisions.md.
+- [x] Every numeric threshold is a persisted, user-editable `CableState`
+      setting (`set_test_settings()`, same subset-update/validate/persist
+      pattern as `set_force_settings`/`set_train_settings`), defaulting from
+      seven new `config/board_constants.py` constants — never a bare literal.
+- [x] `ExperimentMode` two-phase action dispatch (`configure` — safe, zero
+      motion; `confirm_start` — the one explicit, human-confirmed call that
+      begins RAMPING) — the motor-energization gate (spec §5) is structural,
+      not just a UI convention: the motor cannot move between the two calls.
+      `tick()` calls `hardware.stop()` immediately, same-tick, the instant
+      COMPLETE/ABORTED is reached.
+
+## §3 — Telemetry
+
+- [x] `core/telemetry/csv_logger.py` gained 7 columns (`experiment_state,
+      position_m, velocity_m_s, commanded_torque_nm, bus_voltage_v,
+      estimated_power_w, target_position_m`), additive, empty-string default
+      for every other mode — same pattern as every prior amendment (phase/
+      rep_count, cable_length_m, the six Force-mode columns). No separate
+      `measured_current_a` column — reuses the existing `current_iq_a`
+      column (documented, not duplicated). `core/control/session.py`'s
+      `_telemetry_loop` threads the new extras through.
+- [x] `estimated_power_w` = mechanical power (`torque_est * velocity *
+      2*pi`), documented choice over `current * voltage` (would double-count
+      against the phase-current channel already logged).
+
+## §4/§5 — Backend + frontend wiring, safety gates
+
+- [x] `backend/app/experiment_routes.py` (new): `GET /api/experiments`
+      (registry-driven, mirrors `/api/profiles`), `GET /api/experiments/status`
+      (reuses `exercise_routes._cable_status_dict()`, adds
+      `current_position_m`), `POST /api/experiments/configure`,
+      `POST /api/experiments/confirm_start`, `POST /api/experiments/stop`.
+      Registered in `backend/app/app.py` alongside the other three route
+      modules. `backend/app/control_routes.py` gained one `mode_factories`
+      entry (`"experiment": lambda: ExperimentMode(cable_state)`), same
+      shared singletons every other mode already uses.
+- [x] Frontend Testing tab (`frontend/src/components/tabs/testing/`):
+      `TestingTab.jsx` + `ExperimentConfigForm.jsx`, registered in
+      `MainTabs.jsx`. Prerequisite banner (mirrors Train's `!isHomed` alert,
+      extended to `has_max` too), registry-driven experiment selector,
+      schema-driven config form (`initial_position_m` read-only + Refresh,
+      never free-typed, per §4.3), explicit "Confirm & Energize Motor"
+      button (only enabled once `CONFIGURED`), always-visible STOP, three
+      shared `TelemetryTimeSeriesChart` lines (position with a dashed
+      target-position reference line, torque, current/voltage/power), and a
+      post-run summary card once `experiment_state` is
+      `complete`/`aborted`. `api/experiments.js` + `useExperimentTelemetry.js`
+      (mirrors `api/train.js`/`useTrainTelemetry.js` exactly).
+- [x] **Note for Ivan, not in the spec's open questions but worth flagging**:
+      the spec's "Sim/Real banner" ask (§4) describes a UI element that no
+      longer exists — this project runs against real hardware only in the
+      GUI now (`control_session` hardcoded `hardware_source="real"`). The
+      Testing tab mirrors what Train actually looks like today instead
+      (connection/running/homed badges, no sim/real switcher).
+
+## §7 — Verification
+
+- [x] **1. `core/tests/` pytest suite** — 410/410 passing (69 new: 20 pure
+      `Experiment`/`StaticWeightHoldExperiment` state-machine tests
+      (`test_experiments.py`, no hardware fake needed), 6 `ExperimentMode`
+      tests against a `RecordingHardware` fake (`test_experiment_mode.py`,
+      same style as `test_train_mode.py`), 7 end-to-end `ControlSession`
+      tests against `SimHardware` (`test_experiment_session.py` — full
+      RAMPING→LIFTING→HOLDING cycle, CSV column/label correctness, Stop
+      verified from RAMPING/LIFTING/HOLDING in three separate runs,
+      `max_torque_nm` breach → ABORTED + same-tick `hardware.stop()`,
+      `max_duration_s` timeout → COMPLETE, start rejected when not homed),
+      2 new `csv_logger` column tests). No real hardware required.
+- [x] **2. `npx eslint .`** — clean, zero warnings, whole frontend tree.
+      **`npx vitest run`** — 73/73 passing, 2 skipped (unchanged baseline).
+- [x] **3. Live wiring check** — spun up the real Flask app (`ODRIVE_MOCK=1`)
+      and confirmed `/api/experiments` returns the correct registry-driven
+      schema and `/api/experiments/status` returns the expected
+      cable/control shape, via curl.
+- [x] **4. Headless-Chrome pass** (puppeteer-core + local Chrome, scratchpad
+      script, same precedent as every prior session) — Testing tab renders,
+      prerequisite banner correctly shows "Complete calibration in the Train
+      tab first — cable is not homed" and correctly hides the config form
+      while un-homed, **zero console errors**.
+- [ ] **Not verified**: the full Configure → Confirm & Energize → RAMPING →
+      LIFTING → HOLDING → Stop cycle against a *live browser*. Homing
+      against `SimHardware` cannot complete in reasonable time — the sim has
+      no cable-load model (documented, pre-existing limitation, not
+      introduced by this feature): homing's current-threshold detection
+      never trips against a free-spinning sim motor, so it always ends in
+      `FAULT_TRAVEL_EXCEEDED`/`FAULT_TIMEOUT` rather than `HOMED`. The
+      identical code path (`ExperimentMode` + a directly-homed `CableState`)
+      IS verified end-to-end by `test_experiment_session.py` above, just not
+      through the browser. Real-hardware verification of this tab, same as
+      the rest of the spec's own Definition of Done, is deferred to a
+      supervised session with Ivan present.
+
+## Definition of Done
+
+- [x] `core/experiments/` package per §2, tests against the mock/sim, no
+      real hardware required to pass (§7 above).
+- [x] Testing tab renders, shows prerequisite state correctly, blocks start
+      when calibration is missing (verified live, §7.4 above).
+- [x] Full RAMPING → LIFTING → HOLDING → COMPLETE cycle runs end-to-end
+      against the mock/sim, produces a CSV with all channels, correct state
+      labels per row (`test_experiment_session.py`).
+- [x] Stop verified to safely halt from RAMPING, LIFTING, and HOLDING in
+      separate test runs (`test_experiment_session.py`).
+- [x] `max_torque_nm`/`max_duration_s` abort/complete paths tested against
+      the mock/sim (`test_experiment_session.py`).
+- [x] No new ODrive connection opened — `ExperimentMode` shares the exact
+      same `cable_state`/`control_session` singletons as every other mode.
+- [x] `docs/progress.md` (this section) and `docs/decisions.md` updated,
+      including the sign-convention caveat, the COMPLETE-vs-ABORTED spec
+      inconsistency resolution, the 0-floor HOLDING clamp v1 simplification,
+      and the removed Sim/Real banner note.
+- [ ] Not yet run against real hardware — deferred to a supervised session
+      with Ivan present, per the spec's own explicit instruction.
+
+---
+
+# Anti-cogging calibration — added to Configuration → Motor Controls
+
+Task: "Add anti-cogging calibration to Freddy" (add a way to trigger/monitor
+ODrive's built-in anti-cogging calibration from the GUI). Initially placed
+the card in the Testing tab; moved at the user's explicit request to the
+Configuration tab's existing "Motor Controls" sub-tab
+(`frontend/src/components/tabs/config wizard/ConfigurationTab.jsx`,
+`subTabIndex === 1`) instead, alongside the existing `MotorControlsCard`
+(Enable/Disable Motor, Full/Motor/Hall/Encoder calibration, Clear Errors,
+Save & Reboot) — the same family of quick hardware actions, a better fit
+than a tab built for controlled cable-load experiments.
+
+## §1 — Design decision: separate module, not a ControlSession mode
+
+- [x] Deliberately NOT built as a `core/control/modes.py` `BaseMode` /
+      `core/experiments/` `Experiment` — those model a continuous per-tick
+      control loop; anti-cogging calibration is a one-shot,
+      firmware-autonomous routine (the axis spins through ~1 turn on its own
+      once `controller.start_anticogging_calibration()` is called — nothing
+      here commands it tick by tick) that writes NVM config and reboots the
+      board. That's exactly the "config/calibration writes" territory
+      `core/hardware/odrive_hw.py`'s own docstring assigns to "the wizard's
+      and the 1B script's job," not to a `HardwareInterface`. Built instead
+      as its own module, `core/hardware/anticogging.py`
+      (`AnticoggingCalibration`, a small request-driven state machine:
+      IDLE → start() → RUNNING → poll() [repeated] → DONE/ABORTED/FAILED),
+      plus `backend/app/anticogging_routes.py` (thin adapter, same split as
+      every other routes module).
+- [x] Still routes through the one real choke point: `backend/app/
+      anticogging_routes.py` calls `device_manager.get_shared_handle()` /
+      `get_shared_io_lock()` — the exact same functions
+      `core/hardware/odrive_hw.py::OdriveHardware` is injected with via
+      `control_routes.py::_real_hardware_factory` — never `odrive.find_any()`
+      directly. Confirmed via `grep -rn "find_any" --include="*.py" backend
+      core config`: no new call site.
+- [x] `GET /api/anticogging/status` is the one route that drives the state
+      machine forward: if RUNNING, it polls the live `calib_anticogging`
+      flag on every call, and the moment that flips to finished, the SAME
+      call runs the whole restore-gains/`pre_calibrated`/
+      `save_configuration()` sequence inline (no separate "saving" phase to
+      poll for — it's a handful of fast property writes plus one RPC).
+      `save_configuration()` reboots the board mid-call; the expected
+      `fibre.protocol.ChannelBrokenException` is caught exactly like
+      `config/odrive_config.py`'s `call_and_reconnect()` does. Right after a
+      DONE transition, `device_manager.forget_all()` is called so the rest
+      of the app (Inspector, sidebar, any other tab) reconnects on its very
+      next access instead of waiting for the ambient ~3s sidebar poll to
+      notice the dead cached handle on its own.
+
+## §2 — `core/hardware/anticogging.py`
+
+- [x] `AnticoggingCalibration.start()`: rejects if already running; rejects
+      via `RuntimeError` if `axis.motor.is_calibrated`/`axis.encoder.is_ready`
+      are false (never re-runs motor/encoder calibration itself — that's
+      `config/odrive_config.py`'s job); captures the *current*
+      `pos_gain`/`vel_integrator_gain` (not board_constants' tuned values —
+      if the board's since been re-tuned, that's what "restore" should mean);
+      sets `control_mode=CONTROL_MODE_POSITION_CONTROL`,
+      `input_mode=INPUT_MODE_PASSTHROUGH`, the two calibration thresholds,
+      raises the two gains by the given multipliers, requests
+      `AXIS_STATE_CLOSED_LOOP_CONTROL`, then calls
+      `controller.start_anticogging_calibration()`.
+- [x] `.poll()`: no-op while `calib_anticogging` is still true; on
+      completion, restores both gains exactly, sets
+      `anticogging.pre_calibrated = True`, calls `save_configuration()`
+      (catching the expected reboot-triggered `ChannelBrokenException`,
+      any other exception → `FAILED` with a message, gains restored either
+      way).
+- [x] `.abort()`: requests `AXIS_STATE_IDLE`, restores both gains, does
+      **not** set `pre_calibrated` and does **not** save — matches the task
+      spec's abort sequence exactly.
+- [x] Property paths corroborated against
+      `frontend/src/utils/odriveApiReference05x.json` before writing any
+      code: `axis{n}.controller.config.anticogging.{pre_calibrated,
+      calib_anticogging, calib_pos_threshold, calib_vel_threshold,
+      anticogging_enabled}` and `axis{n}.controller.start_anticogging_
+      calibration()` all confirmed present; `axis{n}.controller
+      .anticogging_valid` (read-only) also found and surfaced as a
+      diagnostic. `axis{n}.motor.is_calibrated` / `axis{n}.encoder.is_ready`
+      (the precondition check) also confirmed present in the same reference.
+- [x] `core/tests/test_anticogging.py` — 17/17 passing, fake `odrv`/`axis`
+      object tree (same "fake the hardware surface directly" style as
+      `RecordingHardware` elsewhere, since this deliberately isn't a
+      `HardwareInterface`): rejects on uncalibrated motor/encoder, rejects
+      double-start, rejects invalid numeric args, gain-multiplication +
+      RPC-triggering on start, poll-while-running is a no-op, poll-on-
+      completion restores gains + sets `pre_calibrated` + saves,
+      `ChannelBrokenException` on save is treated as success, any other
+      save exception → FAILED with the message surfaced, abort restores
+      gains without saving, restart-after-abort works.
+
+## §3 — Config: `config/board_constants.py` + backend routes
+
+- [x] New constants: `ANTICOGGING_POS_GAIN_MULTIPLIER_DEFAULT` /
+      `ANTICOGGING_VEL_INTEGRATOR_GAIN_MULTIPLIER_DEFAULT` (both 6.0 — the
+      task's own suggested "4-8x" starting range, expressed as a multiplier
+      of the *live-tuned* `CONTROLLER_POS_GAIN`/`CONTROLLER_VEL_INTEGRATOR_
+      GAIN`, not a second pair of absolute values, so re-tuning the normal
+      gains never leaves this block silently stale), and
+      `ANTICOGGING_CALIB_POS_THRESHOLD_DEFAULT` / `_VEL_THRESHOLD_DEFAULT`
+      (1.0 / 0.5 — flagged `TODO(bench)`: no documented ODrive default found
+      in the bundled reference or anywhere else in this repo; conservative
+      placeholders, not measured values). All four served via
+      `GET /api/board-constants`'s new `"anticogging"` key — never
+      duplicated into frontend code.
+- [x] `backend/app/anticogging_routes.py`: `GET /api/anticogging/status`,
+      `POST /api/anticogging/{start,abort,set_enabled}`. `start` is rejected
+      with a clear 400 if any Control/Train/Testing `ControlSession` mode is
+      currently running (anti-cogging calibration takes over
+      control_mode/input_mode/gains directly, bypassing `ControlSession`
+      entirely, so it can't safely run alongside one). `set_enabled` is a
+      direct, independent property write (`anticogging_enabled`) — no
+      calibration state-machine involvement, always available, doesn't
+      erase the saved map.
+- [x] Registered in `backend/app/app.py` alongside the other four routes
+      modules. Verified live: `python -c "...create_app()..."` lists all
+      four `/api/anticogging/*` rules; full `core/tests` suite still
+      427/427 passing.
+
+## §4 — Frontend: Configuration → Motor Controls gets an "Anti-cogging Calibration" card
+
+- [x] `frontend/src/api/anticogging.js` (thin client, same `getJson`/
+      `postJson` pattern as every other API module),
+      `frontend/src/hooks/useAnticoggingStatus.js` (1s REST poll, same
+      convention as every other tab — no websocket),
+      `frontend/src/components/AnticoggingCalibrationCard.jsx` (new,
+      alongside `MotorControlsCard.jsx` at the same directory level) —
+      initially built inside the Testing tab, **moved at the user's explicit
+      request** into `ConfigurationTab.jsx`'s "Motor Controls" sub-tab,
+      rendered directly below `MotorControlsCard` (same `subTabIndex === 1`
+      `isActive` gating). Deliberately NOT wired through `useCalibration`'s
+      axis-state-polling mechanism (that hook watches the axis return to
+      IDLE after a state-machine calibration step; anti-cogging calibration
+      instead polls a dedicated `calib_anticogging` boolean and needs its
+      own gain-raise/restore + save+reboot sequence) — reads
+      `control_session_running` from its own polled status rather than a
+      prop, so it has no dependency on whichever tab happens to render it.
+- [x] Gain-multiplier/threshold fields editable per-run, pre-filled from
+      `GET /api/board-constants`'s new `anticogging` section (same
+      pattern as `ExperimentConfigForm`'s config fields on the Testing tab)
+      — not persisted live-adjustable settings via `CableState` (a narrower
+      reading of this task's "editable settings in board_constants.py, not
+      buried constants" than the Testing tab's own build spec's stronger
+      "user-editable, persisted setting" wording; see docs/decisions.md).
+- [x] Explicit confirmation dialog ("Run anti-cogging calibration?" /
+      "Confirm & Energize Motor") before `start()` fires — same
+      motor-energization-gate convention as the Testing tab's own experiment
+      flow and `App.jsx`'s Restart-Freddy dialog. Abort button visible only
+      while running. `anticogging_enabled` toggle (Switch) always available.
+      State/`pre_calibrated`/`anticogging_valid` badges.
+- [x] Verified: `npx eslint .` clean; `npx vitest run` 73/73 passing (2
+      skipped, unchanged baseline); headless-Chrome pass against the real
+      running dev server — connected the real device via the sidebar
+      (Scan → Connect, normal read-only app usage), navigated Configuration
+      → Motor Controls, confirmed both `MotorControlsCard` ("Enable Motor"
+      etc.) and the new card render side by side (IDLE / MAP SAVED / MAP
+      VALID badges, all four fields, defaults line, "Calibrate anti-cogging"
+      button), and confirmed the card no longer appears on the Testing tab.
+      **Confirm was never clicked** — this session's dev backend is
+      connected to the real physical board (see docs/decisions.md), so
+      actually triggering calibration was deliberately left for a
+      supervised session with Ivan present.
+
+## Definition of Done
+
+- [x] `core/hardware/anticogging.py` + tests, no real hardware required to
+      pass (§2 above).
+- [x] Backend routes wired, gated on no-other-session-running, no new
+      `odrive.find_any()` call site (§1/§3 above).
+- [x] Configuration tab's Motor Controls sub-tab shows a "Calibrate
+      anti-cogging" action with a
+      progress/status indicator (state badge, polled) and an abort path,
+      plus an independent `anticogging_enabled` toggle (§4 above).
+- [x] All thresholds/gain multipliers are named `config/board_constants.py`
+      settings, editable per-run from the GUI, not buried literals (§3/§4).
+- [x] `docs/progress.md` (this section) + `docs/decisions.md` updated.
+- [ ] **Not yet triggered against real hardware** — deliberately not done
+      this session despite a real board being connected (see
+      docs/decisions.md); needs a supervised session with Ivan present,
+      same as the rest of this project's motor-energizing actions.

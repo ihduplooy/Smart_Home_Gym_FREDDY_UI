@@ -76,6 +76,17 @@ def test_reset_clears_debounce_count(monkeypatch):
     assert detector.update(-0.5) is True  # 5th sample after reset
 
 
+def test_constructor_args_override_board_constants_defaults(monkeypatch):
+    # 24 July 2026: threshold/debounce are now sourced from CableState
+    # (live-tunable), not read implicitly from board_constants -- this is
+    # the actual call shape exercise_mode.py now uses.
+    monkeypatch.setattr(board_constants, "LETGO_VELOCITY_TURNS_S", 999.0)  # must be ignored
+    monkeypatch.setattr(board_constants, "LETGO_DEBOUNCE_SAMPLES", 999)  # must be ignored
+    detector = LetGoDetector(velocity_threshold_turns_s=0.2, debounce_samples=2)
+    assert detector.update(-0.5) is False
+    assert detector.update(-0.5) is True  # 2nd sample, well past 0.2 -- not board_constants' 999.0
+
+
 def test_fires_again_after_reset_and_a_second_sustained_reel_in(monkeypatch):
     _fast_defaults(monkeypatch)
     detector = LetGoDetector()

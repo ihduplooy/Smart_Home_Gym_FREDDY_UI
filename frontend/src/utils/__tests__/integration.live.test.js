@@ -5,7 +5,7 @@ import { describe, it, expect, beforeAll } from 'vitest'
 import { writableConfigPaths } from '../odriveRegistry'
 import { buildDeviceSnapshot, diffConfig, toWrites } from '../configDiff'
 
-const BASE = process.env.BACKEND_URL || 'http://127.0.0.1:5000'
+const BASE = process.env.BACKEND_URL || 'http://127.0.0.1:5050'
 const run = process.env.LIVE_BACKEND ? describe : describe.skip
 
 async function read(serial, paths) {

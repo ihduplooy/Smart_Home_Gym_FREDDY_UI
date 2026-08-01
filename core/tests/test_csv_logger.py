@@ -43,3 +43,44 @@ def test_logs_dir_created_and_named_with_mode_and_source(tmp_path):
     assert logs_dir.exists()
     assert "_torque_real.csv" in path.name
     logger.close()
+
+
+def test_experiment_columns_empty_for_non_experiment_runs(tmp_path):
+    logger = CsvLogger(mode="velocity", hardware_source="sim", logs_dir=tmp_path)
+    path = logger.open()
+    logger.log_sample(TelemetrySample(t=0.0, position=0.0, velocity=0.0, current_iq=0.0, torque_est=0.0), mode="velocity", target=0.5)
+    logger.close()
+
+    with open(path, newline="") as f:
+        reader = csv.reader(f)
+        rows = list(reader)
+
+    for col in ("experiment_state", "position_m", "velocity_m_s", "commanded_torque_nm", "bus_voltage_v", "estimated_power_w", "target_position_m"):
+        assert rows[1][COLUMNS.index(col)] == ""
+
+
+def test_experiment_columns_populated_when_passed(tmp_path):
+    logger = CsvLogger(mode="experiment-static_hold", hardware_source="real", logs_dir=tmp_path)
+    path = logger.open()
+    logger.log_sample(
+        TelemetrySample(t=0.0, position=0.0, velocity=0.0, current_iq=0.0, torque_est=0.0, bus_voltage_v=24.0),
+        mode="experiment-static_hold",
+        target=1.0,
+        experiment_state="holding",
+        position_m=0.5,
+        velocity_m_s=0.01,
+        commanded_torque_nm=0.2,
+        bus_voltage_v=24.0,
+        estimated_power_w=0.0126,
+        target_position_m=1.0,
+    )
+    logger.close()
+
+    with open(path, newline="") as f:
+        reader = csv.reader(f)
+        rows = list(reader)
+
+    row = rows[1]
+    assert row[COLUMNS.index("experiment_state")] == "holding"
+    assert row[COLUMNS.index("position_m")] == "0.5"
+    assert row[COLUMNS.index("target_position_m")] == "1.0"

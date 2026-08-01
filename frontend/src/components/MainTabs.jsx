@@ -3,7 +3,6 @@ import { useSelector } from 'react-redux'
 import {
   Box,
   HStack,
-  VStack,
   Tabs,
   TabList,
   TabPanels,
@@ -11,28 +10,16 @@ import {
   TabPanel,
   Spinner,
   Text,
-  IconButton,
-  Tooltip,
-  Drawer,
-  DrawerOverlay,
-  DrawerContent,
-  DrawerCloseButton,
-  DrawerHeader,
-  DrawerBody,
-  useDisclosure,
+  VStack,
 } from '@chakra-ui/react'
-import { SettingsIcon } from '@chakra-ui/icons'
 
 
 // Lazy-loaded tab components
 const ConfigurationTab = lazy(() => import('./tabs/config wizard/ConfigurationTab'))
 const InspectorTab = lazy(() => import('./tabs/inspector/InspectorTab'))
-const DashboardTab = lazy(() => import('./tabs/dashboard/DashboardTab'))
-const PresetsTab = lazy(() => import('./tabs/presets/PresetsTab'))
-const CommandConsoleTab = lazy(() => import('./tabs/command console/CommandConsoleTab'))
 const ControlTab = lazy(() => import('./tabs/control/ControlTab'))
-const ProfilesTab = lazy(() => import('./tabs/profiles/ProfilesTab'))
-const ExerciseTab = lazy(() => import('./tabs/exercise/ExerciseTab'))
+const TrainTab = lazy(() => import('./tabs/train/TrainTab'))
+const TestingTab = lazy(() => import('./tabs/testing/TestingTab'))
 
 // Lightweight loading component
 const TabLoadingFallback = () => (
@@ -70,28 +57,21 @@ const TAB_CONFIG = [
     requiresConnection: false
   },
   {
-    id: 'dashboard',
-    label: 'Dashboard',
-    component: DashboardTab,
-    requiresConnection: false,
-    isActive: true // Pass active state for dashboard
-  },
-  {
     id: 'control',
     label: 'Control',
     component: ControlTab,
     requiresConnection: false
   },
   {
-    id: 'profiles',
-    label: 'Profiles',
-    component: ProfilesTab,
+    id: 'train',
+    label: 'Train',
+    component: TrainTab,
     requiresConnection: false
   },
   {
-    id: 'exercise',
-    label: 'Exercise',
-    component: ExerciseTab,
+    id: 'testing',
+    label: 'Testing',
+    component: TestingTab,
     requiresConnection: false
   },
   {
@@ -100,19 +80,11 @@ const TAB_CONFIG = [
     component: InspectorTab,
     requiresConnection: false
   },
-  {
-    id: 'console',
-    label: 'Command Console',
-    component: CommandConsoleTab,
-    requiresConnection: false
-  }
 ]
 
 const MainTabs = () => {
   const { isConnected, odriveState } = useSelector(state => state.device)
   const [activeTab, setActiveTab] = useState(0)
-  const { isOpen: presetsOpen, onOpen: openPresets, onClose: closePresets } = useDisclosure()
-
 
   const renderTabContent = (tabConfig, index) => {
     const Component = tabConfig.component
@@ -121,21 +93,16 @@ const MainTabs = () => {
     // Add specific props based on tab type
     const getTabProps = () => {
       switch (tabConfig.id) {
-        case 'dashboard':
-          return {
-            ...commonProps,
-            odriveState,
-            isActive: activeTab === index
-          }
         case 'inspector':
           return {
             ...commonProps,
             odriveState,
             isActive: activeTab === index
           }
+        case 'configuration':
         case 'control':
-        case 'profiles':
-        case 'exercise':
+        case 'train':
+        case 'testing':
           return {
             ...commonProps,
             isActive: activeTab === index
@@ -191,16 +158,6 @@ const MainTabs = () => {
               </Tab>
             ))}
           </TabList>
-          <Tooltip label="Presets">
-            <IconButton
-              aria-label="Presets"
-              icon={<SettingsIcon />}
-              size="sm"
-              variant="ghost"
-              color="gray.300"
-              onClick={openPresets}
-            />
-          </Tooltip>
         </HStack>
 
         <Suspense fallback={<TabLoadingFallback />}>
@@ -221,19 +178,6 @@ const MainTabs = () => {
           </TabPanels>
         </Suspense>
       </Tabs>
-
-      <Drawer isOpen={presetsOpen} placement="right" onClose={closePresets} size="xl">
-        <DrawerOverlay />
-        <DrawerContent bg="gray.900">
-          <DrawerCloseButton />
-          <DrawerHeader borderBottom="1px solid" borderColor="gray.600">Presets</DrawerHeader>
-          <DrawerBody p={0}>
-            <Suspense fallback={<TabLoadingFallback />}>
-              {presetsOpen && <PresetsTab />}
-            </Suspense>
-          </DrawerBody>
-        </DrawerContent>
-      </Drawer>
     </Box>
   )
 }

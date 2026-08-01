@@ -11,6 +11,11 @@ import {
   AlertIcon,
   Progress,
   Spinner,
+  Tabs,
+  TabList,
+  Tab,
+  TabPanels,
+  TabPanel,
   useDisclosure,
   useToast,
 } from '@chakra-ui/react'
@@ -22,6 +27,9 @@ import MotorConfigStep from '../../config-steps/MotorConfigStep'
 import ControlConfigStep from '../../config-steps/ControlConfigStep'
 import ApplyConfigStep from '../../config-steps/ApplyConfigStep'
 import EraseConfigModal from '../../modals/EraseConfigModal'
+import MotorControlsCard from '../../MotorControlsCard'
+import AnticoggingCalibrationCard from '../../AnticoggingCalibrationCard'
+import CommandConsoleTab from '../command console/CommandConsoleTab'
 
 const STEP_ICONS = {
   power: Zap,
@@ -37,11 +45,12 @@ const StepIcon = ({ id }) => {
   return <Icon size={18} />
 }
 
-const ConfigurationTab = () => {
+const ConfigurationTab = ({ isActive = true }) => {
   const wizard = useConfigWizard()
   const toast = useToast()
   const [stepIndex, setStepIndex] = useState(0)
   const [applying, setApplying] = useState(false)
+  const [subTabIndex, setSubTabIndex] = useState(0)
   const { isOpen: isEraseOpen, onOpen: onEraseOpen, onClose: onEraseClose } = useDisclosure()
 
   const step = STEPS[stepIndex]
@@ -91,91 +100,126 @@ const ConfigurationTab = () => {
 
   return (
     <Flex direction="column" flex="1" minH="0" overflow="hidden" bg="gray.900">
-      {/* Header: step indicators, progress, navigation, action buttons */}
-      <Box bg="gray.800" borderBottom="1px solid" borderColor="gray.600" p={4}>
-        <VStack spacing={4}>
-          {/* Step indicator buttons */}
-          <HStack spacing={2} justify="center" w="100%" overflowX="auto">
-            {STEPS.map((s, i) => (
-              <Button
-                key={s.id}
-                size="sm"
-                variant={i === stepIndex ? 'solid' : 'outline'}
-                colorScheme={i === stepIndex ? 'odrive' : 'gray'}
-                onClick={() => setStepIndex(i)}
-                minW="60px"
-                h="50px"
-                flexDirection="column"
-                fontSize="xs"
-              >
-                <StepIcon id={s.id} />
-                <Text fontSize="xs" mt={1}>{s.label}</Text>
-              </Button>
-            ))}
-          </HStack>
+      <Tabs
+        index={subTabIndex}
+        onChange={setSubTabIndex}
+        variant="enclosed"
+        colorScheme="odrive"
+        display="flex"
+        flexDirection="column"
+        flex="1"
+        minH="0"
+        isLazy
+        lazyBehavior="keepMounted"
+      >
+        <TabList bg="gray.800" borderBottom="1px solid" borderColor="gray.600" px={4}>
+          <Tab>Configuration</Tab>
+          <Tab>Motor Controls</Tab>
+          <Tab>Command Console</Tab>
+        </TabList>
+        <TabPanels flex="1" minH="0" display="flex" flexDirection="column" overflow="hidden">
+          <TabPanel p={0} flex="1" minH="0" display="flex" flexDirection="column" overflow="hidden">
+            <Flex direction="column" flex="1" minH="0" overflow="hidden">
+              {/* Header: step indicators, progress, navigation, action buttons */}
+              <Box bg="gray.800" borderBottom="1px solid" borderColor="gray.600" p={4}>
+                <VStack spacing={4}>
+                  {/* Step indicator buttons */}
+                  <HStack spacing={2} justify="center" w="100%" overflowX="auto">
+                    {STEPS.map((s, i) => (
+                      <Button
+                        key={s.id}
+                        size="sm"
+                        variant={i === stepIndex ? 'solid' : 'outline'}
+                        colorScheme={i === stepIndex ? 'odrive' : 'gray'}
+                        onClick={() => setStepIndex(i)}
+                        minW="60px"
+                        h="50px"
+                        flexDirection="column"
+                        fontSize="xs"
+                      >
+                        <StepIcon id={s.id} />
+                        <Text fontSize="xs" mt={1}>{s.label}</Text>
+                      </Button>
+                    ))}
+                  </HStack>
 
-          {/* Pull progress */}
-          {wizard.loading && (
-            <VStack spacing={2} w="100%" maxW="400px">
-              <HStack spacing={2}><Spinner size="sm" color="blue.400" /><Text color="blue.400" fontSize="sm">Loading configuration from ODrive…</Text></HStack>
-              <Progress isIndeterminate colorScheme="blue" size="sm" borderRadius="md" w="100%" />
+                  {/* Pull progress */}
+                  {wizard.loading && (
+                    <VStack spacing={2} w="100%" maxW="400px">
+                      <HStack spacing={2}><Spinner size="sm" color="blue.400" /><Text color="blue.400" fontSize="sm">Loading configuration from ODrive…</Text></HStack>
+                      <Progress isIndeterminate colorScheme="blue" size="sm" borderRadius="md" w="100%" />
+                    </VStack>
+                  )}
+
+                  {/* Progress bars per step */}
+                  <HStack spacing={2} justify="center" w="100%" maxW="800px">
+                    {STEPS.map((s, i) => (
+                      <VStack key={s.id} spacing={1} minW="60px" flex="1">
+                        <Box w="100%" h="4px" bg="gray.600" borderRadius="md" overflow="hidden">
+                          <Box w="100%" h="100%" transition="all 0.3s ease"
+                            bg={i < stepIndex ? 'green.400' : i === stepIndex ? 'odrive.400' : 'gray.600'} />
+                        </Box>
+                        <Text fontSize="2xs" textAlign="center" fontWeight={i === stepIndex ? 'bold' : 'normal'}
+                          color={i < stepIndex ? 'green.300' : i === stepIndex ? 'odrive.300' : 'gray.500'}>
+                          {s.label}
+                        </Text>
+                      </VStack>
+                    ))}
+                  </HStack>
+
+                  {/* Navigation */}
+                  <HStack justify="center" align="center" w="100%" spacing={6}>
+                    <Button onClick={() => setStepIndex((i) => Math.max(0, i - 1))} isDisabled={stepIndex === 0} variant="outline" colorScheme="gray" size="sm" minW="80px">
+                      Previous
+                    </Button>
+                    <Text fontSize="lg" color="white" fontWeight="bold">Step {stepIndex + 1}: {step.label}</Text>
+                    <Button onClick={() => setStepIndex((i) => Math.min(STEPS.length - 1, i + 1))} isDisabled={stepIndex === STEPS.length - 1} variant="outline" colorScheme="gray" size="sm" minW="80px">
+                      Next
+                    </Button>
+                  </HStack>
+
+                  {/* Action buttons (hidden on the Apply step, which has its own apply button) */}
+                  {!isApplyStep && (
+                    <HStack spacing={3} justify="center" flexWrap="wrap">
+                      <Button colorScheme="red" variant="outline" size="md" onClick={onEraseOpen} isDisabled={!wizard.isConnected} leftIcon={<Trash2 size={16} />}>
+                        Erase Config
+                      </Button>
+                      <Button colorScheme="green" variant="outline" size="md" onClick={wizard.pullConfig} isDisabled={!wizard.isConnected} isLoading={wizard.loading} loadingText="Pulling…" leftIcon={!wizard.loading ? <DownloadCloud size={16} /> : undefined}>
+                        Pull Current Config
+                      </Button>
+                      <Button colorScheme="blue" variant="outline" size="md" onClick={() => setStepIndex(STEPS.length - 1)} isDisabled={!wizard.isConnected} leftIcon={<ClipboardList size={16} />}>
+                        Review in Apply
+                      </Button>
+                      <Button colorScheme="blue" size="md" onClick={handleApplySave} isDisabled={!wizard.isConnected || wizard.changes.length === 0} isLoading={applying} loadingText="Applying…" leftIcon={<Save size={16} />}>
+                        Apply &amp; Save
+                        {wizard.changes.length > 0 && <Badge ml={2} colorScheme="teal">{wizard.changes.length}</Badge>}
+                      </Button>
+                    </HStack>
+                  )}
+                </VStack>
+              </Box>
+
+              {/* Step content */}
+              <Box flex="1" minH="0" overflowY="auto" overflowX="hidden" p={4}>
+                {renderStep()}
+              </Box>
+
+              <EraseConfigModal isOpen={isEraseOpen} onClose={onEraseClose} />
+            </Flex>
+          </TabPanel>
+
+          <TabPanel p={4} overflowY="auto">
+            <VStack align="stretch" spacing={4}>
+              <MotorControlsCard isActive={isActive && subTabIndex === 1} />
+              <AnticoggingCalibrationCard isActive={isActive && subTabIndex === 1} />
             </VStack>
-          )}
+          </TabPanel>
 
-          {/* Progress bars per step */}
-          <HStack spacing={2} justify="center" w="100%" maxW="800px">
-            {STEPS.map((s, i) => (
-              <VStack key={s.id} spacing={1} minW="60px" flex="1">
-                <Box w="100%" h="4px" bg="gray.600" borderRadius="md" overflow="hidden">
-                  <Box w="100%" h="100%" transition="all 0.3s ease"
-                    bg={i < stepIndex ? 'green.400' : i === stepIndex ? 'odrive.400' : 'gray.600'} />
-                </Box>
-                <Text fontSize="2xs" textAlign="center" fontWeight={i === stepIndex ? 'bold' : 'normal'}
-                  color={i < stepIndex ? 'green.300' : i === stepIndex ? 'odrive.300' : 'gray.500'}>
-                  {s.label}
-                </Text>
-              </VStack>
-            ))}
-          </HStack>
-
-          {/* Navigation */}
-          <HStack justify="center" align="center" w="100%" spacing={6}>
-            <Button onClick={() => setStepIndex((i) => Math.max(0, i - 1))} isDisabled={stepIndex === 0} variant="outline" colorScheme="gray" size="sm" minW="80px">
-              Previous
-            </Button>
-            <Text fontSize="lg" color="white" fontWeight="bold">Step {stepIndex + 1}: {step.label}</Text>
-            <Button onClick={() => setStepIndex((i) => Math.min(STEPS.length - 1, i + 1))} isDisabled={stepIndex === STEPS.length - 1} variant="outline" colorScheme="gray" size="sm" minW="80px">
-              Next
-            </Button>
-          </HStack>
-
-          {/* Action buttons (hidden on the Apply step, which has its own apply button) */}
-          {!isApplyStep && (
-            <HStack spacing={3} justify="center" flexWrap="wrap">
-              <Button colorScheme="red" variant="outline" size="md" onClick={onEraseOpen} isDisabled={!wizard.isConnected} leftIcon={<Trash2 size={16} />}>
-                Erase Config
-              </Button>
-              <Button colorScheme="green" variant="outline" size="md" onClick={wizard.pullConfig} isDisabled={!wizard.isConnected} isLoading={wizard.loading} loadingText="Pulling…" leftIcon={!wizard.loading ? <DownloadCloud size={16} /> : undefined}>
-                Pull Current Config
-              </Button>
-              <Button colorScheme="blue" variant="outline" size="md" onClick={() => setStepIndex(STEPS.length - 1)} isDisabled={!wizard.isConnected} leftIcon={<ClipboardList size={16} />}>
-                Review in Apply
-              </Button>
-              <Button colorScheme="blue" size="md" onClick={handleApplySave} isDisabled={!wizard.isConnected || wizard.changes.length === 0} isLoading={applying} loadingText="Applying…" leftIcon={<Save size={16} />}>
-                Apply &amp; Save
-                {wizard.changes.length > 0 && <Badge ml={2} colorScheme="teal">{wizard.changes.length}</Badge>}
-              </Button>
-            </HStack>
-          )}
-        </VStack>
-      </Box>
-
-      {/* Step content */}
-      <Box flex="1" minH="0" overflowY="auto" overflowX="hidden" p={4}>
-        {renderStep()}
-      </Box>
-
-      <EraseConfigModal isOpen={isEraseOpen} onClose={onEraseClose} />
+          <TabPanel p={0} h="100%">
+            <CommandConsoleTab />
+          </TabPanel>
+        </TabPanels>
+      </Tabs>
     </Flex>
   )
 }

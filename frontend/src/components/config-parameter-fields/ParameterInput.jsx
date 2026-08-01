@@ -29,8 +29,10 @@ const ParameterInput = ({
   size = 'sm',
   isInteger = false,
   isDisabled = false,
+  allowInfinity = false,
 }) => {
   const [text, setText] = useState('')
+  const isValidNumber = (n) => Number.isFinite(n) || (allowInfinity && (n === Infinity || n === -Infinity))
 
   useEffect(() => {
     // Sync from external value unless the user is mid-edit on the same number.
@@ -39,8 +41,8 @@ const ParameterInput = ({
       return
     }
     const num = Number(value)
-    if (Number.isFinite(num)) {
-      setText(decimals != null ? String(roundTrim(num, decimals)) : String(num))
+    if (isValidNumber(num)) {
+      setText(Number.isFinite(num) && decimals != null ? String(roundTrim(num, decimals)) : String(num))
     } else {
       setText(String(value))
     }
@@ -50,12 +52,12 @@ const ParameterInput = ({
   const commit = (raw) => {
     if (raw === '' || raw === '-' || raw === '.' || raw === '-.') return
     const num = Number(raw)
-    if (Number.isFinite(num)) onChange(num)
+    if (isValidNumber(num)) onChange(num)
   }
 
   // Inline, password-strength-style validation: never blocks typing, just flags
   // bad input so the user sees what's wrong and can fix it.
-  const error = validationError(text, { min, max, isInteger })
+  const error = validationError(text, { min, max, isInteger, allowInfinity })
   const isInvalid = error != null
 
   const input = (
@@ -120,11 +122,13 @@ const ParameterInput = ({
   )
 }
 
-function validationError(text, { min, max, isInteger }) {
+function validationError(text, { min, max, isInteger, allowInfinity }) {
   // Empty or in-progress entries are not flagged.
   if (text === '' || text === '-' || text === '.' || text === '-.') return null
   const num = Number(text)
-  if (!Number.isFinite(num)) return 'Must be a number'
+  const isInf = allowInfinity && (num === Infinity || num === -Infinity)
+  if (!Number.isFinite(num) && !isInf) return 'Must be a number'
+  if (isInf) return null // "no limit" — skip range/integer checks below
   if (isInteger && !Number.isInteger(num)) return 'Must be a whole number'
   if (min != null && num < min) return `Must be ≥ ${min}`
   if (max != null && num > max) return `Must be ≤ ${max}`

@@ -83,7 +83,7 @@ export const SCHEMA = {
           f('axis{n}.motor.config.calibration_current', 'Calibration Current', { unit: 'A', decimals: 2, step: 0.1, tooltip: 'Current applied while measuring motor resistance/inductance.' }),
           f('axis{n}.motor.config.phase_resistance', 'Phase Resistance', { unit: 'Ω', decimals: 4, step: 0.001, tooltip: 'Motor winding resistance (measured by calibration).' }),
           f('axis{n}.motor.config.phase_inductance', 'Phase Inductance', { unit: 'H', decimals: 6, step: 0.00001, tooltip: 'Motor winding inductance (measured by calibration).' }),
-          f('axis{n}.motor.config.torque_lim', 'Torque Limit', { unit: 'Nm', decimals: 2, step: 0.1, tooltip: 'Maximum commanded torque. Leave at Inf to be bounded only by the current limit; set ~2–5× your load torque to cap it.' }),
+          f('axis{n}.motor.config.torque_lim', 'Torque Limit', { unit: 'Nm', decimals: 2, step: 0.1, allowInfinity: true, tooltip: 'Maximum commanded torque. Leave at Inf to be bounded only by the current limit; set ~2–5× your load torque to cap it.' }),
           f('axis{n}.motor.config.pre_calibrated', 'Pre-Calibrated', { kind: 'boolean', tooltip: 'Skip motor calibration on startup using stored resistance/inductance. Set after a successful calibration.' }),
         ],
       },

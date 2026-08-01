@@ -34,6 +34,14 @@ def _animated_value(path: str):
         return round(2.0 * math.sin(t * 0.5), 4)
     if path.endswith("encoder.vel_estimate") or path.endswith("pos_vel_mapper.vel"):
         return round(1.0 * math.cos(t * 0.5), 4)
+    # Controller setpoint, phase-led slightly ahead of the estimate above so
+    # the Inspector tab's overlay charts (AxisTelemetryCharts.jsx) show two
+    # visibly distinct but closely-tracking curves in mock mode, same as a
+    # real closed loop tracking a moving target with small lag.
+    if path.endswith("controller.pos_setpoint"):
+        return round(2.0 * math.sin((t + 0.15) * 0.5), 4)
+    if path.endswith("controller.vel_setpoint"):
+        return round(1.0 * math.cos((t + 0.15) * 0.5), 4)
     if path.endswith("Iq_measured") or path.endswith("Iq_setpoint"):
         return round(0.6 * math.sin(t * 2.0) + 0.05 * math.sin(t * 31.0), 4)
     if path.endswith("Id_measured"):

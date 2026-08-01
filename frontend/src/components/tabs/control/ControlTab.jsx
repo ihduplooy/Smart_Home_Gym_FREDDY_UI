@@ -31,12 +31,31 @@ import {
   ListItem,
 } from '@chakra-ui/react'
 
-import { useControlTelemetry } from '../../../hooks/useControlTelemetry'
+import { useControlTelemetry, CONTROL_TELEMETRY_BUFFER_S } from '../../../hooks/useControlTelemetry'
 import { startControlSession, stopControlSession, setControlTarget } from '../../../api/control'
 import { readProperties, writeProperties, invokeCommand } from '../../../api/backend'
-import MiniChart from './MiniChart'
+import { getExerciseStatus } from '../../../api/exercise'
+import { turnsDeltaFromLength } from '../../../utils/cableGeometry'
+import TelemetryTimeSeriesChart from '../../shared/TelemetryTimeSeriesChart'
 
 const UNIT_BY_MODE = { velocity: 'turns/s', torque: 'Nm' }
+
+// Line config for the shared TelemetryTimeSeriesChart (components/shared/,
+// same component/style Train's tab uses -- "same graphs everywhere" pass,
+// 29 July 2026) -- keys match useControlTelemetry.js's raw ring-buffer
+// sample shape directly (position/velocity/torque_est, turns/turns-per-s/
+// Nm; no client-side unit conversion the way Train's cable-length keys
+// need, since Control operates directly in encoder/motor units). Target
+// position shares Position's own Y axis (axisKey) rather than getting its
+// own -- it's the same quantity, just a second series -- and is dashed to
+// stay visually distinct; only present (non-null) while Position mode is
+// running, same as it was via MiniChart's old secondaryKey mechanism.
+const CONTROL_CHART_LINES = [
+  { key: 'position', label: 'Position (actual)', color: '#63B3ED', unit: 'turns', defaultOn: true, side: 'left' },
+  { key: 'target_position', label: 'Target position', color: '#F6E05E', unit: 'turns', defaultOn: true, side: 'left', axisKey: 'position', dashed: true, lineType: 'stepAfter' },
+  { key: 'velocity', label: 'Velocity (actual)', color: '#68D391', unit: 'turns/s', defaultOn: false, side: 'right' },
+  { key: 'torque_est', label: 'Torque (est.)', color: '#F6AD55', unit: 'Nm', defaultOn: false, side: 'right' },
+]
 
 // Modes this tab's own UI understands (its Select only ever offers these
 // three). The backend's ControlSession is shared with Profiles/Exercise/
@@ -65,12 +84,30 @@ const ControlTab = ({ isActive = true }) => {
   const [targetText, setTargetText] = useState('0.5')
   // Position mode's target is a small move spec, not a single number — kept
   // as separate fields rather than overloading targetText.
-  const [posPositionText, setPosPositionText] = useState('1.0') // relative: turns to move from wherever it is now
+  const [posPositionText, setPosPositionText] = useState('1.0') // relative: turns (or metres, see posUnit) to move from wherever it is now
+  const [posUnit, setPosUnit] = useState('turns') // 'turns' | 'm' -- metres converts via the live cable r0/k, same geometry Exercise/Train use
   const [posVelocityText, setPosVelocityText] = useState('1.0')
   const [posAccelText, setPosAccelText] = useState('1.0')
   const [posTorqueLimitText, setPosTorqueLimitText] = useState('') // blank = leave configured torque_lim untouched
   const [actionError, setActionError] = useState(null)
   const [busy, setBusy] = useState(false)
+
+  // Cable geometry (r0/k) for the metres unit option (25 July 2026, requested
+  // so Position mode isn't turns-only) -- read-only, from the same shared
+  // CableState Exercise/Train already expose via /api/exercise/status.
+  // PositionMode itself stays hardware-turns-only; the conversion happens
+  // here, client-side, before the target is ever sent.
+  const [cableGeometry, setCableGeometry] = useState(null) // { r0, k } | null
+  useEffect(() => {
+    let cancelled = false
+    getExerciseStatus()
+      .then((s) => {
+        if (cancelled || s?.cable?.r0 == null) return
+        setCableGeometry({ r0: s.cable.r0, k: s.cable.k ?? 0 })
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [posUnit])
 
   const running = Boolean(status?.running && KNOWN_MODES.includes(status?.mode))
   // A Profiles/Exercise/Force session running on the shared backend session
@@ -90,29 +127,30 @@ const ControlTab = ({ isActive = true }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status?.running, status?.mode])
 
-  const chartData = useMemo(() => {
-    if (!series.length) return { position: [], velocity: [], torque: [] }
-    const t0 = series[0].t
-    const position = []
-    const velocity = []
-    const torque = []
-    for (const s of series) {
-      const t = s.t - t0
-      position.push({ t, v: s.position })
-      velocity.push({ t, v: s.velocity })
-      torque.push({ t, v: s.torque_est })
-    }
-    return { position, velocity, torque }
-  }, [series])
-
   const targetNumber = Number(targetText)
 
   const posPositionNumber = Number(posPositionText)
   const posVelocityNumber = Number(posVelocityText)
   const posAccelNumber = Number(posAccelText)
   const posTorqueLimitNumber = posTorqueLimitText === '' ? null : Number(posTorqueLimitText)
+
+  // Converts a signed cable-length input to signed turns -- turnsDeltaFromLength
+  // (like its Python original, core/cable/geometry.py's turns_delta_from_length)
+  // only ever returns a magnitude, so the sign is reapplied here, same
+  // convention CABLE_SIGN-aware backend callers already follow.
+  const posPositionTurnsEstimate = useMemo(() => {
+    if (posUnit !== 'm' || !cableGeometry || !Number.isFinite(posPositionNumber)) return null
+    try {
+      const magnitude = turnsDeltaFromLength(Math.abs(posPositionNumber), cableGeometry.r0, cableGeometry.k)
+      return Math.sign(posPositionNumber) * magnitude
+    } catch {
+      return null
+    }
+  }, [posUnit, cableGeometry, posPositionNumber])
+
   const posValid =
     posPositionText !== '' && Number.isFinite(posPositionNumber) &&
+    (posUnit === 'turns' || posPositionTurnsEstimate != null) &&
     posVelocityText !== '' && Number.isFinite(posVelocityNumber) && posVelocityNumber > 0 &&
     posAccelText !== '' && Number.isFinite(posAccelNumber) && posAccelNumber > 0 &&
     (posTorqueLimitText === '' || (Number.isFinite(posTorqueLimitNumber) && posTorqueLimitNumber >= 0))
@@ -121,8 +159,9 @@ const ControlTab = ({ isActive = true }) => {
 
   const buildTarget = () => {
     if (mode === 'position') {
+      const positionTurns = posUnit === 'm' ? posPositionTurnsEstimate : posPositionNumber
       return {
-        position: posPositionNumber,
+        position: positionTurns,
         move_velocity: posVelocityNumber,
         accel_decel: posAccelNumber,
         torque_limit: posTorqueLimitText === '' ? null : posTorqueLimitNumber,
@@ -308,17 +347,29 @@ const ControlTab = ({ isActive = true }) => {
                   <>
                     <Box>
                       <Text fontSize="xs" color="gray.400" mb={1}>Move Distance</Text>
-                      <InputGroup size="sm" w="150px">
-                        <Input
-                          type="text"
-                          inputMode="decimal"
-                          fontFamily="mono"
-                          value={posPositionText}
-                          onChange={(e) => setPosPositionText(e.target.value)}
-                        />
-                        <InputRightAddon px={2} fontSize="xs">turns</InputRightAddon>
-                      </InputGroup>
-                      <Text fontSize="0.65rem" color="gray.500" mt={0.5}>relative to current position</Text>
+                      <HStack spacing={1}>
+                        <InputGroup size="sm" w="110px">
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            fontFamily="mono"
+                            value={posPositionText}
+                            onChange={(e) => setPosPositionText(e.target.value)}
+                          />
+                        </InputGroup>
+                        <Select size="sm" w="80px" value={posUnit} onChange={(e) => setPosUnit(e.target.value)}>
+                          <option value="turns">turns</option>
+                          <option value="m">m (cable)</option>
+                        </Select>
+                      </HStack>
+                      <Text fontSize="0.65rem" color="gray.500" mt={0.5}>
+                        relative to current position
+                        {posUnit === 'm' && (
+                          posPositionTurnsEstimate != null
+                            ? ` (≈ ${posPositionTurnsEstimate.toFixed(3)} turns)`
+                            : cableGeometry == null ? ' (loading cable calibration…)' : ' (out of range for current calibration)'
+                        )}
+                      </Text>
                     </Box>
                     <Box>
                       <Text fontSize="xs" color="gray.400" mb={1}>Move Velocity</Text>
@@ -504,12 +555,11 @@ const ControlTab = ({ isActive = true }) => {
           </CardBody>
         </Card>
 
-        {/* Live charts */}
-        <SimpleGrid columns={{ base: 1, lg: 3 }} spacing={4}>
-          <MiniChart label="Position" unit="turns" color="#63B3ED" data={chartData.position} />
-          <MiniChart label="Velocity" unit="turns/s" color="#68D391" data={chartData.velocity} />
-          <MiniChart label="Torque (est.)" unit="Nm" color="#F6AD55" data={chartData.torque} />
-        </SimpleGrid>
+        {/* Live chart -- same shared component/style as the Train tab's
+            (components/shared/TelemetryTimeSeriesChart.jsx): per-line
+            enable/axis-range/invert/smoothing controls, range-duration
+            buttons, and pause/freeze, all built in. */}
+        <TelemetryTimeSeriesChart series={series} lines={CONTROL_CHART_LINES} bufferS={CONTROL_TELEMETRY_BUFFER_S} />
       </VStack>
     </Box>
   )

@@ -31,6 +31,22 @@ const ParameterField = ({ field, fwLine, value, known, edited, onChange, onRefre
     return enumSelectOptions(fwLine, field.enumName, meta)
   }, [kind, fwLine, field.enumName, meta])
 
+  // For enum fields, the tooltip lists what each option actually does — "how
+  // input commands are shaped" doesn't tell you which of nine modes to pick.
+  const tooltipContent =
+    kind === 'enum' && options.some((o) => o.description) ? (
+      <VStack align="start" spacing={1} py={1}>
+        {field.tooltip && <Text>{field.tooltip}</Text>}
+        {options.map((o) => (
+          <Text key={o.value}>
+            <Text as="span" fontWeight="bold">{o.label}:</Text> {o.description || '—'}
+          </Text>
+        ))}
+      </VStack>
+    ) : (
+      field.tooltip
+    )
+
   let control
   if (kind === 'boolean') {
     control = (
@@ -53,6 +69,7 @@ const ParameterField = ({ field, fwLine, value, known, edited, onChange, onRefre
         min={field.min}
         max={field.max}
         isInteger={kind === 'integer'}
+        allowInfinity={field.allowInfinity}
       />
     )
   }
@@ -63,7 +80,7 @@ const ParameterField = ({ field, fwLine, value, known, edited, onChange, onRefre
         <HStack spacing={1}>
           <Text fontSize="sm" noOfLines={1}>{field.label}</Text>
           {field.tooltip && (
-            <Tooltip label={field.tooltip} hasArrow placement="top">
+            <Tooltip label={tooltipContent} hasArrow placement="top" bg="gray.700" color="white" maxW="360px">
               <Icon as={InfoOutlineIcon} color="gray.500" boxSize={3} />
             </Tooltip>
           )}

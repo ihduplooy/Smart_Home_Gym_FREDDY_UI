@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSelector } from 'react-redux'
 import * as backend from '../api/backend'
 import { buildDeviceSnapshot, diffConfig, toCommandStrings } from '../utils/configDiff'
@@ -38,6 +38,14 @@ export function useConfigWizard() {
   const [loading, setLoading] = useState(false)
   const [loadingPaths, setLoadingPaths] = useState(() => new Set())
   const [boardDefaults, setBoardDefaults] = useState({})
+  // Axes we've already seeded with board-constant defaults this connection.
+  // Board defaults should only pre-fill a field the *first* time you view an
+  // axis (so the wizard "opens pre-loaded") — not on every pull, which used
+  // to silently overwrite live edits (or the device's actual current value)
+  // back to the project's fixed target every time, including the automatic
+  // re-pull right after every Apply. Reset on disconnect so a fresh connect
+  // gets the pre-loaded treatment again.
+  const seededAxesRef = useRef(new Set())
 
   // Fetch this project's board constants once; independent of device connection.
   useEffect(() => {
@@ -75,14 +83,20 @@ export function useConfigWizard() {
       const { snapshot: snap, unreadable: bad } = buildDeviceSnapshot(results)
       setSnapshot(snap) // untouched device readback; diffConfig compares desired against this
       setUnreadable(bad)
-      // This project's board-constant defaults take priority over whatever the
-      // device currently reports for the small, curated set of fields we have
-      // an opinion on (config/board_constants.py) — that's what makes the
-      // wizard a verification/tweak tool: it shows our target configuration,
-      // and diffConfig highlights anywhere the device doesn't match it yet.
-      // Every other field (measured values, thermal limits, etc.) still shows
-      // the real device value — never fabricated.
-      setDesired({ ...snap, ...expandValues(boardDefaults, selectedAxis) })
+      // This project's board-constant defaults pre-fill the small, curated set
+      // of fields we have an opinion on (config/board_constants.py) — but only
+      // the first time this axis is viewed this connection. After that,
+      // `desired` just tracks the live device snapshot (still overridable by
+      // the user's own edits via setValue/setValueByPath), so an Apply doesn't
+      // keep re-suggesting the project's fixed target as a "pending change"
+      // every time you deviate from it on purpose (e.g. testing a different
+      // mode from the Control tab).
+      if (!seededAxesRef.current.has(selectedAxis)) {
+        seededAxesRef.current.add(selectedAxis)
+        setDesired({ ...snap, ...expandValues(boardDefaults, selectedAxis) })
+      } else {
+        setDesired(snap)
+      }
       setEditedPaths(new Set())
     } finally {
       setLoading(false)
@@ -91,7 +105,11 @@ export function useConfigWizard() {
 
   // Auto-pull on connect / axis change / once board defaults arrive.
   useEffect(() => {
-    if (serial) pullConfig()
+    if (!serial) {
+      seededAxesRef.current = new Set() // next connect starts pre-loaded again
+      return
+    }
+    pullConfig()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serial, selectedAxis, fwLine, boardDefaults])
 

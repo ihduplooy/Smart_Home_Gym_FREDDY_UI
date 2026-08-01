@@ -11,9 +11,10 @@ from dataclasses import asdict
 
 from flask import jsonify, request
 
-from core.cable import CableState, ExerciseMode, ForceMode
+from core.cable import CableState, ExerciseMode, TrainMode
 from core.control.modes import MODES_BY_NAME
 from core.control.session import ControlSession, DEFAULT_HARDWARE_FACTORIES
+from core.experiments import ExperimentMode
 from core.hardware.odrive_hw import OdriveHardware
 from core.profiles import PROFILE_REGISTRY, OverloadWrapper, Phase
 
@@ -51,13 +52,21 @@ control_session = ControlSession(
     hardware_factories={**DEFAULT_HARDWARE_FACTORIES, "real": _real_hardware_factory},
     mode_factories={
         **MODES_BY_NAME,
+        # Force feedback (formerly a separate "force" mode) is now just a
+        # set of actions (engage/disengage/update_params/resume) on this
+        # same ExerciseMode instance -- merged 24 July 2026 so home/move and
+        # force engage/disengage no longer require a full session stop/
+        # restart to switch between (see core/cable/exercise_mode.py's
+        # module docstring).
         "exercise": lambda: ExerciseMode(cable_state),
-        # Layer B (force feedback) shares the same CableState as Layer A --
-        # a Force session requires a home/max already established by a
-        # prior Exercise session (see core/cable/force_mode.py's engage
-        # handler). Mutually exclusive with every other mode on this one
-        # ControlSession, exactly like Exercise already is.
-        "force": lambda: ForceMode(cable_state),
+        # Train tab (train_tab_build_spec.md §2): same mode_factories hook,
+        # same shared cable_state -- not added to MODES_BY_NAME itself,
+        # following the "exercise" precedent directly above.
+        "train": lambda: TrainMode(cable_state),
+        # Testing tab (Testing tab Build Spec §2): same mode_factories hook,
+        # same shared cable_state -- proof there's no second ODrive
+        # connection, exactly the "train"/"exercise" precedent above.
+        "experiment": lambda: ExperimentMode(cable_state),
     },
 )
 

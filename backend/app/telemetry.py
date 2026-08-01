@@ -9,9 +9,18 @@ from .device_manager import (
     set_attr_value,
     invoke,
     io_lock,
+    call_with_timeout,
 )
 
 log = logging.getLogger(__name__)
+
+# Bound on each property read in the always-on live-status loop below. A
+# single wedged read (see device_manager.call_with_timeout's docstring) must
+# not be allowed to hold `lock` forever — that would freeze every other
+# real-hardware operation (Dashboard, Control, Configuration) waiting on the
+# same shared lock, not just this stream. On timeout that one reading is
+# reported as stale for this tick; the loop retries it next tick.
+_READ_TIMEOUT_S = 1.5
 
 
 def telemetry_session(ws, serial: str):
@@ -80,7 +89,10 @@ def telemetry_session(ws, serial: str):
             with lock:
                 for p in paths:
                     try:
-                        data[p] = get_attr_value(odrv, p)
+                        data[p] = call_with_timeout(lambda p=p: get_attr_value(odrv, p), _READ_TIMEOUT_S)
+                    except TimeoutError:
+                        data[p] = {"error": "timed out (stale)"}
+                        log.warning("telemetry read timed out for %s (>%.1fs) — reporting stale", p, _READ_TIMEOUT_S)
                     except Exception as e:
                         # Surface the failure instead of a silent None so the
                         # client can tell "unreadable" from a real value.

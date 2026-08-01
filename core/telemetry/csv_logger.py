@@ -23,6 +23,16 @@ more columns appended -- `commanded_force_n`, `estimated_force_n`,
 spec explicitly calls for capturing commanded-vs-estimated force together,
 not just one, since this CSV is the primary record for anything the project
 eventually reports.
+
+Testing tab amendment (Testing tab Build Spec §3): seven more columns
+appended -- `experiment_state`, `position_m`, `velocity_m_s`,
+`commanded_torque_nm`, `bus_voltage_v`, `estimated_power_w`,
+`target_position_m` -- populated during Testing-tab experiment runs, empty
+strings for every other mode. No separate `measured_current_a` column: the
+spec's "motor phase current if available" channel is already served by the
+existing `current_iq_a` column (this project only ever reads phase current,
+never bus current -- see core/hardware/interface.py's TelemetrySample
+docstring), so it isn't duplicated here.
 """
 
 import csv
@@ -51,6 +61,13 @@ COLUMNS = [
     "regen_power_w",
     "force_state",
     "power_limiter_active",
+    "experiment_state",
+    "position_m",
+    "velocity_m_s",
+    "commanded_torque_nm",
+    "bus_voltage_v",
+    "estimated_power_w",
+    "target_position_m",
 ]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -99,6 +116,13 @@ class CsvLogger:
         regen_power_w="",
         force_state="",
         power_limiter_active="",
+        experiment_state="",
+        position_m="",
+        velocity_m_s="",
+        commanded_torque_nm="",
+        bus_voltage_v="",
+        estimated_power_w="",
+        target_position_m="",
     ) -> None:
         if self._writer is None or self._t0 is None:
             raise RuntimeError("CsvLogger.log_sample() called before open()")
@@ -120,6 +144,13 @@ class CsvLogger:
             regen_power_w,
             force_state,
             power_limiter_active,
+            experiment_state,
+            position_m,
+            velocity_m_s,
+            commanded_torque_nm,
+            bus_voltage_v,
+            estimated_power_w,
+            target_position_m,
         ])
         now = time.monotonic()
         if now - self._last_flush >= _FLUSH_INTERVAL_S:

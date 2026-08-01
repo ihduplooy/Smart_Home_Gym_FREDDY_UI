@@ -3,8 +3,10 @@
 import pytest
 
 from core.cable.limits import (
+    check_position_tiers,
     check_runtime_guard,
     clamp_target_turns,
+    excess_beyond_range,
     validate_homed,
     validate_max_extension_candidate,
 )
@@ -56,6 +58,46 @@ def test_runtime_guard_beyond_tolerance_past_home_is_violation():
 
 def test_runtime_guard_at_exact_tolerance_boundary_no_violation():
     assert check_runtime_guard(10.05, home_turns=0.0, max_turns=10.0, tolerance_turns=0.05) is False
+
+
+# ---- excess_beyond_range ----
+
+def test_excess_beyond_range_zero_when_inside():
+    assert excess_beyond_range(5.0, home_turns=0.0, max_turns=10.0) == 0.0
+
+
+def test_excess_beyond_range_positive_past_max():
+    assert excess_beyond_range(10.3, home_turns=0.0, max_turns=10.0) == pytest.approx(0.3)
+
+
+def test_excess_beyond_range_positive_past_home():
+    assert excess_beyond_range(-0.3, home_turns=0.0, max_turns=10.0) == pytest.approx(0.3)
+
+
+# ---- two-tier position guard ----
+
+def test_check_position_tiers_inside_range_no_warning_no_violation():
+    warning, violated = check_position_tiers(5.0, home_turns=0.0, max_turns=10.0, warning_tolerance_turns=0.03, hard_tolerance_turns=0.05)
+    assert warning is False
+    assert violated is False
+
+
+def test_check_position_tiers_between_tolerances_warns_but_does_not_violate():
+    warning, violated = check_position_tiers(10.04, home_turns=0.0, max_turns=10.0, warning_tolerance_turns=0.03, hard_tolerance_turns=0.05)
+    assert warning is True
+    assert violated is False
+
+
+def test_check_position_tiers_beyond_hard_tolerance_both_true():
+    warning, violated = check_position_tiers(10.2, home_turns=0.0, max_turns=10.0, warning_tolerance_turns=0.03, hard_tolerance_turns=0.05)
+    assert warning is True
+    assert violated is True
+
+
+def test_check_position_tiers_matches_check_runtime_guard_at_hard_tier():
+    for pos in (10.2, 10.04, 5.0, -0.2):
+        _, violated = check_position_tiers(pos, home_turns=0.0, max_turns=10.0, warning_tolerance_turns=0.03, hard_tolerance_turns=0.05)
+        assert violated == check_runtime_guard(pos, home_turns=0.0, max_turns=10.0, tolerance_turns=0.05)
 
 
 # ---- un-homed rejection ----

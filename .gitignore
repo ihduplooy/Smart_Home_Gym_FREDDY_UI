@@ -28,6 +28,11 @@ dist-ssr
 # SPOOL_CORRECTION_K_DEFAULT is the fallback when this file is absent.
 config/spool_calibration.json
 
+# Persisted experimental multi-point spool-growth calibration (train tab
+# calibration overhaul) -- same bench/physical-spool-specific character as
+# the sidecar above, kept separate since it's a list of points, not floats.
+config/spool_growth_calibration.json
+
 #Back-end directories and files (in ../backend/)
 # Ignore venv for python
 .venv/

@@ -62,7 +62,7 @@ MOTOR_CURRENT_CONTROL_BANDWIDTH = 100  # reduced from ODrive's default for stabi
 # tabs' TorqueMode/ProfileMode — a real, visible, spec-mandated behavior
 # change on those tabs, not just an Exercise-tab-local one (docs/decisions.md,
 # "Exercise tab Layer A" entry).
-MOTOR_TORQUE_CONSTANT = 0.516875  # Nm/A, fallback estimate (8.27 / 16)
+MOTOR_TORQUE_CONSTANT = 0.492  # Nm/A, fallback estimate (8.27 / 16)
 
 # Measured phase resistance — consistent across every motor calibration run
 # on this unit (Layer B §5.2, exercise_tab_build_spec_layerB.md). Distinct
@@ -109,6 +109,29 @@ CONTROLLER_VEL_INTEGRATOR_GAIN = 0.1
 TRAP_TRAJ_VEL_LIMIT = 1.0  # turns/s
 TRAP_TRAJ_ACCEL_LIMIT = 1.0  # turns/s^2
 TRAP_TRAJ_DECEL_LIMIT = 1.0  # turns/s^2
+
+# --------------------------------------------------------------------------
+# Anti-cogging calibration (axis{n}.controller.config.anticogging.*) —
+# firmware v0.5.1, corroborated against the bundled odriveApiReference05x.json
+# (properties.controller_anticogging: index/pre_calibrated/calib_anticogging/
+# calib_pos_threshold/calib_vel_threshold/cogging_ratio/anticogging_enabled,
+# all real 0.5.x properties; axis{n}.controller.start_anticogging_calibration()
+# also confirmed present). Gains during calibration are a MULTIPLE of the
+# live-tuned CONTROLLER_POS_GAIN/CONTROLLER_VEL_INTEGRATOR_GAIN above, not a
+# second pair of absolute values, so raising/re-tuning the normal gains never
+# leaves this block silently stale. 6x sits mid-way in the requested "4-8x"
+# starting-point range.
+ANTICOGGING_POS_GAIN_MULTIPLIER_DEFAULT = 6.0
+ANTICOGGING_VEL_INTEGRATOR_GAIN_MULTIPLIER_DEFAULT = 6.0
+# TODO(bench): calib_pos_threshold/calib_vel_threshold have no documented
+# default in odriveApiReference05x.json (schema only, no values) and this
+# project has no live dir()/read-back confirmation of ODrive's own factory
+# default for either — these are conservative placeholders, not measured
+# values. Larger = faster calibration but a less accurate map (per ODrive's
+# own semantics); tighten only after confirming the loosened defaults below
+# don't already produce an unacceptably coarse map.
+ANTICOGGING_CALIB_POS_THRESHOLD_DEFAULT = 1.0  # encoder counts
+ANTICOGGING_CALIB_VEL_THRESHOLD_DEFAULT = 0.5  # counts/s
 
 # Open item #8, resolved (Layer B §3.1, exercise_tab_build_spec_layerB.md,
 # 23 July 2026): ODrive's torque-mode velocity limiter reduces commanded
@@ -226,8 +249,7 @@ HOMING_TIMEOUT_S = 130.0  # Originally recomputed for the measured
 # Max-extension calibration — light constant tension while the user pulls.
 CALIB_HOLD_FORCE_N = 3.0  # single-digit N, trivially overcome by hand; enough
                           # to keep a lightweight cable/webbing taut.
-MAX_EXTENSION_SAFETY_MARGIN_M = 0.05  # 5cm inside the physically marked point.
-MAX_EXTENSION_MIN_TRAVEL_TURNS = 0.5  # ~11.0cm of cable at the measured
+MAX_EXTENSION_MIN_TRAVEL_TURNS = 1.0  # ~11.0cm of cable at the measured
                                       # SPOOL_RADIUS_M=0.035m (was ~15.7cm
                                       # against the old 0.05m placeholder) --
                                       # below this, a marked max is rejected
@@ -236,57 +258,69 @@ MAX_EXTENSION_MIN_TRAVEL_TURNS = 0.5  # ~11.0cm of cable at the measured
                                       # degenerate/inverted travel range.
 
 # Length-based control — runtime out-of-range guard (spec §3.4 mechanism 2).
+# Two-tier (added 24 July 2026, after live testing showed a hard stop on
+# first overrun was too abrupt): a smaller WARNING tier surfaces a warning
+# and actively brakes rather than killing the session outright; only an
+# excursion beyond the larger HARD tier still triggers the full auto-stop.
+# Both are live-adjustable via CableState -- these are just the fallback
+# defaults when no sidecar override exists (same pattern as the homing
+# settings below).
+POSITION_GUARD_WARNING_TURNS = 0.03  # ~0.7cm of cable at the measured
+                                     # SPOOL_RADIUS_M=0.035m -- deliberately
+                                     # tighter than the hard tier so there's
+                                     # real room between "warn and brake" and
+                                     # "stop everything".
 POSITION_GUARD_TOLERANCE_TURNS = 0.05  # ~1.1cm of cable at the measured
                                        # SPOOL_RADIUS_M=0.035m (was ~1.57cm
                                        # against the old 0.05m placeholder) —
                                        # small enough to catch real problems
                                        # quickly, larger than ordinary
                                        # position-control settling/overshoot.
+                                       # This is now the HARD tier of the
+                                       # two-tier guard above.
 
 # Spool geometry correction factor k (r_eff(theta) = r0 + k*theta).
 SPOOL_CORRECTION_K_DEFAULT = 0.0  # un-calibrated default = fixed-radius model
-SPOOL_CORRECTION_K_BOUNDS = (-0.00035, 0.00035)  # m/rad. Recomputed for the
-                                                 # measured SPOOL_RADIUS_M=
-                                                 # 0.035m (Layer B §2.3) — a
-                                                 # real value change, not just
-                                                 # a comment update. Two
-                                                 # constraints set this: (1)
-                                                 # physical plausibility -- a
-                                                 # several-mm cable/webbing
-                                                 # thickness spread over a
-                                                 # full wrap (2*pi rad)
-                                                 # implies |k| on the order of
-                                                 # 1e-4-1e-3 m/rad, still true
-                                                 # at the corrected radius; (2)
-                                                 # the r_eff=r0+k*theta model
-                                                 # must stay non-degenerate
-                                                 # (r_eff > 0) across the whole
-                                                 # plausible operating range --
-                                                 # at the OLD r0=0.05m and the
-                                                 # old +-0.0005 bound, that
-                                                 # margin was theta =
-                                                 # r0/0.0005 ~= 100 rad; left
-                                                 # unchanged, the new, smaller
-                                                 # r0=0.035m would only reach
-                                                 # ~70 rad (~2.4m of cable) at
-                                                 # the same bound -- tightened
-                                                 # to +-0.00035 to restore the
-                                                 # same ~100 rad (~3.5m)
-                                                 # margin. (A looser bound
-                                                 # originally, +-0.01, let a
-                                                 # legitimately-in-range k
-                                                 # break the model within a
-                                                 # single turn of travel --
-                                                 # caught by core/tests/
-                                                 # test_geometry.py's
-                                                 # round-trip property test,
-                                                 # not by inspection; same
-                                                 # class of error this
-                                                 # recompute avoids repeating.)
+SPOOL_CORRECTION_K_BOUNDS = (-0.01, 0.01)  # m/rad. Widened ~28x (was
+                                           # +-0.00035) at the developer's
+                                           # request, 28 July 2026 (Train tab
+                                           # calibration overhaul) -- the old
+                                           # bound was derived from an assumed
+                                           # thin cable/webbing thickness
+                                           # (1e-4-1e-3 m/rad order), which
+                                           # turned out to reject legitimate
+                                           # large corrections (e.g. an
+                                           # initial length estimate off by
+                                           # several tens of percent). This is
+                                           # now deliberately just a coarse
+                                           # fat-finger guard, not the primary
+                                           # safety net -- the real protection
+                                           # against a non-physical model is
+                                           # SPOOL_MIN_EFFECTIVE_RADIUS_M
+                                           # below, checked against the
+                                           # cable's ACTUAL calibrated travel
+                                           # range (backend/app/
+                                           # exercise_routes.py), which is
+                                           # exact rather than a guess and so
+                                           # doesn't need to be conservative
+                                           # the way a static bound does.
 SPOOL_CALIBRATION_MIN_THETA_M_RAD = 1.0  # below this, L ~= r0*theta dominates
                                          # and k's contribution is too small
                                          # relative to measurement error to
                                          # reliably back out (spec §3.3 guard).
+SPOOL_MIN_EFFECTIVE_RADIUS_M = 0.005  # 5mm floor on r_eff -- below this the
+                                      # r_eff=r0+k*theta (or piecewise
+                                      # growth) model is treated as
+                                      # non-physical/degenerate. Used both to
+                                      # validate a candidate k against the
+                                      # cable's actual calibrated travel range
+                                      # (exercise_routes.py) and to validate
+                                      # every segment of the experimental
+                                      # multi-point growth model
+                                      # (core/cable/geometry.py::
+                                      # build_growth_segments) -- added for
+                                      # the Train tab calibration overlay, 28
+                                      # July 2026.
 
 # --------------------------------------------------------------------------
 # Exercise tab, Layer B Session B1 (concentric force feedback) — tuning
@@ -422,14 +456,23 @@ ISOKINETIC_VELOCITY_FILTER_ALPHA = 0.3  # EWMA smoothing applied to the
                                         # governor feel laggy against a real
                                         # velocity change.
 
-# Let-go detector (spec §4.4, §6 items 3/4) — active in concentric only,
-# gated by ForceMode's state, tested explicitly for that gating.
-LETGO_VELOCITY_TURNS_S = 0.1  # Reel-in speed indicating nothing is holding
-                              # the cable during concentric. 2x
-                              # PHASE_VEL_THRESHOLD_TURNS_S=0.05 (the "at
-                              # rest" threshold) -- a clear, unambiguous
-                              # reel-in signal, not a noise-floor value that
-                              # would false-trigger on ordinary settling.
+# Let-go detector (spec §4.4, §6 items 3/4) — live-adjustable via CableState
+# (these are just the fallback defaults when no sidecar override exists,
+# same pattern as the homing settings below). Redefined 24 July 2026: with
+# eccentric now a real resisted phase (not an automatic fault -- see
+# exercise_mode.py), reel-in motion during a normal controlled rep is
+# expected and must NOT trip this. The detector's job narrowed to "the cable
+# is genuinely unloaded and free-spinning" -- a backstop, not a motion
+# classifier -- so the threshold needs to sit above any real controlled
+# rep speed, not just above the "at rest" noise floor. 0.1 (the original
+# value) was too close to ordinary eccentric speed to tell the two apart;
+# this default is a starting point for bench tuning with the live
+# cable_velocity_m_s reading, not a verified number.
+LETGO_VELOCITY_TURNS_S = 0.4  # ~8.8cm/s at the measured SPOOL_RADIUS_M=
+                              # 0.035m -- comfortably above a deliberate,
+                              # controlled eccentric return, still well
+                              # below what an unloaded free-spinning spool
+                              # reaches. RETUNE AT THE BENCH.
 LETGO_DEBOUNCE_SAMPLES = 5  # Matches HOMING_DEBOUNCE_SAMPLES exactly, per
                             # spec §9's explicit suggestion (~100ms at 50Hz).
 
@@ -452,13 +495,66 @@ REGEN_POWER_BUDGET_W = 30.0  # Brake resistor is 2ohm/50W rated (Layer B
 # Max-extension force taper (spec §4.5) — distance-based, not time-based:
 # force eases off as the cable approaches the physical limit under load,
 # rather than holding full force until Layer A's runtime guard trips.
-MAX_EXTENSION_FORCE_TAPER_M = 0.15  # 3x MAX_EXTENSION_SAFETY_MARGIN_M
-                                    # (0.05m) -- starts well before the
-                                    # enforced limit itself (which already
-                                    # sits inside the physically marked
-                                    # point by that margin), giving a
-                                    # gentle, perceptible ease-off rather
-                                    # than a last-moment flinch.
+MAX_EXTENSION_FORCE_TAPER_M = 0.15  # Starts well before the enforced limit
+                                    # itself, giving a gentle, perceptible
+                                    # ease-off rather than a last-moment
+                                    # flinch.
+
+# --------------------------------------------------------------------------
+# Testing tab (Testing tab Build Spec §2.1) — persisted, live-adjustable
+# CableState defaults (same _PERSISTED_DEFAULTS pattern as k/homing/force/
+# train settings above; see core/cable/state.py). Every one of these is a
+# per-run ExperimentConfig field's *default* -- editing the persisted value
+# changes what a future run's config form pre-fills, never a running
+# experiment (config is snapshotted at configure() time). All untested
+# placeholders pending the first live bench session with a real weight
+# attached, same "flag it, don't guess, verify at the bench" treatment as
+# every other first-pass tuning constant in this file.
+# --------------------------------------------------------------------------
+TEST_INITIAL_TORQUE_NM_DEFAULT = 0.1  # small, safe starting torque command
+TEST_TORQUE_RAMP_RATE_NM_PER_S_DEFAULT = 0.05  # slow enough to watch by eye
+TEST_MOVEMENT_THRESHOLD_M_PER_S_DEFAULT = 0.01  # |v| above this = "cable moving"
+TEST_HOLD_DEADBAND_M_DEFAULT = 0.005  # 5mm -- how close to target before HOLDING
+TEST_HOLD_GAIN_DEFAULT = 5.0  # Nm per metre of position error (proportional only, v1)
+TEST_MAX_TORQUE_NM_DEFAULT = 2.0  # hard ceiling -- abort if commanded torque exceeds this
+TEST_MAX_DURATION_S_DEFAULT = 60.0  # experiment-level timeout safety net
+
+# Sim-only placeholder bus voltage (Session 2's sim_hw.py has no real DC bus
+# to read) -- matches the mock's own vbus_voltage seed
+# (backend/app/mock_odrive.py), not a measured value.
+SIM_BUS_VOLTAGE_V = 24.0
+
+# --------------------------------------------------------------------------
+# Train tab (train_tab_build_spec.md §1/§3) — both persisted, live-adjustable
+# CableState defaults (same _PERSISTED_DEFAULTS pattern as k/homing/force
+# settings above; see core/cable/state.py).
+# --------------------------------------------------------------------------
+TRAIN_MAX_EXTENSION_ENFORCED_DEFAULT = True  # Runtime max-extension guard
+                                              # on by default; scoped to
+                                              # TrainMode only (spec §3) --
+                                              # does not touch ExerciseMode's
+                                              # own runtime guard.
+TRAIN_HOME_GUARD_ENFORCED_DEFAULT = True  # Runtime home-side (min) guard on
+                                           # by default; independent of the
+                                           # max-extension toggle above so
+                                           # each side of the calibrated range
+                                           # can be relaxed on its own (added
+                                           # 25 July 2026 after a session left
+                                           # the range on the home side while
+                                           # only max-extension enforcement
+                                           # had been turned off). Scoped to
+                                           # TrainMode only, same as above --
+                                           # does not touch ExerciseMode's own
+                                           # runtime guard.
+TRAIN_TELEMETRY_BUFFER_S = 90.0  # Client-side rolling telemetry buffer
+                                 # duration for the Train graphs (spec §1's
+                                 # own named example of a numeric default
+                                 # that must be persisted, not hardcoded).
+                                 # Comfortably covers the "60s" range option
+                                 # (spec §5) with headroom, and is evicted by
+                                 # sample *age*, not point count -- see
+                                 # docs/decisions.md ("Train tab" entry) for
+                                 # why MiniChart's buffer couldn't do this.
 
 # --------------------------------------------------------------------------
 # Axis — axis0 only; axis1 is a ghost node
@@ -563,6 +659,12 @@ def as_dict():
             "trap_traj_decel_limit": TRAP_TRAJ_DECEL_LIMIT,
             "enable_torque_mode_vel_limit": ENABLE_TORQUE_MODE_VEL_LIMIT,
         },
+        "anticogging": {
+            "pos_gain_multiplier_default": ANTICOGGING_POS_GAIN_MULTIPLIER_DEFAULT,
+            "vel_integrator_gain_multiplier_default": ANTICOGGING_VEL_INTEGRATOR_GAIN_MULTIPLIER_DEFAULT,
+            "calib_pos_threshold_default": ANTICOGGING_CALIB_POS_THRESHOLD_DEFAULT,
+            "calib_vel_threshold_default": ANTICOGGING_CALIB_VEL_THRESHOLD_DEFAULT,
+        },
         "exercise": {
             "homing_current_threshold_a": HOMING_CURRENT_THRESHOLD_A,
             "homing_current_limit_a": HOMING_CURRENT_LIMIT_A,
@@ -572,12 +674,13 @@ def as_dict():
             "homing_max_travel_turns": HOMING_MAX_TRAVEL_TURNS,
             "homing_timeout_s": HOMING_TIMEOUT_S,
             "calib_hold_force_n": CALIB_HOLD_FORCE_N,
-            "max_extension_safety_margin_m": MAX_EXTENSION_SAFETY_MARGIN_M,
             "max_extension_min_travel_turns": MAX_EXTENSION_MIN_TRAVEL_TURNS,
+            "position_guard_warning_turns": POSITION_GUARD_WARNING_TURNS,
             "position_guard_tolerance_turns": POSITION_GUARD_TOLERANCE_TURNS,
             "spool_correction_k_default": SPOOL_CORRECTION_K_DEFAULT,
             "spool_correction_k_bounds": list(SPOOL_CORRECTION_K_BOUNDS),
             "spool_calibration_min_theta_m_rad": SPOOL_CALIBRATION_MIN_THETA_M_RAD,
+            "spool_min_effective_radius_m": SPOOL_MIN_EFFECTIVE_RADIUS_M,
             "spool_radius_m": SPOOL_RADIUS_M,
         },
         "force": {
@@ -599,6 +702,20 @@ def as_dict():
                                                    # once open item #13 (KV
                                                    # hand-spin measurement)
                                                    # lands.
+        },
+        "train": {
+            "train_max_extension_enforced_default": TRAIN_MAX_EXTENSION_ENFORCED_DEFAULT,
+            "train_home_guard_enforced_default": TRAIN_HOME_GUARD_ENFORCED_DEFAULT,
+            "train_telemetry_buffer_s": TRAIN_TELEMETRY_BUFFER_S,
+        },
+        "testing": {
+            "test_initial_torque_nm_default": TEST_INITIAL_TORQUE_NM_DEFAULT,
+            "test_torque_ramp_rate_nm_per_s_default": TEST_TORQUE_RAMP_RATE_NM_PER_S_DEFAULT,
+            "test_movement_threshold_m_per_s_default": TEST_MOVEMENT_THRESHOLD_M_PER_S_DEFAULT,
+            "test_hold_deadband_m_default": TEST_HOLD_DEADBAND_M_DEFAULT,
+            "test_hold_gain_default": TEST_HOLD_GAIN_DEFAULT,
+            "test_max_torque_nm_default": TEST_MAX_TORQUE_NM_DEFAULT,
+            "test_max_duration_s_default": TEST_MAX_DURATION_S_DEFAULT,
         },
         "axis": {
             "active_axis": ACTIVE_AXIS,

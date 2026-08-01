@@ -23,4 +23,14 @@ if __name__ == "__main__":
     # existed); Session 2 adds a second concurrent one (/ws/control-telemetry
     # alongside the per-device telemetry socket), which starves an
     # unthreaded dev server and can corrupt the WS frame stream.
-    app.run(host="127.0.0.1", port=5000, debug=True, threaded=True)
+    #
+    # port=5050, not 5000: macOS's own AirPlay Receiver (ControlCenter)
+    # listens on *:5000 by default. When our specific 127.0.0.1:5000 listener
+    # is up both can coexist, but the instant ours goes away for any reason
+    # (crash, restart), every request silently falls through to AirPlay
+    # instead of a clean connection-refused — it answers with a real HTTP
+    # response (403, Server: AirTunes) that looks like a live server, making
+    # "the backend died" look like "the backend is returning nonsense".
+    # Confirmed live, 22 July 2026 (docs/decisions.md). 5050 avoids the OS
+    # conflict entirely; frontend/vite.config.js's proxy target matches.
+    app.run(host="127.0.0.1", port=5050, debug=True, threaded=True)

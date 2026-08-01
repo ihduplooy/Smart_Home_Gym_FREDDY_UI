@@ -253,6 +253,13 @@ class ControlSession:
                         regen_power_w=extra.get("regen_power_w", ""),
                         force_state=extra.get("force_state", ""),
                         power_limiter_active=extra.get("power_limiter_active", ""),
+                        experiment_state=extra.get("experiment_state", ""),
+                        position_m=extra.get("position_m", ""),
+                        velocity_m_s=extra.get("velocity_m_s", ""),
+                        commanded_torque_nm=extra.get("commanded_torque_nm", ""),
+                        bus_voltage_v=extra.get("bus_voltage_v", ""),
+                        estimated_power_w=extra.get("estimated_power_w", ""),
+                        target_position_m=extra.get("target_position_m", ""),
                     )
                 except Exception:
                     log.exception("CSV logger write failed")

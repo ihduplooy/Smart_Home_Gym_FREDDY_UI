@@ -401,22 +401,19 @@
     <nav>
       <div class="group-label">Getting started</div>
       <a href="#starting"><span class="num">§1</span> Starting the app</a>
+      <a href="#sidebar-controls"><span class="num">§2</span> The sidebar</a>
 
-      <div class="group-label">The eight tabs</div>
-      <a href="#t21"><span class="num">2.1</span> Configuration</a>
-      <a href="#t22"><span class="num">2.2</span> Presets</a>
-      <a href="#t23"><span class="num">2.3</span> Dashboard</a>
-      <a href="#t24"><span class="num">2.4</span> Control</a>
-      <a href="#t25"><span class="num">2.5</span> Profiles</a>
-      <a href="#t26"><span class="num">2.6</span> Exercise</a>
-      <a href="#t27"><span class="num">2.7</span> Inspector</a>
-      <a href="#t28"><span class="num">2.8</span> Command Console</a>
+      <div class="group-label">The four tabs</div>
+      <a href="#t31"><span class="num">3.1</span> Configuration</a>
+      <a href="#t32"><span class="num">3.2</span> Control</a>
+      <a href="#t33"><span class="num">3.3</span> Train</a>
+      <a href="#t34"><span class="num">3.4</span> Inspector</a>
 
       <div class="group-label">Reference</div>
-      <a href="#logs"><span class="num">§3</span> Telemetry logs</a>
-      <a href="#simreal"><span class="num">§4</span> With/without hardware</a>
-      <a href="#rough"><span class="num">§5</span> Rough edges</a>
-      <a href="#quickref"><span class="num">§6</span> Quick reference</a>
+      <a href="#gap"><span class="num">§4</span> No longer reachable</a>
+      <a href="#logs"><span class="num">§5</span> Telemetry logs</a>
+      <a href="#simreal"><span class="num">§6</span> With/without hardware</a>
+      <a href="#changed"><span class="num">§7</span> What changed</a>
     </nav>
   </aside>
 
@@ -432,53 +429,92 @@
         <span>progress.md — verified status</span>
         <span>README.md — setup fallback</span>
       </div>
+      <div class="callout" style="margin-top:18px;">
+        <span class="icon">↻</span>
+        <p><strong>Rewritten 28 July 2026</strong> to match the current four-tab app (Configuration /
+        Control / Train / Inspector). The previous version described an eight-tab layout — see
+        <a class="inline-link" href="#changed">§7</a> for what changed.</p>
+      </div>
     </div>
 
     <!-- ================= SECTION 1 ================= -->
     <section id="starting">
       <h2><span class="idx">§1</span> Starting the app</h2>
-      <p>From the project root, with the Python venv active:</p>
-      <pre><code><span class="comment"># Real hardware (once an ODrive is actually connected)</span>
-npm run dev
+      <p><strong>Easiest</strong>: double-click <code>Start Freddy.command</code> in Finder (project
+      root). It kills any stale backend/frontend on ports 5050/3000, starts both fresh against
+      <span class="badge real">REAL</span> hardware (no mock), waits for both to come up, then opens
+      Safari automatically. Use <code>Stop Freddy.command</code> to shut both down again — they run
+      detached (<code>nohup</code>), so closing the Terminal window alone does not stop them.</p>
+      <p>Manually, from the project root with the Python venv active:</p>
+      <pre><code><span class="comment"># Backend, real hardware</span>
+source .venv/bin/activate
+python backend/start_backend.py</code></pre>
+      <pre><code><span class="comment"># Frontend only — talks to the backend already running above</span>
+cd frontend &amp;&amp; npm run dev:frontend
 
-<span class="comment"># No hardware — simulated ODrive device, recommended for now</span>
+<span class="comment"># No hardware needed — spins up its own mock backend + frontend</span>
 npm run mock_dev</code></pre>
-      <p>Run either from <code>frontend/</code> if the root script isn't set up to proxy — check
-      <code>README.md</code> if a command isn't found. Once running:</p>
+      <div class="callout warn">
+        <span class="icon">!</span>
+        <p><strong>Do not use plain <code>npm run dev</code></strong> for real hardware — it spins up
+        a <em>second</em> backend via <code>concurrently</code>, using its own (non-activated) Python
+        environment, which can be missing Flask entirely and risks a second process contending for the
+        same USB device.</p>
+      </div>
       <table>
         <tr><th>Endpoint</th><th>Address</th></tr>
         <tr><td>UI</td><td><code>http://localhost:3000</code></td></tr>
-        <tr><td>Backend</td><td><code>http://127.0.0.1:5050</code> — the frontend talks to this automatically, you never need to open it directly</td></tr>
+        <tr><td>Backend</td><td><code>http://127.0.0.1:5050</code> — the frontend talks to this automatically, you never need to open it directly (not port 5000, which macOS's own AirPlay Receiver silently squats on)</td></tr>
       </table>
-      <div class="callout">
-        <span class="icon">i</span>
-        <p>Leave the terminal running — <code>Ctrl+C</code> stops both servers together. There's no
-        separate "quit" button in the app itself (that was upstream's standalone-app packaging,
-        removed — see <code>decisions.md</code>).</p>
-      </div>
       <div class="callout warn">
         <span class="icon">!</span>
         <p>If you see <strong>No ODrive device found</strong> in the sidebar, that's expected with no
-        hardware and no mock — either wire up a device or restart with <code>mock_dev</code>.</p>
+        hardware and no mock — either wire up a device and hit <strong>Scan</strong>, or restart with
+        <code>mock_dev</code>.</p>
       </div>
     </section>
 
-    <!-- ================= SECTION 2 intro ================= -->
-    <section id="tabs-intro">
-      <h2><span class="idx">§2</span> The eight tabs</h2>
-      <p>The sidebar switches between eight tabs, in two groups:</p>
-      <table>
-        <tr><th>Group</th><th>Tabs</th><th>Purpose</th></tr>
-        <tr><td>Setup / inspection</td><td>Configuration, Presets, Dashboard, Inspector, Command Console</td><td>Reading/writing raw ODrive properties, getting a device calibrated and configured. Carried over from upstream, largely unchanged.</td></tr>
-        <tr><td>Control</td><td>Control, Profiles, Exercise</td><td>New in this project — actually driving the motor once it's configured: pick a mode or a resistance profile, hit Start, watch live telemetry, hit Stop. Exercise is the odd one out — it's for once a cable is physically attached to the spool, adding homing/end-stops on top rather than raw turns-based control.</td></tr>
-      </table>
+    <!-- ================= SECTION 2 ================= -->
+    <section id="sidebar-controls">
+      <h2><span class="idx">§2</span> The sidebar (always visible, regardless of tab)</h2>
+      <p>The left-hand device panel stays on screen no matter which tab is open:</p>
+      <ul>
+        <li><strong>Scan</strong> — looks for a connected ODrive. Manual only — no automatic/periodic
+        re-scan, so press it once your device is connected and powered on.</li>
+        <li><strong>Connect</strong> / <strong>Disconnect</strong> — on the device card once found.</li>
+        <li><strong>Reset</strong> — forgets the backend's cached device handle/lock and drops the
+        frontend's own connection state, for a soft reconnect that doesn't touch the motor,
+        calibration, or the backend process. Reach for <strong>Restart Freddy</strong> (top bar)
+        instead if this alone doesn't clear a stuck connection.</li>
+        <li><span class="badge stop">EMERGENCY STOP</span> — always available once connected,
+        independent of whatever tab or session is active.</li>
+        <li><strong>Device Status</strong> — live Vbus voltage, axis state, motor/supply current,
+        encoder position, and (once homed) cable position.</li>
+        <li><strong>Go Home</strong> — jogs the cable back to its homed position from anywhere in the
+        app, without needing to open Train's Settings section first. Disabled until the cable has been
+        homed at least once; arms a session automatically if none is running and releases it again on
+        arrival. Reuses the same plain position-move action homing is built on, <strong>not</strong> the
+        homing current-threshold logic — it can't be confused with "cable went taut" the way an actual
+        Home run can.</li>
+      </ul>
+      <div class="callout">
+        <span class="icon">i</span>
+        <p>The app's top bar also has a <strong>Restart Freddy</strong> button — a full backend process
+        restart (heavier than Reset; disabled while a session is running, same as the Control tab's
+        "Save to NVM").</p>
+      </div>
     </section>
 
-    <!-- 2.1 Configuration -->
-    <section id="t21">
+    <!-- ================= SECTION 3 intro ================= -->
+    <section id="tabs-intro">
+      <h2><span class="idx">§3</span> The four tabs</h2>
+    </section>
+
+    <!-- 3.1 Configuration -->
+    <section id="t31">
       <div class="tab-panel">
         <div class="tab-head">
-          <span class="tab-tag">2.1</span>
+          <span class="tab-tag">3.1</span>
           <span class="tab-title">Configuration — the config wizard</span>
         </div>
         <div class="tab-body">
@@ -493,79 +529,53 @@ npm run mock_dev</code></pre>
             <strong>command preview</strong> before anything is written — review it before confirming.</li>
             <li>Toggle <strong>"Only changed parameters"</strong> to limit writes to fields that differ
             from the device's current values, or turn it off to see/write the full set.</li>
+            <li>A factory preset ("Smart Gym Cable — Hoverboard + AS5047P") is available from inside the
+            wizard — it's the exact wizard defaults, saved for quick reapplication. (The old, separate
+            Presets tab that also offered import/export of named snapshots has been removed — see
+            <a class="inline-link" href="#changed">§7</a>.)</li>
           </ul>
           <div class="callout ok">
             <span class="icon">→</span>
             <p>Use this tab first, on a freshly-connected or freshly-erased board, before touching
-            Control or Profiles.</p>
+            Control or Train.</p>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- 2.2 Presets -->
-    <section id="t22">
+    <!-- 3.2 Control -->
+    <section id="t32">
       <div class="tab-panel">
         <div class="tab-head">
-          <span class="tab-tag">2.2</span>
-          <span class="tab-title">Presets</span>
-        </div>
-        <div class="tab-body">
-          <p>Save, load, import, and export named configuration snapshots (JSON).</p>
-          <ul>
-            <li>A factory preset <strong>"Smart Gym Cable — Hoverboard + AS5047P"</strong> ships
-            pre-loaded — it's the exact config wizard defaults, saved as a preset for quick
-            reapplication.</li>
-            <li>Loading a preset does <strong>not</strong> write to the device by itself; it feeds
-            values into the wizard/apply flow the same way manual edits would.</li>
-          </ul>
-        </div>
-      </div>
-    </section>
-
-    <!-- 2.3 Dashboard -->
-    <section id="t23">
-      <div class="tab-panel">
-        <div class="tab-head">
-          <span class="tab-tag">2.3</span>
-          <span class="tab-title">Dashboard</span>
-        </div>
-        <div class="tab-body">
-          <p>Live overview / at-a-glance telemetry for the connected device (or mock). Good first stop
-          after connecting to confirm the device is alive and reporting sane values before diving
-          into Inspector or Control.</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- 2.4 Control -->
-    <section id="t24">
-      <div class="tab-panel">
-        <div class="tab-head">
-          <span class="tab-tag">2.4</span>
-          <span class="tab-title">Control — velocity / torque motor control</span>
+          <span class="tab-tag">3.2</span>
+          <span class="tab-title">Control — velocity / torque / position motor control</span>
         </div>
         <div class="tab-body">
           <p>Direct, low-level motor control in three modes: <strong>Velocity</strong>,
-          <strong>Torque</strong>, and <strong>Position</strong>. This is where you actually spin the
-          motor — always the real connected device now (or the mock device under <code>mock_dev</code>);
-          there's no sim/real switcher here anymore.</p>
+          <strong>Torque</strong>, and <strong>Position</strong>. Always drives the real connected device
+          (or the mock device under <code>mock_dev</code>) — no sim/real switcher.</p>
           <ol>
-            <li>Pick a mode, enter a numeric target (units shown next to the field — turns/s for
-            velocity, Nm for torque, or the Move Distance/Velocity/Accel-Decel fields for a Position
-            move).</li>
+            <li>Pick a mode, enter a numeric target (turns/s for velocity, Nm for torque, or the Move
+            Distance/Velocity/Accel-Decel fields for a Position move).
+              <ul>
+                <li><strong>Position mode's Move Distance field has a <code>turns</code> / <code>m</code>
+                unit toggle.</strong> Metres are converted to turns on the frontend using the live cable
+                spool geometry (<code>r0</code>/<code>k</code>, read from the same status Train uses) —
+                the turns value actually sent is identical to typing turns directly. <code>turns</code>
+                stays the default.</li>
+              </ul>
+            </li>
             <li><strong>Start</strong> — begins the run. Fails cleanly with a visible error if no device
             is attached (no crash, no hang). While running you get:
               <ul>
                 <li>Live numeric readout: position, velocity, torque, current.</li>
-                <li>Three live mini-charts (position / velocity / torque).</li>
+                <li>Live mini-charts (position / velocity / torque).</li>
                 <li>A <strong>"Set target"</strong> button to retarget live, without stopping.</li>
-                <li>The active CSV log filename (see <a class="inline-link" href="#logs">§3</a>).</li>
+                <li>The active CSV log filename (see <a class="inline-link" href="#logs">§5</a>).</li>
               </ul>
             </li>
             <li><span class="badge stop">STOP</span> — always visible and reachable, disabled only when
-            nothing is running. Available regardless of what else is happening on screen — this is
-            the safety-critical control.</li>
+            nothing is running.</li>
           </ol>
           <div class="callout ok">
             <span class="icon">→</span>
@@ -573,264 +583,182 @@ npm run mock_dev</code></pre>
             and the error is shown on screen — you don't need to notice it yourself.</p>
           </div>
           <h3 style="margin:22px 0 8px 0; font-size:15px; color:var(--text);">Controller Gains</h3>
-          <p>Below the main controls, a <strong>Controller Gains</strong> card lets you tune Position
-          Gain, Velocity Gain, and Velocity Integrator Gain live, without going through the
-          Configuration wizard:</p>
+          <p>A <strong>Controller Gains</strong> card lets you tune Position Gain, Velocity Gain, and
+          Velocity Integrator Gain live, without going through the Configuration wizard:</p>
           <ul>
             <li>Each gain has a slider. Dragging updates the number shown next to it immediately; the
             value is only written to the device when you <strong>release</strong> the slider — so
             dragging doesn't flood the connection with writes.</li>
-            <li>Requires a connected device (the card shows "no device" and a prompt otherwise) — it
-            reads the board's current gains once connected, so the sliders start from whatever's
+            <li>Reads the board's current gains once connected, so the sliders start from whatever's
             actually on the device, not some default.</li>
-            <li><strong>Save to NVM</strong> persists the current gains to the board's non-volatile
-            memory so they survive a power cycle. This briefly reboots the board (an ODrive requirement
-            for <code>save_configuration</code>), so the button is disabled while a Control or Profiles
-            session is running — stop first, then save. Without saving, slider changes are live but
-            temporary — they're gone on next reboot.</li>
+            <li><strong>Save to NVM</strong> persists the current gains through a power cycle. This
+            briefly reboots the board, so it's disabled while a session is running — stop first, then
+            save. Without saving, slider changes are live but temporary.</li>
           </ul>
         </div>
       </div>
     </section>
 
-    <!-- 2.5 Profiles -->
-    <section id="t25">
+    <!-- 3.3 Train -->
+    <section id="t33">
       <div class="tab-panel">
         <div class="tab-head">
-          <span class="tab-tag">2.5</span>
-          <span class="tab-title">Profiles — resistance-profile training</span>
+          <span class="tab-tag">3.3</span>
+          <span class="tab-title">Train — cable-attached positioning, calibration &amp; resistance training</span>
         </div>
         <div class="tab-body">
-          <p>A layer on top of Control: instead of a fixed velocity/torque target, pick a
-          <strong>resistance profile</strong> that computes torque dynamically based on the cable's
-          motion (position/velocity), plus optional rep counting.</p>
-          <ol>
-            <li>Pick a <strong>base profile</strong> from the dropdown (registry-driven — whatever
-            profiles the backend reports):
-              <ul>
-                <li><strong>Constant</strong> — flat resistance (force → torque conversion only).</li>
-                <li><strong>Bell curve</strong> — resistance ramps up/down over a position range, peaking mid-range (raised-cosine shape).</li>
-                <li><strong>VBT</strong> (velocity-based training) — adjusts resistance rep-to-rep based on how fast the previous rep was.</li>
-              </ul>
-              <p style="margin:6px 0 0 0; color:var(--muted); font-size:13px;"><strong>Overload</strong>
-              exists as a <em>modifier</em>, not a selectable base profile — see step 3.</p>
-            </li>
-            <li>Fill in the profile's parameters — the form is generated automatically from the
-            profile's schema (labels, min/max).</li>
-            <li>Optionally enable <strong>Eccentric overload</strong>: a toggle + ratio + target-phase
-            selector that multiplies the resistance during one phase of the rep only (e.g. heavier
-            on the lowering/eccentric phase). This wraps whichever base profile you picked — you
-            don't pick "overload" itself as the profile.</li>
-            <li>Same always-visible <span class="badge stop">STOP</span> as the Control tab — this is
-            the same underlying session, just a third mode (also real-device-only now, no sim/real
-            switcher — see <a class="inline-link" href="#t24">§2.4</a>).</li>
-            <li><strong>Start</strong> — while running you get:
-              <ul>
-                <li>A color-coded <strong>phase badge</strong> (concentric / top hold / eccentric / bottom hold) — what the phase detector currently thinks the cable is doing.</li>
-                <li>A <strong>rep count</strong>.</li>
-                <li>The same live telemetry / CSV behavior as Control.</li>
-              </ul>
-            </li>
-            <li><strong>"Set target"</strong> lets you retarget the profile's primary parameter live
-            (e.g. change the base force) without restarting the session — useful for forcing a phase
-            change while testing (a negative force flips the direction, for example).</li>
-          </ol>
-          <div class="callout warn">
-            <span class="icon">STUB</span>
-            <p>A persistent on-screen notice reminds you the profile math is stub-quality
-            (<code># STUB(2A+)</code>) — real tuning against actual cable rigging happens in Phase 2A.
-            Treat exact numeric behavior as illustrative, not final.</p>
-          </div>
+          <p>The primary tab once a cable is physically attached to the spool. Covers everything the old
+          Exercise tab did (homing, end stops, spool calibration) plus position-based resistance
+          profiles, in one place.</p>
+          <p>The <strong>header card</strong> shows live Cable position (m, from home), Target force (N),
+          Commanded torque (Nm), and Max extension (m, or "not calibrated"), plus a
+          <span class="badge stop">STOP</span> button while a Train session is running.</p>
           <div class="callout">
             <span class="icon">i</span>
-            <p><strong>Only one of Control or Profiles can run at a time</strong> (they share one
-            backend session) — starting one while the other is active is refused with a visible
-            warning, not a silent conflict.</p>
+            <p>If the cable isn't homed yet, an on-screen notice points you at Settings/Startup below. If
+            a different mode (Control, or the setup session itself) is already running elsewhere, Train
+            tells you to stop it first — they all share one underlying <code>ControlSession</code>.</p>
           </div>
-        </div>
-      </div>
-    </section>
 
-    <!-- 2.6 Exercise -->
-    <section id="t26">
-      <div class="tab-panel">
-        <div class="tab-head">
-          <span class="tab-tag">2.6</span>
-          <span class="tab-title">Exercise — cable-attached positioning &amp; safety</span>
-        </div>
-        <div class="tab-body">
-          <p>For once a cable is physically attached to the spool. Control and Profiles stay exactly
-          as they are — raw, turns-based, no-cable bench-testing tools; Exercise is the tab that
-          makes cable-attached operation safe by giving the machine a length reference and hard end
-          stops, and (§2.6.1 below) lets it push back against you once that's in place.</p>
-          <div class="callout warn">
-            <span class="icon">B</span>
-            <p>Two layers, built in that order because the second is materially more dangerous than
-            the first — this hardware has no mechanical fail-safe (direct-drive, no clutch).
-            <strong>Layer A</strong> (this section): homing, end stops, length-based moves, no
-            resistance. <strong>Layer B, Session B1</strong> (§2.6.1): the motor resists you pulling
-            the cable out. <strong>Eccentric resistance (reeling you in) is not built yet</strong> —
-            Layer B only ever resists your own pull, it never actively pulls back.</p>
-          </div>
-          <ol>
-            <li><strong>Start Exercise Session</strong> — arms the session; the motor does not move
-            yet. Nothing in this tab ever moves the cable except an explicit action below.</li>
-            <li><strong>Home</strong> (its own collapsible sub-section, open by default) — slow,
-            current-limited reel-in until the cable goes taut, which becomes the <code>0</code>
-            length reference. Watch the live position/current readout while this runs;
-            <strong>Abort Homing</strong> stops it immediately, and the always-present
-            <span class="badge stop">STOP</span> works throughout too. If it fails (cable not
-            attached, slipping, or genuinely stuck), it faults with a clear reason instead of
-            reeling in forever. Underneath, <strong>Homing settings</strong> (current threshold,
-            reel-in velocity, current limit) are live-adjustable and persist across backend
-            restarts — tune them here rather than editing <code>config/board_constants.py</code>
-            and restarting; changes apply to the <em>next</em> Home, not one already running.</li>
-            <li><strong>Max Extension</strong> — once homed, applies a light constant tension (just
-            enough to keep the cable taut, trivially overcome by hand) while you pull the cable out
-            by hand to a safe maximum, then <strong>Set Max Here</strong>. The enforced limit is
-            stored slightly inside the point you marked, as a safety margin. <strong>Cancel</strong>
-            discards the attempt without storing anything. The <strong>hold force</strong> itself is
-            also a live-adjustable, persisted setting underneath, same as homing settings.</li>
-            <li><strong>Move</strong> — command the cable to a target length in metres, with its own
-            Move Velocity and Accel/Decel fields (same idea as Control tab's Position mode) and a
-            live turns estimate under the length field. Requires both Home and Max Extension to be
-            set; both ends are enforced by the motor itself, not just the input field.</li>
-            <li><strong>Advanced: Spool Calibration</strong> (collapsed by default) — corrects for
-            the spool's effective radius changing as cable winds on or off. Reel out to some
-            position (via Move), physically measure the actual cable length with a tape measure, and
-            enter it — the correction factor is computed for you. You never enter a raw
-            multiplier. The base <strong>spool radius (r0)</strong> itself is also editable here,
-            live and persisted, separate from the wrap-growth correction factor.</li>
-            <li><strong>Manual Position Reset</strong> — clears the home reference and
-            max-extension limit (e.g. after the cable slips, or a bad homing run).
-            Confirmation-gated, and only available while the Exercise session is stopped.</li>
-          </ol>
-          <p>The main status card distinguishes <strong>Cable position</strong> (turns, zeroed at
-          Home — blank until homed) from <strong>Encoder position</strong> (turns, the raw absolute
-          reading, whatever arbitrary value it was at power-on) — they're deliberately shown as two
-          separate stats so it's never ambiguous which one you're looking at.</p>
+          <h3 style="margin:26px 0 10px 0; font-size:15px; color:var(--text);">3.3.1 Settings / Startup
+          (collapsible, open by default)</h3>
+          <ul>
+            <li><strong>Start setup session</strong> — arms a session for homing/calibration (internally
+            the same <code>ExerciseMode</code> machinery the old Exercise tab used). <strong>Stop setup
+            session</strong> ends it — a prominent button in the section header.</li>
+            <li><strong>Homing</strong> — <strong>Home</strong> starts a slow, current-limited reel-in
+            until the cable goes taut, becoming the <code>0</code> length reference; <strong>Abort</strong>
+            stops it immediately. A badge shows live state (Reeling in… / Homed / Fault: travel bound
+            exceeded / Fault: timed out / Aborted). <strong>Homing velocity</strong> and
+            <strong>Current threshold</strong> underneath are live-adjustable, persisted fields —
+            <strong>Update</strong> applies them to the <em>next</em> Home, not one already running.</li>
+            <li><strong>Max-extension calibration</strong> — once homed, <strong>Start</strong> applies a
+            light constant tension while you pull the cable out by hand to a safe maximum;
+            <strong>Confirm</strong> stores the limit (slightly inside the marked point, as a safety
+            margin); <strong>Cancel</strong> discards the attempt. Two independent toggles sit
+            underneath — <strong>Enforce home-side guard during Train</strong> and <strong>Enforce
+            max-extension guard during Train</strong> — each can be relaxed on its own; either one hard-
+            stops a Train session if the cable crosses that end of the calibrated range. Neither affects
+            the setup session's own guard.</li>
+            <li><strong>Spool calibration</strong> — <strong>Spool radius (r0)</strong>: the bare spool
+            radius before any wrap builds up, editable directly (affects every force/velocity
+            conversion). <strong>Wrap-growth correction (k)</strong>: how much the effective radius grows
+            per turn as cable winds on. Reel out via Control's Position mode, physically measure the
+            actual length, enter it under <strong>Measured length</strong>, and hit <strong>Calibrate
+            from measurement</strong> — the correction factor is computed for you. You can also
+            <strong>Set k</strong> directly if you already know it.</li>
+            <li><strong>Graph history buffer</strong> — how many seconds of history the Train graphs keep
+            (default 90s), live-adjustable and persisted.</li>
+          </ul>
           <div class="callout">
             <span class="icon">i</span>
-            <p>The home reference and max-extension limit <strong>do not survive a backend
-            restart</strong> — they're intentionally never written to disk (a stale reference after
-            a restart, power cycle, or period of the motor sitting idle would mean every safety
-            limit is wrong by the same offset). The spool correction factor <em>does</em> persist,
-            since it's a property of the physical spool, not the current session.</p>
+            <p>There is <strong>no manual jog/Move control in Train</strong> — for manual jogging, use the
+            Control tab's own Position mode (<a class="inline-link" href="#t32">§3.2</a>), which already
+            has PI tuning and a turns/metres toggle. A deliberate simplification made after the tab's
+            first round of real use — see <code>decisions.md</code> ("Train tab refinements").</p>
           </div>
 
-          <h3 style="margin:26px 0 10px 0; font-size:15px; color:var(--text);">2.6.1 Force Feedback
-          (Layer B, Session B1 — concentric only)</h3>
-          <p>A card next to Move (the two sit side by side). <strong>Requires Home and
-          Max Extension to already be set</strong> — start an Exercise session and do those first if
-          you haven't. Force Feedback is its own session on the same underlying motor connection, so
-          it and the Exercise session above can't run at the same time; stop one before starting the
-          other.</p>
+          <h3 style="margin:26px 0 10px 0; font-size:15px; color:var(--text);">3.3.2 Resistance profile</h3>
+          <p>Build a position-based resistance profile from one or more <strong>segments</strong>, each
+          with a <strong>Start</strong>/<strong>End</strong> position (metres) and a <strong>shape</strong>:</p>
+          <ul>
+            <li><strong>Constant</strong> — flat force.</li>
+            <li><strong>Linear</strong> — ramps between a start force and an end force across the segment.</li>
+            <li><strong>Bell</strong> — rises from a start force to a peak (at a chosen position) and back
+            down to an end force (defaults to 0 → peak → 0, edges can be raised independently).</li>
+          </ul>
+          <p><strong>Add segment</strong> appends a new one starting where the last left off; each segment
+          can be removed individually. A <strong>live preview</strong> graph updates (debounced) as you
+          edit, showing the draft profile's force-vs-position curve before you apply it.</p>
+          <ul>
+            <li><strong>Save</strong> / <strong>Load</strong> / delete — named profiles persist in your
+            browser's local storage so a segment layout doesn't need retyping every session. Frontend-only;
+            not synced to the backend or other machines/browsers.</li>
+            <li><strong>Start Train session</strong> (when nothing is running) or <strong>Apply
+            profile</strong> (once a session is already running, to change segments live).</li>
+          </ul>
+
+          <h3 style="margin:26px 0 10px 0; font-size:15px; color:var(--text);">3.3.3 Graphs</h3>
+          <p>Two graphs, both with independently-scaled, independently-labelled Y axes per plotted
+          quantity (each with its own Auto/manual-range control) — so a small-magnitude quantity is never
+          squashed unreadable next to a large-magnitude one:</p>
+          <ul>
+            <li><strong>Time-series</strong> — Position (actual + target overlay), Velocity, Torque
+            against time, over the graph history buffer window.</li>
+            <li><strong>Force vs. position</strong> — the profile's Planned curve against the Actual
+            measured force as the cable moves.</li>
+          </ul>
           <div class="callout warn">
             <span class="icon">~</span>
-            <p>Displayed forces are labelled <strong>uncalibrated estimates</strong> in the UI, and
-            will be for as long as that label is showing — the motor's actual torque constant hasn't
-            been bench-measured yet. Treat exact Newton numbers as illustrative, not precise, until
-            that label is removed.</p>
+            <p><strong>Force calibration is a known, unresolved issue</strong>: displayed/estimated force
+            is computed from motor current via <code>MOTOR_TORQUE_CONSTANT</code>, an explicitly-flagged
+            fallback estimate, not a bench-measured value. Planned vs. measured force can currently differ
+            by roughly an order of magnitude. Treat the Actual curve's exact numbers as illustrative, not
+            precise, until that constant is properly measured.</p>
           </div>
-          <ol>
-            <li><strong>Start Force Session</strong> — arms it; zero resistance. Disabled until Home
-            and Max Extension are both set.</li>
-            <li>Pick a <strong>mode</strong>: <strong>Constant</strong> (a flat resistance) or
-            <strong>Isokinetic</strong> (free below a speed cap, resistance climbs sharply above it —
-            a firm "wall," not a hard limit). Set the <strong>Force</strong> (Newtons — a kgf
-            estimate is shown alongside for intuition) and, for Isokinetic, the
-            <strong>Velocity cap</strong>.</li>
-            <li>Optionally set an <strong>active range</strong> (Start/End, in metres) —
-            resistance only applies within that sub-range of the home-to-max travel, tapering off
-            near both bounds the same way it already tapers near the max-extension limit. Leave
-            either blank to use the full range (the default, unchanged from before this
-            existed).</li>
-            <li><strong>Engage</strong> — deliberately a different button, in a different colour,
-            from Start/STOP above it: this is the moment resistance actually becomes live. Force
-            ramps in smoothly, never steps. <strong>Update</strong> retargets live (including the
-            active range) without disengaging; <strong>Disengage</strong> ramps back to zero.</li>
-            <li>If you hold still for a moment mid-rep, resistance eases to a light holding tension
-            rather than staying at full force — you'll feel this as the "Holding" state.</li>
-            <li>If the handle is released while resistance is live, the machine detects the sudden
-            reel-in and <strong>hard-stops immediately</strong> (zero torque) — this shows as a
-            <strong>FAULT</strong>. It does not recover on its own. <strong>Resume</strong>
-            (confirmation-gated) clears the fault and returns to Armed — your force settings are
-            kept, and Home/Max Extension are untouched — but resistance stays off until you Engage
-            again.</li>
-            <li>As the cable nears the max-extension limit under load, resistance eases off on its
-            own rather than cutting out abruptly at the limit.</li>
-            <li>The live display shows commanded vs. estimated actual force, cable velocity, and
-            whether the <strong>power limiter</strong> is currently reducing force to protect the
-            brake resistor from overheating — this can activate during fast reps and is normal, not
-            a fault.</li>
-          </ol>
-          <p style="color:var(--muted); font-size:13px;">The always-present
-          <span class="badge stop">STOP</span> works in every state here too, including mid-rep
-          under full load.</p>
         </div>
       </div>
     </section>
 
-    <!-- 2.7 Inspector -->
-    <section id="t27">
+    <!-- 3.4 Inspector -->
+    <section id="t34">
       <div class="tab-panel">
         <div class="tab-head">
-          <span class="tab-tag">2.7</span>
+          <span class="tab-tag">3.4</span>
           <span class="tab-title">Inspector</span>
         </div>
         <div class="tab-body">
-          <p>Full raw property tree for the connected device (single axis0 only — axis1 is hidden,
-          it's an unused ghost node on this board). Use this for low-level poking: reading/writing
-          arbitrary ODrive properties directly, live property charts, and anything the wizard
-          doesn't expose.</p>
-          <p style="color:var(--muted); font-size:13px;">This is the most "raw" interface — use
-          Configuration/Presets for normal setup, Inspector when you need something specific the
-          wizard doesn't cover.</p>
+          <p>Full raw property tree for the connected device (single axis0 only — axis1 is hidden, it's
+          an unused ghost node on this board). Use this for low-level poking: reading/writing arbitrary
+          ODrive properties directly, live property charts, and anything the other tabs don't expose.</p>
         </div>
       </div>
     </section>
 
-    <!-- 2.8 Command Console -->
-    <section id="t28">
-      <div class="tab-panel">
-        <div class="tab-head">
-          <span class="tab-tag">2.8</span>
-          <span class="tab-title">Command Console</span>
-        </div>
-        <div class="tab-body">
-          <p>Free-form command entry against the device — equivalent to typing into an ODrive Python
-          console, but through the GUI. Use for one-off commands, calibration sequences, or anything
-          scriptable that doesn't have a dedicated UI control.</p>
-        </div>
+    <!-- ================= SECTION 4 ================= -->
+    <section id="gap">
+      <h2><span class="idx">§4</span> What used to be here, and isn't reachable from the UI right now</h2>
+      <p>Two older capabilities are <strong>fully implemented and tested in the backend</strong> but
+      currently have <strong>no tab or UI control</strong>:</p>
+      <ul>
+        <li><strong>Force Feedback</strong> (<code>ExerciseMode</code>'s Engage/Disengage
+        concentric/isokinetic torque resistance, with a let-go safety detector and a FAULT/Resume flow) —
+        reachable only via raw calls to <code>/api/force/*</code>, not through Freddy's UI.</li>
+        <li><strong>The Session-3 resistance-profile system</strong> (<code>ProfileMode</code>: constant,
+        bell-curve strength-curve matching, VBT auto-regulation, eccentric-overload wrapper, with live
+        phase/rep detection) — reachable only via a raw <code>mode: "profile"</code> session start, not
+        through Freddy's UI.</li>
+      </ul>
+      <div class="callout warn">
+        <span class="icon">?</span>
+        <p>Whether this is a deliberate simplification (Train's segment profiles judged to cover the same
+        need) or an oversight from the tab cleanup is an <strong>open question</strong> — see
+        <code>decisions.md</code> ("Frontend consolidation to four tabs") and the master plan doc's open
+        items. If you need either capability today, it's a backend/API job, not a UI one.</p>
       </div>
+      <p style="color:var(--muted); font-size:13px;">Also gone, with no replacement needed: the old
+      <strong>Dashboard</strong> tab (a generic at-a-glance telemetry view — superseded by the sidebar's
+      Device Status panel) and the old <strong>Presets</strong> tab (named config snapshots — the
+      Configuration wizard's own factory preset covers the one preset actually in use).</p>
     </section>
 
-    <!-- ================= SECTION 3 ================= -->
+    <!-- ================= SECTION 5 ================= -->
     <section id="logs">
-      <h2><span class="idx">§3</span> Telemetry logs (CSV)</h2>
-      <p>Every Control or Profiles run writes a CSV to <code>logs/</code> at the project root, named:</p>
-      <pre><code>telemetry_&lt;timestamp&gt;_&lt;mode&gt;_&lt;sim|real&gt;.csv</code></pre>
-      <p>e.g. <span class="filename">telemetry_20260717_143205_profile-overload_real.csv</span>.</p>
-      <div class="callout">
-        <span class="icon">i</span>
-        <p>Since the Control/Profiles sim/real switcher was removed, this suffix is now always
-        <code>real</code> — even under <code>mock_dev</code>, since it reflects which internal
-        hardware factory the session used (always the real one now), not whether the underlying
-        device happens to be the mock object. Older <code>_sim</code> files from before that removal
-        are still valid history, just from a different code path.</p>
-      </div>
+      <h2><span class="idx">§5</span> Telemetry logs (CSV)</h2>
+      <p>Every Control or Train run writes a CSV to <code>logs/</code> at the project root, named:</p>
+      <pre><code>telemetry_&lt;timestamp&gt;_&lt;mode&gt;_real.csv</code></pre>
       <table>
         <tr><th>Column</th><th>Notes</th></tr>
         <tr><td>timestamp_iso</td><td rowspan="2" style="color:var(--muted)">Standard run metadata</td></tr>
         <tr><td>t_rel_s</td></tr>
-        <tr><td>mode</td><td style="color:var(--muted)">e.g. velocity, torque, profile-*</td></tr>
+        <tr><td>mode</td><td style="color:var(--muted)">e.g. velocity, torque, profile-*, exercise, train</td></tr>
         <tr><td>target</td><td style="color:var(--muted)">Current commanded target</td></tr>
         <tr><td>position_turns</td><td rowspan="3" style="color:var(--muted)">Live telemetry, same as on-screen readout</td></tr>
         <tr><td>velocity_turns_s</td></tr>
         <tr><td>current_iq_a</td></tr>
         <tr><td>torque_est_nm</td><td style="color:var(--muted)">Estimated torque</td></tr>
-        <tr><td>phase</td><td style="color:var(--muted)">Blank for Velocity/Torque runs, populated for Profiles runs</td></tr>
-        <tr><td>rep_count</td><td style="color:var(--muted)">Blank for Velocity/Torque runs, populated for Profiles runs</td></tr>
+        <tr><td>phase</td><td style="color:var(--muted)">Blank except on profile-mode runs</td></tr>
+        <tr><td>rep_count</td><td style="color:var(--muted)">Blank except on profile-mode runs</td></tr>
         <tr><td>cable_length_m</td><td style="color:var(--muted)">Blank except on Exercise runs, and even then only once homed</td></tr>
         <tr><td>commanded_force_n</td><td rowspan="6" style="color:var(--muted)">Blank except on Force Feedback runs</td></tr>
         <tr><td>estimated_force_n</td></tr>
@@ -839,82 +767,60 @@ npm run mock_dev</code></pre>
         <tr><td>force_state</td></tr>
         <tr><td>power_limiter_active</td></tr>
       </table>
-      <p>A new file opens automatically on Start and closes on Stop — you don't manage this yourself.
-      The active filename is shown on screen while running.</p>
-      <div class="callout warn">
-        <span class="icon">!</span>
-        <p>For an <strong>Overload</strong>-wrapped run, the filename only says
-        <code>profile-overload</code> — it doesn't record which base profile was wrapped in the
-        filename itself. The wrapped profile's parameters are still in the CSV's own columns /
-        backend logs if you need to distinguish runs later.</p>
-      </div>
-    </section>
-
-    <!-- ================= SECTION 4 ================= -->
-    <section id="simreal">
-      <h2><span class="idx">§4</span> Running with vs without hardware</h2>
-      <p>There's one way to run the app now, not a per-tab switch — the whole app (Control/Profiles
-      included) always talks to whatever <code>device_manager</code> finds:</p>
-      <table>
-        <tr><th>Command</th><th>What to expect</th></tr>
-        <tr>
-          <td><code>npm run dev</code></td>
-          <td>Talks to a real connected ODrive. Starting a Control or Profiles run with nothing
-          attached fails within a couple of seconds with a clear on-screen error; nothing hangs or
-          crashes.</td>
-        </tr>
-        <tr>
-          <td><code>npm run mock_dev</code></td>
-          <td>No hardware needed; the whole app, including Control/Profiles, transparently drives the
-          built-in mock device instead. Good for UI development or a demo away from the bench.</td>
-        </tr>
-      </table>
-      <p>The Control/Profiles tabs' own separate, simpler software simulator — a per-tab Sim/Real
-      toggle — has been removed; see <a class="inline-link" href="#t24">§2.4</a>.</p>
-    </section>
-
-    <!-- ================= SECTION 5 ================= -->
-    <section id="rough">
-      <h2><span class="idx">§5</span> Known rough edges <span style="color:var(--dim); font-weight:400; text-transform:none; letter-spacing:0;">(as of Session 3)</span></h2>
-      <div class="callout">
-        <span class="icon">~150ms</span>
-        <p>Live phase/rep telemetry updates every ~150ms via polling, not a websocket — a deliberate,
-        documented tradeoff (see <code>decisions.md</code>). Slightly less immediate than a true push
-        update, but reliable.</p>
-      </div>
-      <div class="callout warn">
-        <span class="icon">STUB</span>
-        <p>The resistance-profile math is a stub — realistic tuning (cable geometry, real strength
-        curves, VBT step sizes) is Phase 2A work.</p>
-      </div>
-      <div class="callout warn">
-        <span class="icon">!</span>
-        <p><strong>Torque-mode velocity limiting</strong> and the <strong>two-simultaneous-connection</strong>
-        case (e.g. Inspector and Control both trying to talk to the same real device) are flagged but
-        not yet resolved — avoid having both a device-connected inspection tab and a Real-hardware
-        Control/Profiles run active at once until Phase 2A addresses this.</p>
-      </div>
+      <p>Columns are only ever appended, never reordered or removed, so older logs stay readable against
+      this same reference. A new file opens automatically on Start and closes on Stop — the active
+      filename is shown on screen while running.</p>
     </section>
 
     <!-- ================= SECTION 6 ================= -->
-    <section id="quickref">
-      <h2><span class="idx">§6</span> Quick reference</h2>
+    <section id="simreal">
+      <h2><span class="idx">§6</span> Running with vs without hardware</h2>
       <table>
-        <tr><th>Want to…</th><th>Go to</th></tr>
-        <tr><td style="color:var(--text); font-family:var(--sans); font-size:13.5px;">Write known-good settings to a fresh board</td><td>Configuration</td></tr>
-        <tr><td style="color:var(--text); font-family:var(--sans); font-size:13.5px;">Save/reload a named config</td><td>Presets</td></tr>
-        <tr><td style="color:var(--text); font-family:var(--sans); font-size:13.5px;">Get a quick device health check</td><td>Dashboard</td></tr>
-        <tr><td style="color:var(--text); font-family:var(--sans); font-size:13.5px;">Spin the motor at a fixed velocity/torque</td><td>Control</td></tr>
-        <tr><td style="color:var(--text); font-family:var(--sans); font-size:13.5px;">Train against a dynamic resistance curve / count reps</td><td>Profiles</td></tr>
-        <tr><td style="color:var(--text); font-family:var(--sans); font-size:13.5px;">Home a cable, set safe end stops, and move it by length</td><td>Exercise</td></tr>
-        <tr><td style="color:var(--text); font-family:var(--sans); font-size:13.5px;">Resist a cable pull with a set force (concentric only)</td><td>Exercise → Force Feedback</td></tr>
-        <tr><td style="color:var(--text); font-family:var(--sans); font-size:13.5px;">Read or write one specific raw property</td><td>Inspector</td></tr>
-        <tr><td style="color:var(--text); font-family:var(--sans); font-size:13.5px;">Run an arbitrary one-off command</td><td>Command Console</td></tr>
-        <tr><td style="color:var(--text); font-family:var(--sans); font-size:13.5px;">Stop the motor immediately</td><td><span class="badge stop">STOP</span> (Control, Profiles, or Exercise, always visible while running)</td></tr>
+        <tr><th>Command</th><th>What to expect</th></tr>
+        <tr>
+          <td><code>Start Freddy.command</code></td>
+          <td>Real hardware, one click. Starting a session with nothing attached fails within a couple
+          of seconds with a clear on-screen error.</td>
+        </tr>
+        <tr>
+          <td><code>npm run mock_dev</code></td>
+          <td>No hardware needed; the whole app transparently drives the built-in mock device instead.
+          Good for UI development or a demo away from the bench. CSV filenames still say <code>_real</code>
+          even under <code>mock_dev</code> — the suffix reflects which internal hardware factory the
+          session used, not whether the device object itself is the mock.</td>
+        </tr>
       </table>
     </section>
 
-    <div class="footer-note">SMART GYM CONTROL — USER MANUAL · GENERATED FROM PROJECT DOCS · SESSION 3</div>
+    <!-- ================= SECTION 7 ================= -->
+    <section id="changed">
+      <h2><span class="idx">§7</span> What changed since the last version of this manual</h2>
+      <p>The previous version described eight tabs (Configuration, Presets, Dashboard, Control, Profiles,
+      Exercise, Inspector, Command Console) and a Layer-B-only Force Feedback section inside Exercise.
+      Since then:</p>
+      <ul>
+        <li><strong>Command Console</strong> was removed along with the rest of the old raw-testing
+        furniture — the Inspector tab's property tree is the closest remaining tool for one-off ODrive
+        commands.</li>
+        <li><strong>Exercise's homing/max-extension/spool-calibration UI moved into Train</strong>
+        (<a class="inline-link" href="#t33">§3.3.1</a>) — same backend routes, same persisted state, just
+        relocated.</li>
+        <li><strong>Force Feedback and the old Profiles tab lost their UI entirely</strong> — see
+        <a class="inline-link" href="#gap">§4</a>.</li>
+        <li><strong>Train</strong> is new since that version (constant/linear/bell segment profiles,
+        save/load, the two graphs in <a class="inline-link" href="#t33">§3.3.3</a>).</li>
+        <li>The sidebar's <strong>Go Home</strong> and <strong>Reset</strong> buttons, and the top bar's
+        <strong>Restart Freddy</strong>, are new conveniences that work regardless of tab.</li>
+      </ul>
+      <div class="callout warn">
+        <span class="icon">!</span>
+        <p>If something you used to rely on from the eight-tab version isn't mentioned above, it likely
+        fell into the gap in <a class="inline-link" href="#gap">§4</a> — flag it, since that gap wasn't a
+        deliberate, documented decision.</p>
+      </div>
+    </section>
+
+    <div class="footer-note">SMART GYM CONTROL — USER MANUAL · GENERATED FROM PROJECT DOCS · REWRITTEN 28 JULY 2026</div>
   </main>
 </div>
 
