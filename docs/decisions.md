@@ -3082,3 +3082,57 @@ object tree (17/17 passing) and a headless-Chrome pass that opened the
 confirmation dialog and clicked **Cancel**, never **Confirm**. Real-hardware
 triggering of this feature is left for a supervised session with Ivan
 present.
+
+---
+
+## 5 August 2026 — DC bus overvoltage ramp fix (Train mode hard-pull trips)
+
+**Problem:** Hard/fast cable pulls in Train mode caused vbus to spike
+toward the 25V overvoltage trip and fault, despite a correctly-valued
+brake resistor being wired in. The brake resistor never got warm during
+these events.
+
+**Root cause:** odrv0.config.enable_dc_bus_overvoltage_ramp was False
+(firmware default), even though dc_bus_overvoltage_ramp_start/_end had
+values set from an earlier config pass. The DC bus overvoltage ramp
+feature — which drives brake resistor duty cycle directly off measured
+vbus voltage — is fully inactive unless this flag is explicitly True.
+Without it, the brake resistor only ever responded to the primary
+current-based regen logic (tied to max_regen_current), which reacts to
+sustained regen current, not fast voltage transients — so a hard pull
+outran it and drove vbus toward the trip before the resistor engaged.
+
+**Fix:**
+- enable_dc_bus_overvoltage_ramp = True
+- dc_bus_overvoltage_ramp_start = 24.0 V
+- dc_bus_overvoltage_ramp_end = 25.0 V
+- brake_resistance updated to 2.35 Ω (two spare resistors wired in
+  parallel, replacing the single 2Ω/50W unit; combined wattage rating
+  identified as 100W — resolves the wattage-unknown half of open item #4)
+- dc_bus_overvoltage_trip_level raised to 27V (deliberate decision,
+  distinct from the ramp fix itself — supersedes the prior 25V
+  bench-only value on record)
+
+**Verified:**
+- Hard pull in Train mode — vbus stays ~23.6V, no fault (previously
+  spiked toward trip)
+- Full DC bus power cycle confirms all values above persist correctly via
+  Freddy's Apply & Save — save_configuration() is working as expected on
+  this board for this path
+
+**Open follow-up:** resistor ran uncomfortably hot within seconds on a
+short manual test despite the now-known 100W rating. Do not run
+extended/hard training sessions until thermal behavior under sustained
+real load has been checked — see open item #4.
+
+Wired into both `config/board_constants.py` (`BRAKE_RESISTANCE`,
+`DC_BUS_OVERVOLTAGE_TRIP_LEVEL`, new `ENABLE_DC_BUS_OVERVOLTAGE_RAMP` /
+`DC_BUS_OVERVOLTAGE_RAMP_START` / `DC_BUS_OVERVOLTAGE_RAMP_END`, all
+exposed via `GET /api/board-constants`'s existing `"bus"` key) and
+`config/odrive_config.py`'s static config section (matching literal
+assignments in the same "Bus-level limits" block), so a fresh board
+bring-up or a post-`erase_configuration()` re-run reproduces this fix
+automatically rather than relying on the live board's current flash
+state. `dc_max_negative_current`, `max_regen_current`, and the
+motor/encoder/gain config were deliberately left untouched — out of
+scope for this fix.

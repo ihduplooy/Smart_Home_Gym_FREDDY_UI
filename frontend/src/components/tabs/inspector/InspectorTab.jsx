@@ -69,7 +69,7 @@ const InspectorTab = ({ isConnected, isActive = true }) => {
                 <AxisTelemetryCharts isActive={isActive} />
               </Box>
               <Box h="600px">
-                <LiveCharts isActive={isActive} />
+                <LiveCharts isActive={isActive} serial={serial} />
               </Box>
             </Box>
           </GridItem>

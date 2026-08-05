@@ -13,6 +13,7 @@ import {
   Tooltip,
   SimpleGrid,
   useColorModeValue,
+  useToast,
 } from '@chakra-ui/react'
 import { DeleteIcon, DownloadIcon, CloseIcon } from '@chakra-ui/icons'
 import { useSelector, useDispatch } from 'react-redux'
@@ -20,6 +21,7 @@ import { removeProperty, clearAll } from '../../../store/slices/telemetrySlice'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts'
 import { movingAverage, filterByAgeMs, domainFromRange } from '../../../utils/chartDisplay'
 import { useFreezableSeries } from '../../../hooks/useFreezableSeries'
+import { getDeviceSocket } from '../../../api/deviceSocket'
 import AxisRangeControl from '../../shared/AxisRangeControl'
 import { FIXED_AXIS_TELEMETRY_PATH_LIST } from './fixedAxisTelemetry'
 
@@ -140,11 +142,60 @@ const PropertyChart = memo(({ path, color, data, range, inverted, smoothingWindo
 })
 PropertyChart.displayName = 'PropertyChart'
 
-const LiveCharts = ({ isActive = true }) => {
+const LiveCharts = ({ isActive = true, serial }) => {
   const dispatch = useDispatch()
+  const toast = useToast()
   const { selectedProperties: allSelectedProperties, samples, status } = useSelector(
     (state) => (isActive ? state.telemetry : FROZEN_TELEMETRY)
   )
+
+  // CSV recording of whatever's currently subscribed on the socket (the
+  // fixed axis0 set from AxisTelemetryCharts plus any custom properties
+  // checked below) -- backend snapshots the column set at record_start, so
+  // ticking/unticking a property mid-recording doesn't reshape the file
+  // (core/telemetry/csv_logger.py's mode loggers stay fixed-schema for the
+  // same reason; Inspector's is just user-picked instead of mode-picked).
+  const [recording, setRecording] = useState(null) // { path, columns } while active
+  const [recordBusy, setRecordBusy] = useState(false)
+
+  const handleToggleRecord = async () => {
+    const sock = getDeviceSocket(serial)
+    if (!sock) {
+      toast({ title: 'Not connected', status: 'warning', duration: 2500 })
+      return
+    }
+    setRecordBusy(true)
+    try {
+      if (recording) {
+        const result = await sock.request('record_stop', {})
+        toast({
+          title: 'Recording saved',
+          description: `${result.rows} rows → ${result.path}`,
+          status: 'success',
+          duration: 5000,
+        })
+        setRecording(null)
+      } else {
+        const result = await sock.request('record_start', {})
+        setRecording(result)
+        toast({
+          title: 'Recording started',
+          description: `${result.columns.length} properties → ${result.path}`,
+          status: 'info',
+          duration: 3000,
+        })
+      }
+    } catch (err) {
+      toast({
+        title: recording ? 'Stop failed' : 'Start failed',
+        description: String(err.message || err),
+        status: 'error',
+        duration: 4000,
+      })
+    } finally {
+      setRecordBusy(false)
+    }
+  }
   // AxisTelemetryCharts.jsx owns a fixed set of axis0 graphs (position/
   // velocity vs. setpoint, currents, computed torque, bus voltage) rendered
   // above this section -- excluded here so each doesn't also get a second,
@@ -203,6 +254,7 @@ const LiveCharts = ({ isActive = true }) => {
             <HStack spacing={2}>
               <Text fontSize="lg" fontWeight="medium" color="white">Custom Properties</Text>
               {paused && <Badge colorScheme="yellow" variant="solid">Frozen</Badge>}
+              {recording && <Badge colorScheme="red" variant="solid">● Recording</Badge>}
             </HStack>
             <HStack spacing={2}>
               <Badge colorScheme={status === 'connected' ? 'green' : 'gray'} variant="outline">{status}</Badge>
@@ -213,6 +265,16 @@ const LiveCharts = ({ isActive = true }) => {
           </VStack>
 
           <HStack spacing={2}>
+            <Button
+              size="sm"
+              colorScheme={recording ? 'red' : 'odrive'}
+              variant={recording ? 'solid' : 'outline'}
+              onClick={handleToggleRecord}
+              isLoading={recordBusy}
+              isDisabled={status !== 'connected'}
+            >
+              {recording ? 'Stop Recording' : 'Record to CSV'}
+            </Button>
             <Button size="sm" variant="outline" onClick={togglePause} isDisabled={selectedProperties.length === 0}>
               {paused ? 'Resume' : 'Pause'}
             </Button>

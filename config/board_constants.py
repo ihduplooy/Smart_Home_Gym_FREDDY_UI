@@ -569,13 +569,37 @@ CAN_BAUD_RATE = 500000
 # --------------------------------------------------------------------------
 # Bus-level limits
 # --------------------------------------------------------------------------
-BRAKE_RESISTANCE = 2.0  # ohm — confirmed against the physical resistor, 50W
-                        # rated (Layer B §2.4, 23 July 2026). No longer a
-                        # placeholder value that happened to match; this is
-                        # the actual, measured/rated component.
+BRAKE_RESISTANCE = 2.35  # ohm — two spare resistors wired in parallel (5 Aug
+                         # 2026), replacing the single 2ohm/50W unit. Combined
+                         # wattage rating confirmed 100W (resolves the
+                         # wattage-unknown half of open item #4 — see
+                         # docs/decisions.md, "DC bus overvoltage ramp fix").
+                         # Thermal margin under sustained real training load
+                         # is still unverified — open item #4 stays open for
+                         # that half.
 DC_BUS_UNDERVOLTAGE_TRIP_LEVEL = 8.0
-DC_BUS_OVERVOLTAGE_TRIP_LEVEL = 25.0  # capped for bench PSU testing; raise before
-                                      # battery phase (~42V)
+DC_BUS_OVERVOLTAGE_TRIP_LEVEL = 27.0  # Raised from the prior 25V bench-only
+                                      # value (5 Aug 2026) — a deliberate
+                                      # decision, distinct from the
+                                      # overvoltage-ramp fix below. Still
+                                      # below the ~42V battery-phase target;
+                                      # raise again before that phase.
+# DC bus overvoltage ramp (distinct from the current-based regen logic tied
+# to MAX_REGEN_CURRENT below): drives brake resistor duty directly off
+# measured vbus voltage, so it can react to fast voltage transients (e.g. a
+# hard/fast cable pull in Train mode) rather than only sustained regen
+# current. ENABLE_DC_BUS_OVERVOLTAGE_RAMP defaults to False on this firmware
+# — leaving it False (the state this board was actually in) meant the
+# resistor never got a chance to react to fast transients, letting vbus spike
+# toward DC_BUS_OVERVOLTAGE_TRIP_LEVEL and fault even with a correctly-valued
+# brake resistor wired in. Fixed and confirmed live 5 Aug 2026 (see
+# docs/decisions.md, "DC bus overvoltage ramp fix"): hard yank in Train mode
+# now stays ~23.6V, no fault. Known open caveat: resistor ran uncomfortably
+# hot within seconds on a short manual test despite the now-known 100W
+# rating — extended/hard sessions not yet run under sustained real load.
+ENABLE_DC_BUS_OVERVOLTAGE_RAMP = True
+DC_BUS_OVERVOLTAGE_RAMP_START = 24.0
+DC_BUS_OVERVOLTAGE_RAMP_END = 25.0
 DC_MAX_POSITIVE_CURRENT = 15.0
 # Tightened from -3.0 (Layer B §2.4, 23 July 2026) — the old value was an
 # unjustified placeholder ("brake resistor wattage tbc"), not derived from
@@ -727,6 +751,9 @@ def as_dict():
             "brake_resistance": BRAKE_RESISTANCE,
             "dc_bus_undervoltage_trip_level": DC_BUS_UNDERVOLTAGE_TRIP_LEVEL,
             "dc_bus_overvoltage_trip_level": DC_BUS_OVERVOLTAGE_TRIP_LEVEL,
+            "enable_dc_bus_overvoltage_ramp": ENABLE_DC_BUS_OVERVOLTAGE_RAMP,
+            "dc_bus_overvoltage_ramp_start": DC_BUS_OVERVOLTAGE_RAMP_START,
+            "dc_bus_overvoltage_ramp_end": DC_BUS_OVERVOLTAGE_RAMP_END,
             "dc_max_positive_current": DC_MAX_POSITIVE_CURRENT,
             "dc_max_negative_current": DC_MAX_NEGATIVE_CURRENT,
             "max_regen_current": MAX_REGEN_CURRENT,

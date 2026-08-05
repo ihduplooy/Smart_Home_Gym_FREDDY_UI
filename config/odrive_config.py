@@ -18,10 +18,13 @@ IMPORTANT — READ BEFORE RUNNING ON REAL HARDWARE
 1. USB isolator MUST be in place before connecting USB with DC bus power
    applied. Ground loops from USB+DC together have destroyed other
    people's ODrive boards (and reportedly host USB ports too).
-2. Brake resistor wattage rating is NOT YET CONFIRMED (open item #4 in the
-   project plan). regen limits below are deliberately conservative
-   (dc_max_negative_current, max_regen_current) until that's checked.
-   Do not raise these without confirming the resistor can handle it.
+2. Brake resistor wattage rating is now confirmed at 100W (5 Aug 2026: two
+   spare resistors wired in parallel, 2.35 ohm combined — resolves the
+   wattage-unknown half of open item #4 in the project plan). Thermal
+   margin under sustained real training load is still UNVERIFIED (the
+   resistor ran uncomfortably hot within seconds on a short manual test) —
+   regen limits below (dc_max_negative_current, max_regen_current) stay
+   conservative until extended/hard sessions have actually been run.
 3. First power-up should use the variable bench PSU at the LOW end
    (~12-15V), per plan. Do not jump straight to higher voltage.
 4. This script pauses for manual confirmation before any step that
@@ -188,10 +191,22 @@ odrv0 = call_and_reconnect(odrv0, "erase_configuration")
 # No separate enable flag on this firmware (v0.5.1 has no odrv0.config.enable_brake_resistor —
 # confirmed live via dir(odrv0.config)): setting brake_resistance non-zero is itself what
 # enables the brake resistor. Set it to 0 to disable.
-odrv0.config.brake_resistance = 2.0                 # matches the 2ohm brake resistor in hand
+odrv0.config.brake_resistance = 2.35                # two spare resistors wired in parallel (5 Aug
+                                                      # 2026), replacing the single 2ohm/50W unit —
+                                                      # combined wattage confirmed 100W
 odrv0.config.dc_bus_undervoltage_trip_level = 8.0    # safe default, fine for 12-15V testing
-odrv0.config.dc_bus_overvoltage_trip_level = 25.0    # capped for bench PSU testing only —
-                                                      # MUST be raised before battery phase (~42V)
+odrv0.config.dc_bus_overvoltage_trip_level = 27.0    # raised from the prior 25V bench-only value
+                                                      # (5 Aug 2026, deliberate) —
+                                                      # MUST be raised again before battery phase (~42V)
+# DC bus overvoltage ramp: drives brake resistor duty directly off measured vbus, distinct from
+# the current-based regen logic tied to max_regen_current below. Defaults to False on this
+# firmware — left False, a hard/fast cable pull in Train mode could spike vbus toward the trip
+# level and fault even with a correctly-valued brake resistor wired in (confirmed live 5 Aug 2026,
+# see docs/decisions.md). Enabling it lets the resistor react to fast voltage transients, not only
+# sustained regen current.
+odrv0.config.enable_dc_bus_overvoltage_ramp = True
+odrv0.config.dc_bus_overvoltage_ramp_start = 24.0
+odrv0.config.dc_bus_overvoltage_ramp_end = 25.0
 odrv0.config.dc_max_positive_current = 15.0          # bus-side draw limit, above motor current_lim
 odrv0.config.dc_max_negative_current = -3.0          # conservative: brake resistor wattage tbc
 odrv0.config.max_regen_current = 0                   # conservative: brake resistor wattage tbc
