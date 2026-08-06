@@ -6,6 +6,7 @@
 //   GET  /api/exercise/status
 //   POST /api/exercise/start                  {} -- arms, zero motion
 //   POST /api/exercise/home
+//   POST /api/exercise/go_home                -- same reel-in-to-current-threshold as Home, but never re-latches home
 //   POST /api/exercise/abort_homing
 //   POST /api/exercise/start_max_calibration
 //   POST /api/exercise/confirm_max
@@ -35,6 +36,11 @@
 //   POST /api/exercise/cancel_spool_growth_calibration
 //   POST /api/exercise/save_growth_calibration
 //   POST /api/exercise/clear_growth_calibration
+//
+// Torque/force calibration (items 6/7 -- see status.cable.torque_model for
+// the currently-fitted scale/offset/equation/points):
+//   POST /api/exercise/record_torque_calibration_point { known_weight_kg }
+//   POST /api/exercise/clear_torque_calibration
 //
 // Force Feedback (formerly a separate "force" session, merged 24 July 2026
 // into this same Exercise session -- see backend/app/force_routes.py):
@@ -77,6 +83,10 @@ export function startExerciseSession() {
 
 export function homeExercise() {
   return postJson('/api/exercise/home')
+}
+
+export function goHomeExercise() {
+  return postJson('/api/exercise/go_home')
 }
 
 export function abortHoming() {
@@ -164,6 +174,14 @@ export function saveGrowthCalibration() {
 
 export function clearGrowthCalibration() {
   return postJson('/api/exercise/clear_growth_calibration')
+}
+
+export function recordTorqueCalibrationPoint(knownWeightKg) {
+  return postJson('/api/exercise/record_torque_calibration_point', { known_weight_kg: knownWeightKg })
+}
+
+export function clearTorqueCalibration() {
+  return postJson('/api/exercise/clear_torque_calibration')
 }
 
 export function updateForceSettings({

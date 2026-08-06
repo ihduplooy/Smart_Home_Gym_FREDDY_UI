@@ -60,11 +60,11 @@ def test_experiment_columns_empty_for_non_experiment_runs(tmp_path):
 
 
 def test_experiment_columns_populated_when_passed(tmp_path):
-    logger = CsvLogger(mode="experiment-static_hold", hardware_source="real", logs_dir=tmp_path)
+    logger = CsvLogger(mode="experiment-position_hold", hardware_source="real", logs_dir=tmp_path)
     path = logger.open()
     logger.log_sample(
         TelemetrySample(t=0.0, position=0.0, velocity=0.0, current_iq=0.0, torque_est=0.0, bus_voltage_v=24.0),
-        mode="experiment-static_hold",
+        mode="experiment-position_hold",
         target=1.0,
         experiment_state="holding",
         position_m=0.5,

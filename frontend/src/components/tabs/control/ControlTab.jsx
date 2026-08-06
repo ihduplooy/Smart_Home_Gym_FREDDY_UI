@@ -34,8 +34,7 @@ import {
 import { useControlTelemetry, CONTROL_TELEMETRY_BUFFER_S } from '../../../hooks/useControlTelemetry'
 import { startControlSession, stopControlSession, setControlTarget } from '../../../api/control'
 import { readProperties, writeProperties, invokeCommand } from '../../../api/backend'
-import { getExerciseStatus } from '../../../api/exercise'
-import { turnsDeltaFromLength } from '../../../utils/cableGeometry'
+import { turnsDeltaFromLength, rawTorqueNmForCorrected } from '../../../utils/cableGeometry'
 import TelemetryTimeSeriesChart from '../../shared/TelemetryTimeSeriesChart'
 
 const UNIT_BY_MODE = { velocity: 'turns/s', torque: 'Nm' }
@@ -54,7 +53,12 @@ const CONTROL_CHART_LINES = [
   { key: 'position', label: 'Position (actual)', color: '#63B3ED', unit: 'turns', defaultOn: true, side: 'left' },
   { key: 'target_position', label: 'Target position', color: '#F6E05E', unit: 'turns', defaultOn: true, side: 'left', axisKey: 'position', dashed: true, lineType: 'stepAfter' },
   { key: 'velocity', label: 'Velocity (actual)', color: '#68D391', unit: 'turns/s', defaultOn: false, side: 'right' },
-  { key: 'torque_est', label: 'Torque (est.)', color: '#F6AD55', unit: 'Nm', defaultOn: false, side: 'right' },
+  // Calibrated by default (item 1: "calibration becomes the single source
+  // of truth") -- raw torque_est (motor-constant-only estimate) kept
+  // available as an off-by-default secondary line, same precedent as
+  // TestingTab.jsx's CHART_LINES.
+  { key: 'torque_est_corrected', label: 'Torque (calibrated)', color: '#F6AD55', unit: 'Nm', defaultOn: false, side: 'right' },
+  { key: 'torque_est', label: 'Torque (raw estimate)', color: '#ED8936', unit: 'Nm', defaultOn: false, side: 'right' },
 ]
 
 // Modes this tab's own UI understands (its Select only ever offers these
@@ -76,7 +80,7 @@ const GAIN_FIELDS = [
 const gainPath = (key) => `axis0.controller.config.${key}`
 
 const ControlTab = ({ isActive = true }) => {
-  const { status, series, connected } = useControlTelemetry(isActive)
+  const { status, series, connected, cable } = useControlTelemetry(isActive)
   const { connectedDevice, isConnected } = useSelector((s) => s.device)
   const serial = connectedDevice?.serial_number
 
@@ -94,20 +98,17 @@ const ControlTab = ({ isActive = true }) => {
 
   // Cable geometry (r0/k) for the metres unit option (25 July 2026, requested
   // so Position mode isn't turns-only) -- read-only, from the same shared
-  // CableState Exercise/Train already expose via /api/exercise/status.
+  // CableState Exercise/Train already expose. Sourced from useControlTelemetry's
+  // own `cable` poll (added for item 1's torque calibration) rather than a
+  // second independent fetch of the same status -- one poll, two uses.
   // PositionMode itself stays hardware-turns-only; the conversion happens
   // here, client-side, before the target is ever sent.
-  const [cableGeometry, setCableGeometry] = useState(null) // { r0, k } | null
-  useEffect(() => {
-    let cancelled = false
-    getExerciseStatus()
-      .then((s) => {
-        if (cancelled || s?.cable?.r0 == null) return
-        setCableGeometry({ r0: s.cable.r0, k: s.cable.k ?? 0 })
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [posUnit])
+  const cableGeometry = useMemo(
+    () => (cable?.r0 != null ? { r0: cable.r0, k: cable.k ?? 0 } : null),
+    [cable?.r0, cable?.k]
+  )
+  const torqueScale = cable?.torque_model?.scale ?? 1.0
+  const torqueOffset = cable?.torque_model?.offset ?? 0.0
 
   const running = Boolean(status?.running && KNOWN_MODES.includes(status?.mode))
   // A Profiles/Exercise/Force session running on the shared backend session
@@ -157,6 +158,14 @@ const ControlTab = ({ isActive = true }) => {
 
   const targetValid = mode === 'position' ? posValid : (targetText !== '' && Number.isFinite(targetNumber))
 
+  // Item 1: every user-facing Nm value in this tab is meant to represent the
+  // CALIBRATED, real physical torque (consistent with Train/Testing) -- the
+  // raw value actually sent to hardware.set_torque_target()/torque_limit is
+  // converted through the calibration's inverse correction right before
+  // send, same as Train/Exercise/Testing already do server-side (there's no
+  // CableState-aware mode backing plain Velocity/Torque/Position here, so
+  // the conversion happens client-side instead, same precedent as the
+  // posPositionTurnsEstimate m/turns conversion just above).
   const buildTarget = () => {
     if (mode === 'position') {
       const positionTurns = posUnit === 'm' ? posPositionTurnsEstimate : posPositionNumber
@@ -164,8 +173,11 @@ const ControlTab = ({ isActive = true }) => {
         position: positionTurns,
         move_velocity: posVelocityNumber,
         accel_decel: posAccelNumber,
-        torque_limit: posTorqueLimitText === '' ? null : posTorqueLimitNumber,
+        torque_limit: posTorqueLimitText === '' ? null : rawTorqueNmForCorrected(posTorqueLimitNumber, torqueScale, torqueOffset),
       }
+    }
+    if (mode === 'torque') {
+      return rawTorqueNmForCorrected(targetNumber, torqueScale, torqueOffset)
     }
     return targetNumber
   }
@@ -410,11 +422,12 @@ const ControlTab = ({ isActive = true }) => {
                         />
                         <InputRightAddon px={2} fontSize="xs">Nm</InputRightAddon>
                       </InputGroup>
+                      <Text fontSize="0.65rem" color="gray.500" mt={0.5}>calibrated (real) Nm</Text>
                     </Box>
                   </>
                 ) : (
                   <Box>
-                    <Text fontSize="xs" color="gray.400" mb={1}>Target</Text>
+                    <Text fontSize="xs" color="gray.400" mb={1}>Target{mode === 'torque' ? ' (calibrated Nm)' : ''}</Text>
                     <InputGroup size="sm" w="180px">
                       <Input
                         type="text"
@@ -468,9 +481,9 @@ const ControlTab = ({ isActive = true }) => {
                   <Text fontSize="xs" color="gray.400">turns/s</Text>
                 </Stat>
                 <Stat>
-                  <StatLabel color="gray.300">Torque (est.)</StatLabel>
-                  <StatNumber color="odrive.300" fontSize="xl">{(latest?.torque_est ?? 0).toFixed(3)}</StatNumber>
-                  <Text fontSize="xs" color="gray.400">Nm</Text>
+                  <StatLabel color="gray.300">Torque (calibrated est.)</StatLabel>
+                  <StatNumber color="odrive.300" fontSize="xl">{(latest?.torque_est_corrected ?? 0).toFixed(3)}</StatNumber>
+                  <Text fontSize="xs" color="gray.400">Nm — sign is direction, not resistance magnitude</Text>
                 </Stat>
                 <Stat>
                   <StatLabel color="gray.300">Current (Iq)</StatLabel>

@@ -17,6 +17,7 @@ import {
 // Lazy-loaded tab components
 const ConfigurationTab = lazy(() => import('./tabs/config wizard/ConfigurationTab'))
 const InspectorTab = lazy(() => import('./tabs/inspector/InspectorTab'))
+const SetupTab = lazy(() => import('./tabs/setup/SetupTab'))
 const ControlTab = lazy(() => import('./tabs/control/ControlTab'))
 const TrainTab = lazy(() => import('./tabs/train/TrainTab'))
 const TestingTab = lazy(() => import('./tabs/testing/TestingTab'))
@@ -54,6 +55,12 @@ const TAB_CONFIG = [
     id: 'configuration',
     label: 'Configuration',
     component: ConfigurationTab,
+    requiresConnection: false
+  },
+  {
+    id: 'setup',
+    label: 'Setup',
+    component: SetupTab,
     requiresConnection: false
   },
   {
@@ -100,6 +107,7 @@ const MainTabs = () => {
             isActive: activeTab === index
           }
         case 'configuration':
+        case 'setup':
         case 'control':
         case 'train':
         case 'testing':

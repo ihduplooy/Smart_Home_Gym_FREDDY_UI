@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { getControlStatus, getControlTelemetry } from '../api/control'
+import { getExerciseStatus } from '../api/exercise'
+import { correctedTorqueNm } from '../utils/cableGeometry'
 import { appendAndTrimByAge } from '../utils/telemetryBuffer'
 
 // Rolling buffer duration (train_tab_build_spec.md "calibration overhaul"
@@ -31,19 +33,29 @@ export const CONTROL_TELEMETRY_BUFFER_S = 90
 // itself is left in place — it works fine once connected and may be worth
 // revisiting under a production WSGI server in Phase 2A.
 const POLL_INTERVAL_MS = 150
+// Calibration constants (torque_model scale/offset) change rarely -- no need
+// for the 150ms telemetry cadence, same rationale useTestingTelemetry.js's
+// own slower `cable` poll already follows.
+const CABLE_POLL_INTERVAL_MS = 1000
 
 /**
  * Polls control status + new ring-buffer samples. Local to the Control tab —
  * polls while `enabled` (i.e. the tab is active), stops and clears
- * otherwise.
+ * otherwise. Also polls /api/exercise/status for the `cable` calibration
+ * snapshot (item 1, "calibration becomes the single source of truth" --
+ * Control tab's own Torque display/targets used to bypass the calibrated
+ * model entirely, unlike Train/Testing) so torque_est can be corrected the
+ * same way useTestingTelemetry.js already does.
  */
 export function useControlTelemetry(enabled) {
   const [status, setStatus] = useState(null)
   const [series, setSeries] = useState([])
   const [connected, setConnected] = useState(false)
+  const [cable, setCable] = useState(null)
 
   const seriesRef = useRef([])
   const lastTRef = useRef(null)
+  const cableRef = useRef(null)
 
   useEffect(() => {
     if (!enabled) return undefined
@@ -72,7 +84,13 @@ export function useControlTelemetry(enabled) {
             nextStatus?.mode === 'position' && nextStatus?.target && typeof nextStatus.target === 'object'
               ? nextStatus.target.position
               : null
-          const stamped = samples.map((s) => ({ ...s, target_position: targetPosition }))
+          const torqueScale = cableRef.current?.torque_model?.scale ?? 1.0
+          const torqueOffset = cableRef.current?.torque_model?.offset ?? 0.0
+          const stamped = samples.map((s) => ({
+            ...s,
+            target_position: targetPosition,
+            torque_est_corrected: correctedTorqueNm(s.torque_est, torqueScale, torqueOffset),
+          }))
           lastTRef.current = samples[samples.length - 1].t
           const next = appendAndTrimByAge(seriesRef.current, stamped, CONTROL_TELEMETRY_BUFFER_S)
           seriesRef.current = next
@@ -97,5 +115,34 @@ export function useControlTelemetry(enabled) {
     }
   }, [enabled])
 
-  return { status, series, connected }
+  useEffect(() => {
+    if (!enabled) return undefined
+    let cancelled = false
+    let timer = null
+
+    async function poll() {
+      if (cancelled) return
+      try {
+        const s = await getExerciseStatus()
+        if (!cancelled) {
+          cableRef.current = s.cable
+          setCable(s.cable)
+        }
+      } catch {
+        // Transient poll failure -- keep the last known calibration snapshot.
+      } finally {
+        if (!cancelled) timer = setTimeout(poll, CABLE_POLL_INTERVAL_MS)
+      }
+    }
+    poll()
+
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+      cableRef.current = null
+      setCable(null)
+    }
+  }, [enabled])
+
+  return { status, series, connected, cable }
 }

@@ -87,11 +87,11 @@ class RecordingHardware(HardwareInterface):
 
 
 def _mode(tmp_path):
-    return ExerciseMode(CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json"))
+    return ExerciseMode(CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json", torque_calibration_sidecar_path=tmp_path / "torque_calibration.json"))
 
 
 def _homed_and_maxed_mode(tmp_path, home=0.0, max_turns=20.0):
-    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json")
+    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json", torque_calibration_sidecar_path=tmp_path / "torque_calibration.json")
     cable_state.latch_home(home)
     cable_state.set_max(marked_turns=max_turns, enforced_turns=max_turns)
     return ExerciseMode(cable_state)
@@ -494,6 +494,39 @@ def test_runtime_guard_not_checked_before_max_is_set(tmp_path):
     mode.tick(hw, hw.sample)  # must not raise
 
 
+def test_guard_disabled_when_both_enforcement_toggles_off(tmp_path):
+    # Item 4: the runtime guard used to be unconditional here regardless of
+    # train_home_guard_enforced/train_max_extension_enforced -- those two
+    # toggles now gate ExerciseMode's guard the same way TrainMode's own
+    # already was, so disabling them turns this off too (Go Home/Homing/
+    # manual moves), not just Train sessions.
+    mode = _mode(tmp_path)
+    hw = RecordingHardware()
+    _arm(mode, hw)
+    mode.cable_state.latch_home(0.0)
+    mode.cable_state.set_max(marked_turns=10.0, enforced_turns=9.0)
+    mode.cable_state.set_train_settings(max_extension_enforced=False, home_guard_enforced=False)
+
+    hw.sample = TelemetrySample(t=1.0, position=20.0, velocity=0.0, current_iq=0.0, torque_est=0.0)
+    extra = mode.tick(hw, hw.sample)  # must not raise
+    assert extra["position_warning"] is False
+
+
+def test_guard_still_fires_when_only_one_toggle_enabled(tmp_path):
+    # Combined (OR) gating, not per-side like TrainMode's split check --
+    # leaving either toggle on keeps the guard fully active.
+    mode = _mode(tmp_path)
+    hw = RecordingHardware()
+    _arm(mode, hw)
+    mode.cable_state.latch_home(0.0)
+    mode.cable_state.set_max(marked_turns=10.0, enforced_turns=9.0)
+    mode.cable_state.set_train_settings(max_extension_enforced=True, home_guard_enforced=False)
+
+    hw.sample = TelemetrySample(t=1.0, position=20.0, velocity=0.0, current_iq=0.0, torque_est=0.0)
+    with pytest.raises(RuntimeError):
+        mode.tick(hw, hw.sample)
+
+
 def test_position_warning_tier_fires_before_hard_tier(tmp_path):
     # Sitting between the warning and hard tolerances: warned, not stopped.
     mode = _mode(tmp_path)
@@ -618,7 +651,7 @@ def test_cable_length_reflects_experimental_growth_model_once_saved(tmp_path):
 def test_exercise_csv_gains_cable_length_column(tmp_path):
     import csv as csv_module
 
-    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json")
+    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json", torque_calibration_sidecar_path=tmp_path / "torque_calibration.json")
     session = ControlSession(
         hardware_source="sim",
         mode_factories={**MODES_BY_NAME, "exercise": lambda: ExerciseMode(cable_state)},
@@ -639,7 +672,7 @@ def test_exercise_csv_gains_cable_length_column(tmp_path):
 def test_exercise_csv_cable_length_populated_once_homed(tmp_path):
     import csv as csv_module
 
-    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json")
+    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json", torque_calibration_sidecar_path=tmp_path / "torque_calibration.json")
     cable_state.latch_home(0.0)
     session = ControlSession(
         hardware_source="sim",
@@ -660,7 +693,7 @@ def test_exercise_csv_cable_length_populated_once_homed(tmp_path):
 
 
 def test_exercise_mode_end_to_end_via_control_session(tmp_path):
-    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json")
+    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json", torque_calibration_sidecar_path=tmp_path / "torque_calibration.json")
     session = ControlSession(
         hardware_source="sim",
         mode_factories={**MODES_BY_NAME, "exercise": lambda: ExerciseMode(cable_state)},
@@ -714,7 +747,7 @@ def test_engage_requires_explicit_action(tmp_path):
 
 
 def test_engage_requires_homed(tmp_path):
-    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json")
+    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json", torque_calibration_sidecar_path=tmp_path / "torque_calibration.json")
     mode = ExerciseMode(cable_state)
     hw = RecordingHardware()
     _arm(mode, hw)
@@ -723,7 +756,7 @@ def test_engage_requires_homed(tmp_path):
 
 
 def test_engage_without_max_requires_explicit_end(tmp_path):
-    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json")
+    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json", torque_calibration_sidecar_path=tmp_path / "torque_calibration.json")
     cable_state.latch_home(0.0)
     mode = ExerciseMode(cable_state)
     hw = RecordingHardware()
@@ -733,7 +766,7 @@ def test_engage_without_max_requires_explicit_end(tmp_path):
 
 
 def test_engage_without_max_succeeds_with_explicit_end(tmp_path):
-    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json")
+    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json", torque_calibration_sidecar_path=tmp_path / "torque_calibration.json")
     cable_state.latch_home(0.0)
     mode = ExerciseMode(cable_state)
     hw = RecordingHardware()
@@ -955,6 +988,31 @@ def test_commanded_torque_magnitude_matches_force_to_torque(tmp_path, monkeypatc
         hw.sample = _sample(t, 0.0, 0.0)
         mode.tick(hw, hw.sample)
     assert abs(hw.torque_target) == pytest.approx(force_to_torque(50.0), rel=0.05)
+
+
+def test_commanded_torque_applies_torque_calibration_inverse_correction(tmp_path, monkeypatch):
+    """Items 6/7: the force-feedback torque command must go through the
+    calibration's INVERSE correction -- the raw Nm actually sent to
+    hardware, not the real/intended torque -- so the physical torque
+    delivered matches the calibrated real-world relationship."""
+    _fast_ramp(monkeypatch)
+    mode = _homed_and_maxed_mode(tmp_path)
+    mode.cable_state.add_torque_calibration_point(known_weight_kg=5.0, raw_torque_nm=0.9, position_turns=0.0)
+    assert mode.cable_state.torque_calibration.scale != pytest.approx(1.0)  # sanity
+
+    hw = RecordingHardware()
+    _arm(mode, hw)
+    _engage(mode, hw, concentric_force_n=50.0, eccentric_force_n=50.0)
+    t = 0.0
+    for _ in range(20):
+        t += DT
+        hw.sample = _sample(t, 0.0, 0.0)
+        mode.tick(hw, hw.sample)
+
+    real_torque_nm = force_to_torque(50.0)
+    expected_raw = mode.cable_state.raw_torque_nm_for_corrected(real_torque_nm)
+    assert abs(hw.torque_target) == pytest.approx(abs(expected_raw), rel=0.05)
+    assert abs(hw.torque_target) != pytest.approx(real_torque_nm, rel=0.05)
 
 
 def test_commanded_torque_uses_cable_state_r0_not_board_constants(tmp_path, monkeypatch):
@@ -1241,7 +1299,7 @@ def test_resume_rejected_when_not_faulted(tmp_path):
 # ---- Stop remains available/effective mid-engagement (end-to-end) ----
 
 def test_global_stop_mid_engaged_zeroes_torque_and_restores_current_limit(tmp_path):
-    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json")
+    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json", torque_calibration_sidecar_path=tmp_path / "torque_calibration.json")
     cable_state.latch_home(0.0)
     cable_state.set_max(marked_turns=20.0, enforced_turns=20.0)
     session = ControlSession(
@@ -1363,12 +1421,33 @@ def test_estimated_force_reflects_measured_torque(tmp_path):
     assert extra["estimated_force_n"] == pytest.approx(expected)
 
 
+def test_estimated_force_applies_torque_calibration_correction(tmp_path):
+    """Items 6/7: estimated_force_n must run the raw torque_est through the
+    torque calibration's forward correction before converting to force --
+    otherwise a recorded calibration would have no effect on what's
+    displayed/logged as the measured force."""
+    mode = _homed_and_maxed_mode(tmp_path)
+    mode.cable_state.add_torque_calibration_point(known_weight_kg=5.0, raw_torque_nm=0.9, position_turns=0.0)
+    assert mode.cable_state.torque_calibration.scale != pytest.approx(1.0)  # sanity
+
+    hw = RecordingHardware()
+    _arm(mode, hw)
+    raw_torque_est = board_constants.MOTOR_TORQUE_CONSTANT * 1.0
+    hw.sample = _sample(0.0, 0.0, 0.0, current_iq=1.0, torque_est=raw_torque_est)
+    extra = mode.tick(hw, hw.sample)
+
+    corrected = mode.cable_state.corrected_torque_nm(raw_torque_est)
+    assert corrected != pytest.approx(raw_torque_est)  # sanity: correction changes something
+    expected = corrected / board_constants.SPOOL_RADIUS_M
+    assert extra["estimated_force_n"] == pytest.approx(expected)
+
+
 # ---- CSV telemetry ----
 
 def test_force_csv_gains_columns(tmp_path):
     import csv as csv_module
 
-    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json")
+    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json", torque_calibration_sidecar_path=tmp_path / "torque_calibration.json")
     cable_state.latch_home(0.0)
     cable_state.set_max(marked_turns=20.0, enforced_turns=20.0)
     session = ControlSession(

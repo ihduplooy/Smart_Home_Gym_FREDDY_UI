@@ -5,7 +5,7 @@
 //   POST /api/train/start            { profile? }
 //   POST /api/train/stop
 //   POST /api/train/set_profile      { profile }
-//   POST /api/train/update_settings  { max_extension_enforced?, home_guard_enforced?, telemetry_buffer_s? }
+//   POST /api/train/update_settings  { max_extension_enforced?, home_guard_enforced?, telemetry_buffer_s?, resistance_display_unit_kg? }
 //   POST /api/train/preview_profile  { profile, position_range_m: [lo, hi], n_points? } -> { points: [{position_m, force_n}] }
 //
 // Homing / max-extension calibration / spool calibration (k, r0) are NOT
@@ -52,11 +52,12 @@ export function setTrainProfile(profile) {
   return postJson('/api/train/set_profile', { profile })
 }
 
-export function updateTrainSettings({ maxExtensionEnforced, homeGuardEnforced, telemetryBufferS } = {}) {
+export function updateTrainSettings({ maxExtensionEnforced, homeGuardEnforced, telemetryBufferS, resistanceDisplayUnitKg } = {}) {
   const body = {}
   if (maxExtensionEnforced != null) body.max_extension_enforced = maxExtensionEnforced
   if (homeGuardEnforced != null) body.home_guard_enforced = homeGuardEnforced
   if (telemetryBufferS != null) body.telemetry_buffer_s = telemetryBufferS
+  if (resistanceDisplayUnitKg != null) body.resistance_display_unit_kg = resistanceDisplayUnitKg
   return postJson('/api/train/update_settings', body)
 }
 

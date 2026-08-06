@@ -17,7 +17,6 @@ from . import device_manager
 from . import anticogging_routes
 from . import control_routes
 from . import exercise_routes
-from . import experiment_routes
 from . import force_routes
 from . import train_routes
 from .api_reference import load_api_reference, reference_line
@@ -293,7 +292,6 @@ def create_app() -> Flask:
     anticogging_routes.register(app)
     control_routes.register(app, sock)
     exercise_routes.register(app)
-    experiment_routes.register(app)
     force_routes.register(app)
     train_routes.register(app)
 

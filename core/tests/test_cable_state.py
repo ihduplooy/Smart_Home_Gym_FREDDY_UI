@@ -1,6 +1,9 @@
-"""core/cable/state.py tests -- persistence split (spec §6): home/max are
-in-memory only, k persists across a fresh CableState() (simulating a backend
-restart)."""
+"""core/cable/state.py tests -- persistence split (spec §6): home/max TURNS
+are in-memory only, k persists across a fresh CableState() (simulating a
+backend restart). The physical max-extension LENGTH is the one exception
+(train tab calibration overhaul item 3): it persists across both reset() and
+re-homing, and latch_home() reapplies it against the new home reference
+automatically."""
 
 import pytest
 
@@ -14,33 +17,49 @@ def _tmp_sidecar(tmp_path):
 
 
 def test_fresh_state_is_unhomed_and_has_default_k(tmp_path):
-    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     assert state.is_homed is False
     assert state.has_max is False
     assert state.k == board_constants.SPOOL_CORRECTION_K_DEFAULT
 
 
 def test_latch_home_sets_is_homed(tmp_path):
-    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     state.latch_home(12.5)
     assert state.is_homed is True
     assert state.home_turns == 12.5
 
 
-def test_latching_a_new_home_invalidates_previous_max(tmp_path):
-    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+def test_latching_a_new_home_reapplies_persisted_max_extension(tmp_path):
+    """Item 3: re-homing invalidates the old (now stale) TURNS reference, but
+    the physical max-extension LENGTH survives and is immediately reapplied
+    against the new home -- no recalibration needed on every re-home."""
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     state.latch_home(0.0)
     state.set_max(marked_turns=10.0, enforced_turns=9.0)
+    length_m = state.max_extension_length_m
     assert state.has_max is True
 
-    state.latch_home(1.0)  # re-homed -- old max no longer trustworthy
+    state.latch_home(1.0)  # re-homed -- old TURNS reference is stale
+    assert state.has_max is True
+    assert state.max_extension_length_m == pytest.approx(length_m)
+    # Same physical length from the new home, so the enforced turns shift by
+    # exactly the home offset (fixed-radius model: 9.0 turns from the old
+    # home == 9.0 turns from the new one, offset by the +1.0 turn shift).
+    assert state.max_turns == pytest.approx(10.0)
+    assert state.marked_max_turns == pytest.approx(10.0)
+
+
+def test_latching_a_new_home_without_prior_max_stays_unset(tmp_path):
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    state.latch_home(0.0)
     assert state.has_max is False
-    assert state.max_turns is None
-    assert state.marked_max_turns is None
+    state.latch_home(1.0)
+    assert state.has_max is False
 
 
 def test_reset_clears_home_and_max_but_not_k(tmp_path):
-    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     state.set_k(0.0003)
     state.latch_home(0.0)
     state.set_max(marked_turns=10.0, enforced_turns=9.0)
@@ -52,19 +71,54 @@ def test_reset_clears_home_and_max_but_not_k(tmp_path):
     assert state.k == 0.0003  # untouched -- physical spool property
 
 
+def test_max_extension_length_survives_reset_and_reapplies_on_rehome(tmp_path):
+    """Item 3's core guarantee: reset() alone leaves max un-set (no home to
+    reapply it against), but the next successful Home brings it straight
+    back -- no recalibration prompt."""
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    state.latch_home(0.0)
+    state.set_max(marked_turns=10.0, enforced_turns=9.0)
+    length_m = state.max_extension_length_m
+
+    state.reset()
+    assert state.has_max is False
+    assert state.max_extension_length_m == pytest.approx(length_m)  # survives reset
+
+    state.latch_home(2.0)  # simulates the next Home after reset
+    assert state.has_max is True
+    assert state.max_extension_length_m == pytest.approx(length_m)
+
+
+def test_max_extension_length_persists_across_a_fresh_instance(tmp_path):
+    """Simulates a backend restart: unlike home/max turns, the physical
+    max-extension length is meant to survive it."""
+    sidecar = _tmp_sidecar(tmp_path)
+    state1 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    state1.latch_home(0.0)
+    state1.set_max(marked_turns=10.0, enforced_turns=9.0)
+
+    state2 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    assert state2.is_homed is False
+    assert state2.has_max is False  # no home yet in the fresh instance
+    assert state2.max_extension_length_m == pytest.approx(state1.max_extension_length_m)
+
+    state2.latch_home(0.0)  # first Home after the simulated restart
+    assert state2.has_max is True
+
+
 # ---- persistence split: k survives a fresh instance, home/max never do ----
 
 def test_k_persists_across_a_fresh_instance_simulating_backend_restart(tmp_path):
     sidecar = _tmp_sidecar(tmp_path)
 
-    state1 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state1 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     state1.set_k(0.00042)
     state1.latch_home(5.0)
     state1.set_max(marked_turns=15.0, enforced_turns=14.0)
 
     # A fresh instance against the same sidecar path simulates a backend
     # restart: k must survive, home/max must NOT (spec §6 hard requirement).
-    state2 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state2 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     assert state2.k == 0.00042
     assert state2.is_homed is False
     assert state2.has_max is False
@@ -72,21 +126,21 @@ def test_k_persists_across_a_fresh_instance_simulating_backend_restart(tmp_path)
 
 def test_missing_sidecar_file_falls_back_to_default_k(tmp_path):
     sidecar = tmp_path / "does_not_exist.json"
-    state = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     assert state.k == board_constants.SPOOL_CORRECTION_K_DEFAULT
 
 
 def test_corrupt_sidecar_file_falls_back_to_default_k(tmp_path):
     sidecar = _tmp_sidecar(tmp_path)
     sidecar.write_text("not valid json{{{")
-    state = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     assert state.k == board_constants.SPOOL_CORRECTION_K_DEFAULT
 
 
 # ---- live-adjustable spool radius (r0) and homing settings ----
 
 def test_fresh_state_has_default_r0_and_homing_settings(tmp_path):
-    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     assert state.r0 == board_constants.SPOOL_RADIUS_M
     assert state.homing_current_threshold_a == board_constants.HOMING_CURRENT_THRESHOLD_A
     assert state.homing_velocity_turns_s == board_constants.HOMING_VELOCITY_TURNS_S
@@ -95,14 +149,14 @@ def test_fresh_state_has_default_r0_and_homing_settings(tmp_path):
 
 def test_set_r0_persists_across_a_fresh_instance(tmp_path):
     sidecar = _tmp_sidecar(tmp_path)
-    state1 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state1 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     state1.set_r0(0.04)
-    state2 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state2 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     assert state2.r0 == 0.04
 
 
 def test_set_r0_rejects_nonpositive(tmp_path):
-    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     with pytest.raises(ValueError):
         state.set_r0(0.0)
     with pytest.raises(ValueError):
@@ -111,9 +165,9 @@ def test_set_r0_rejects_nonpositive(tmp_path):
 
 def test_set_homing_settings_persists_across_a_fresh_instance(tmp_path):
     sidecar = _tmp_sidecar(tmp_path)
-    state1 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state1 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     state1.set_homing_settings(current_threshold_a=2.0, velocity_turns_s=0.5, current_limit_a=7.5)
-    state2 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state2 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     assert state2.homing_current_threshold_a == 2.0
     assert state2.homing_velocity_turns_s == 0.5
     assert state2.homing_current_limit_a == 7.5
@@ -125,8 +179,16 @@ def _tmp_growth_sidecar(tmp_path):
     return tmp_path / "spool_growth_calibration.json"
 
 
+def _tmp_torque_sidecar(tmp_path):
+    return tmp_path / "torque_calibration.json"
+
+
 def _state(tmp_path):
-    return CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    return CableState(
+        sidecar_path=_tmp_sidecar(tmp_path),
+        growth_sidecar_path=_tmp_growth_sidecar(tmp_path),
+        torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path),
+    )
 
 
 def _valid_growth_points(r0, t1_turns=2.0, t2_turns=5.0, slope1=0.0002, slope2=0.0003):
@@ -282,7 +344,7 @@ def test_check_k_against_travel_range_accepts_safe_k(tmp_path):
 
 
 def test_set_homing_settings_updates_only_given_fields(tmp_path):
-    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     original_velocity = state.homing_velocity_turns_s
     original_limit = state.homing_current_limit_a
     state.set_homing_settings(current_threshold_a=1.5)
@@ -292,7 +354,7 @@ def test_set_homing_settings_updates_only_given_fields(tmp_path):
 
 
 def test_set_homing_settings_rejects_nonpositive_values(tmp_path):
-    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     with pytest.raises(ValueError):
         state.set_homing_settings(current_threshold_a=0.0)
     with pytest.raises(ValueError):
@@ -300,7 +362,7 @@ def test_set_homing_settings_rejects_nonpositive_values(tmp_path):
 
 
 def test_set_homing_settings_rejects_limit_at_or_below_threshold(tmp_path):
-    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     with pytest.raises(ValueError):
         state.set_homing_settings(current_threshold_a=3.0, current_limit_a=3.0)
     with pytest.raises(ValueError):
@@ -308,13 +370,13 @@ def test_set_homing_settings_rejects_limit_at_or_below_threshold(tmp_path):
 
 
 def test_set_homing_settings_rejects_limit_above_operating_limit(tmp_path):
-    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     with pytest.raises(ValueError):
         state.set_homing_settings(current_limit_a=board_constants.MOTOR_CURRENT_LIM + 1.0)
 
 
 def test_set_homing_settings_rejected_call_does_not_partially_apply(tmp_path):
-    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     original_threshold = state.homing_current_threshold_a
     with pytest.raises(ValueError):
         state.set_homing_settings(current_threshold_a=5.0, current_limit_a=1.0)  # limit < threshold
@@ -324,20 +386,20 @@ def test_set_homing_settings_rejected_call_does_not_partially_apply(tmp_path):
 # ---- live-adjustable max-extension calibration hold force ----
 
 def test_fresh_state_has_default_calib_hold_force(tmp_path):
-    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     assert state.calib_hold_force_n == board_constants.CALIB_HOLD_FORCE_N
 
 
 def test_set_calib_hold_force_persists_across_a_fresh_instance(tmp_path):
     sidecar = _tmp_sidecar(tmp_path)
-    state1 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state1 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     state1.set_calib_hold_force(4.5)
-    state2 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state2 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     assert state2.calib_hold_force_n == 4.5
 
 
 def test_set_calib_hold_force_rejects_nonpositive(tmp_path):
-    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     with pytest.raises(ValueError):
         state.set_calib_hold_force(0.0)
     with pytest.raises(ValueError):
@@ -347,7 +409,7 @@ def test_set_calib_hold_force_rejects_nonpositive(tmp_path):
 # ---- live-adjustable force/safety "feel" settings ----
 
 def test_fresh_state_has_default_force_settings(tmp_path):
-    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     assert state.letgo_velocity_turns_s == board_constants.LETGO_VELOCITY_TURNS_S
     assert state.letgo_debounce_samples == board_constants.LETGO_DEBOUNCE_SAMPLES
     assert state.hold_duration_s == board_constants.HOLD_DURATION_S
@@ -362,15 +424,15 @@ def test_fresh_state_has_default_force_settings(tmp_path):
 
 def test_set_force_settings_persists_across_a_fresh_instance(tmp_path):
     sidecar = _tmp_sidecar(tmp_path)
-    state1 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state1 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     state1.set_force_settings(letgo_velocity_turns_s=0.3, hold_duration_s=1.0)
-    state2 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state2 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     assert state2.letgo_velocity_turns_s == 0.3
     assert state2.hold_duration_s == 1.0
 
 
 def test_set_force_settings_updates_only_given_fields(tmp_path):
-    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     original_ramp_out = state.force_ramp_out_s
     state.set_force_settings(force_ramp_in_s=0.25)
     assert state.force_ramp_in_s == 0.25
@@ -378,7 +440,7 @@ def test_set_force_settings_updates_only_given_fields(tmp_path):
 
 
 def test_set_force_settings_rejects_nonpositive_values(tmp_path):
-    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     with pytest.raises(ValueError):
         state.set_force_settings(letgo_velocity_turns_s=0.0)
     with pytest.raises(ValueError):
@@ -388,13 +450,13 @@ def test_set_force_settings_rejects_nonpositive_values(tmp_path):
 
 
 def test_set_force_settings_rejects_hard_tolerance_below_warning(tmp_path):
-    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     with pytest.raises(ValueError):
         state.set_force_settings(position_guard_warning_turns=0.1, position_guard_hard_turns=0.05)
 
 
 def test_set_force_settings_rejects_out_of_range_filter_alpha(tmp_path):
-    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     with pytest.raises(ValueError):
         state.set_force_settings(isokinetic_velocity_filter_alpha=0.0)
     with pytest.raises(ValueError):
@@ -402,7 +464,7 @@ def test_set_force_settings_rejects_out_of_range_filter_alpha(tmp_path):
 
 
 def test_set_force_settings_rejected_call_does_not_partially_apply(tmp_path):
-    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path))
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
     original = state.letgo_velocity_turns_s
     with pytest.raises(ValueError):
         state.set_force_settings(letgo_velocity_turns_s=0.5, force_ramp_in_s=-1.0)

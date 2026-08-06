@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { createSpoolGeometry } from '../cableGeometry'
+import {
+  createSpoolGeometry,
+  torqueFromForce,
+  correctedTorqueNm,
+  rawTorqueNmForCorrected,
+  forceNFromMassKg,
+  massKgFromForceN,
+} from '../cableGeometry'
 
 // Cross-checks createSpoolGeometry()'s piecewise growth-calibration mirror
 // (train_tab_build_spec.md "calibration overhaul" item 3b) against
@@ -51,5 +58,68 @@ describe('createSpoolGeometry (piecewise growth model)', () => {
     // calibration point; the floor must still hold client-side.
     const shrinking = createSpoolGeometry(0.06, 0.0, [[2.0, 0.363]], 0.005)
     expect(shrinking.rEffAtTurnsDelta(50.0)).toBe(0.005)
+  })
+})
+
+describe('torqueFromForce (items 2/6 -- Testing tab torque-limit unit conversion)', () => {
+  it('is the inverse of forceFromTorque', () => {
+    expect(torqueFromForce(40, 0.04)).toBeCloseTo(1.6, 9)
+  })
+})
+
+describe('correctedTorqueNm / rawTorqueNmForCorrected (items 6/7)', () => {
+  it('is identity at the default (uncalibrated) scale/offset', () => {
+    expect(correctedTorqueNm(0.35)).toBeCloseTo(0.35, 9)
+    expect(rawTorqueNmForCorrected(0.35)).toBeCloseTo(0.35, 9)
+  })
+
+  it('are inverses of each other under a real calibration', () => {
+    const scale = 1.1
+    const offset = 0.05
+    const raw = 0.4
+    const corrected = correctedTorqueNm(raw, scale, offset)
+    expect(rawTorqueNmForCorrected(corrected, scale, offset)).toBeCloseTo(raw, 9)
+  })
+
+  it('rawTorqueNmForCorrected does not divide by zero at scale=0', () => {
+    expect(rawTorqueNmForCorrected(5.0, 0, 1.0)).toBe(0)
+  })
+
+  // Sign-preserving, magnitude-only correction (5 Aug 2026 fix -- mirrors
+  // core/cable/torque_calibration.py's same fix): scale/offset correct the
+  // MAGNITUDE of the reading, direction passes through untouched. Confirms
+  // the JS mirror matches the Python original's corrected behavior.
+  it('correctedTorqueNm preserves the sign of raw and corrects only the magnitude', () => {
+    const scale = 0.5
+    const offset = 1.2
+    const positive = correctedTorqueNm(0.9, scale, offset)
+    const negative = correctedTorqueNm(-0.9, scale, offset)
+    expect(positive).toBeGreaterThan(0)
+    expect(negative).toBeCloseTo(-positive, 9)
+  })
+
+  it('correctedTorqueNm of exactly zero is zero even with a nonzero offset', () => {
+    expect(correctedTorqueNm(0, 0.5, 1.2)).toBe(0)
+  })
+
+  it('rawTorqueNmForCorrected preserves sign and floors magnitude at zero below offset', () => {
+    const scale = 0.5
+    const offset = 1.2
+    expect(rawTorqueNmForCorrected(-2.0, scale, offset)).toBeCloseTo(-rawTorqueNmForCorrected(2.0, scale, offset), 9)
+    // corrected magnitude smaller than offset -> no valid raw magnitude,
+    // floors at 0 (toBeCloseTo, not toBe -- the negative branch legitimately
+    // produces -0, which is numerically 0 but fails Object.is-based toBe)
+    expect(rawTorqueNmForCorrected(0.5, scale, offset)).toBeCloseTo(0, 9)
+    expect(rawTorqueNmForCorrected(-0.5, scale, offset)).toBeCloseTo(0, 9)
+  })
+})
+
+describe('forceNFromMassKg / massKgFromForceN (item 2 -- resistance display unit preference)', () => {
+  it('are inverses of each other', () => {
+    expect(massKgFromForceN(forceNFromMassKg(5.0))).toBeCloseTo(5.0, 9)
+  })
+
+  it('matches the known g=9.81 conversion', () => {
+    expect(forceNFromMassKg(10.0)).toBeCloseTo(98.1, 9)
   })
 })

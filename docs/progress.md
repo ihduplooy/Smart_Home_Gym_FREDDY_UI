@@ -2461,3 +2461,216 @@ than a tab built for controlled cable-load experiments.
       100W rating, extended/hard sessions have not been run yet. Do not run
       extended/hard training sessions until this is checked — open item #4
       stays open for this half.
+
+---
+
+# Sidebar Homing split, live-tunable Testing tab, Setup tab, torque/force calibration — 5 August 2026
+
+Requested as a single 7-item list (numbered 1/2/4/5/6/7 in the original
+message — no item 3), explicitly asking for a simple implementation reusing
+existing patterns rather than new machinery.
+
+## Item 1 — Sidebar: split "Go Home" into "Homing" + "Go Home"
+
+- [x] `DeviceList.jsx`'s single "Go Home" button is now two: **Homing**
+      (fresh re-home — reels in and latches a NEW home reference, no prior
+      home required) and **Go Home** (unchanged — returns to the existing
+      home, no re-latch). Both call the existing `exercise_mode.py`
+      `_apply_home`/`_apply_go_home` actions (`homeExercise()`/
+      `goHomeExercise()`); no backend changes needed.
+
+## Item 2 — Testing tab rebuilt on Control tab's own Position mode
+
+- [x] The session-1 Testing tab redesign (a dedicated `ExperimentMode` with
+      a configure → confirm → energize → immutable-run flow) turned out too
+      rigid in practice — the user wanted Control tab's Position-mode feel
+      instead: change a field, hit Update, see the effect immediately, keep
+      adjusting without stopping. Rather than adapting `ExperimentMode`,
+      the Testing tab now drives Control's existing `mode: "position"`
+      session directly.
+- [x] **Deleted** the entire `core/experiments/` package,
+      `backend/app/experiment_routes.py`, `frontend/src/api/experiments.js`,
+      `frontend/src/hooks/useExperimentTelemetry.js`,
+      `ExperimentConfigForm.jsx`, and their tests — net removal, not a
+      parallel path. Confirmed via `grep -rn` across the whole repo that no
+      references to any of it remain.
+- [x] Rebuilt `TestingTab.jsx` + new `useTestingTelemetry.js`: Known Weight
+      (kg, unchanged), **Move Distance** (relative to current position, m or
+      turns — replaces the old absolute "Target Position from Home"), Move
+      Velocity, and **Torque Limit** with a 3-way unit selector (Nm / N /
+      kg). All four fields are editable while the session is running via an
+      "Update" button, exactly like Control tab's Position mode.
+
+## Item 4 — Safety guard fix: ExerciseMode wasn't respecting the Train guard toggles
+
+- [x] **Bug:** "Session auto-stopped ... Safety stop" kept firing during
+      Go Home/Homing/manual moves even after disabling the corresponding
+      guard toggle in the Train tab. Root cause: `train_home_guard_enforced`/
+      `train_max_extension_enforced` (`core/cable/state.py`) were only ever
+      consulted by `TrainMode.tick()` — `ExerciseMode.tick()`'s own position
+      guard was unconditional by original design ("always on" for the setup
+      session), and the frontend's own text at the time said as much.
+- [x] **Fix:** `ExerciseMode.tick()`'s guard now gates on the same two
+      toggles, combined with OR — disabling *either* toggle turns the guard
+      off entirely for Exercise-mode operations, rather than staying
+      half-enforced. A deliberate simplification vs. `TrainMode`'s fully
+      independent per-side gating (`check_runtime_guard_split`), flagged as
+      such in code; revisit if per-side parity turns out to matter here too.
+      Two new tests added (`test_exercise_mode.py`).
+
+## Item 5 — New "Setup" tab
+
+- [x] The Train tab's "Settings / Startup" block (Homing, Max-extension
+      calibration, Spool calibration, guard toggles) moved — not
+      redesigned — into a new top-level **Setup** tab, positioned between
+      Configuration and Control. `TrainSettingsSection.jsx` +
+      `SpoolGrowthCalibration.jsx` + `SpoolModelDiagnostics.jsx` moved via
+      `git mv` (history preserved) into `components/tabs/setup/`, with a new
+      thin `SetupTab.jsx` wrapper polling `/api/exercise/status`. Dropped the
+      now-unneeded `trainSessionRunning` prop (no longer coupled to Train's
+      own running state). Train tab now contains only training-related
+      functionality.
+
+## Items 6 & 7 — Torque/force calibration, with full developer visibility
+
+- [x] New `core/cable/torque_calibration.py` (`TorqueCalibrationPoint`,
+      `fit_linear`, `TorqueCalibration`) — corrects the fixed-
+      `MOTOR_TORQUE_CONSTANT` torque estimate against experimentally
+      recorded points (hang a known mass, record the torque it actually took
+      to hold): 0 points → identity, 1 point → scale-only, 2+ points →
+      ordinary least squares (scale + offset). Iterative and additive, not a
+      one-shot automatic calibration — matches the user's explicit ask.
+      Persisted to a new `config/torque_calibration.json` sidecar, same
+      pattern as the existing spool-growth calibration.
+- [x] Applied **everywhere** torque/force conversions already happen (same
+      "everywhere, not just one tab" precedent as the earlier `r_eff`
+      fix): `ExerciseMode`'s `estimated_force_n`, `TrainMode`'s and
+      `ExerciseMode`'s force→torque commands, and all calibration-hold
+      torques. New routes `POST /api/exercise/record_torque_calibration_point`
+      / `clear_torque_calibration`.
+- [x] **Full developer visibility (item 7):** `_cable_status_dict()` gained
+      a `torque_model` block (scale, offset, equation string, every recorded
+      point, the underlying `motor_torque_constant_nm_per_a`). New
+      `TorqueModelDiagnostics.jsx` — collapsed-by-default "Developer
+      diagnostics" panel, same convention as the spool-growth calibration's
+      own panel — shows the fitted equation with numbers substituted in and
+      a plain-text walkthrough of current → torque → force → mass.
+- [x] Verified: full backend pytest suite green (410 passed at the time),
+      `npx eslint`/`npm run build` clean.
+- [ ] **Not yet verified against a real known mass on the bench** at the
+      time this round shipped — see the follow-up round below, which used
+      an actual bench screenshot (2 recorded points, 5kg/10kg) to check the
+      math, and found a real bug in the process (sign handling — see below).
+
+---
+
+# Calibration coverage audit, resistance display unit (N/kg), torque sign fix — 5 August 2026
+
+Follow-up to the round above, triggered by the user attaching a real bench
+screenshot of the Testing tab mid-calibration (2 points recorded: 5kg → raw
+-0.9456 Nm, 10kg → raw -4.6892 Nm; fitted model
+`corrected = -0.511925 * raw + 1.284924`) and asking three things: (1) is
+this calibration actually used everywhere in the app, (2) can resistance be
+displayed/entered in kg instead of N, (3) why is torque sometimes negative
+when it's presented as "resistance."
+
+## Screenshot math check
+
+- [x] Manually verified the fit against the two recorded points —
+      `-0.511925 * -0.9456 + 1.284924 = 1.7690` (vs expected
+      `5 * 9.81 * 0.0361 = 1.7707`) and the same for the 10kg point — the
+      fit itself was arithmetically correct (2 points on a line fit
+      exactly). The negative scale was the real problem (see below), not a
+      fitting bug.
+
+## Item 1 — Calibration coverage: Train/Testing had it, Control tab didn't
+
+- [x] **Found:** `core/control/modes.py`'s generic `PositionMode`/
+      `TorqueMode` (used directly by the Control tab, and — via the item-2
+      redesign above — by the Testing tab too) have no `CableState`
+      awareness at all. The Testing tab already converts client-side before
+      sending (documented in its own code), but the **Control tab did not**
+      — its "Torque (est.)" stat and its Torque-mode/Position-mode-Torque-
+      Limit targets went straight to/from raw motor-constant Nm, bypassing
+      the calibrated model entirely. Train/Exercise modes were already
+      correct (server-side, both directions) from the round above.
+- [x] **Fixed:** `useControlTelemetry.js` now also polls
+      `/api/exercise/status` for the `cable` calibration snapshot (same
+      pattern `useTestingTelemetry.js` already used) and stamps every
+      sample with a calibrated `torque_est_corrected` field. `ControlTab.jsx`
+      displays the calibrated value by default (raw kept as an off-by-default
+      secondary chart line), and converts both the Torque-mode target and
+      the Position-mode Torque Limit through the calibration's inverse
+      correction before sending — calibration is now the single source of
+      truth everywhere in the app that reasons about torque/force.
+
+## Item 2 — Resistance display unit preference (N vs kg)
+
+- [x] New persisted `CableState` setting, `resistance_display_unit_kg`
+      (default `False` = Newtons), same `_PERSISTED_DEFAULTS`/
+      `set_train_settings()` mechanism as the guard toggles — set via a new
+      toggle in the **Setup tab** ("Display resistance in kilograms"),
+      surfaced through both `/api/train/update_settings` and
+      `_cable_status_dict()` (so Control/Testing can read it too, though
+      only the Train tab's profile builder consumes it so far).
+- [x] `TrainProfileEditor.jsx`'s resistance-profile builder now shows/
+      accepts every force field (constant/linear/bell shapes, the live
+      preview chart) in the selected unit — conversion happens only at this
+      component's own input/output boundary (`buildProfilePayload`/
+      `segmentsFromPayload`/the preview chart's data mapping); the wire
+      format and `core/cable/train_profiles.py` are unchanged, always
+      Newtons. Deliberately **not** extended to `TrainPositionChart.jsx`
+      (the separate Planned-vs-Actual diagnostic overlay, which already has
+      its own manual per-curve scale-factor controls — a developer view,
+      out of scope for this user-facing preference) or to the Testing tab's
+      existing independent Nm/N/kg Torque Limit selector (a different,
+      already-flexible per-field control, not this global preference).
+
+## Item 3 — Torque sign: a real calibration-logic bug, not just display
+
+- [x] **Bug found:** `core/cable/torque_calibration.py`'s `fit_linear` fit
+      the SIGNED `raw_torque_nm` against the always-positive
+      `expected_torque_nm` (a known weight is never negative). For this
+      bench's data (both calibration holds recorded a negative raw
+      reading), that produced an exact-fitting but physically nonsensical
+      negative `scale` — it happened to reproduce both points, but would
+      have silently flipped sign on any raw reading in the other direction
+      (a different exercise, the other side of a hold). This is exactly
+      what produced the "-0.7 Nm for a 5kg equivalent" symptom the user
+      noticed in the Testing tab's Torque Limit field: `scale` was negative,
+      so converting a positive real-world torque limit back to a raw
+      command came out negative.
+- [x] **Fixed at the conversion-logic level, not just display:** `fit_linear`
+      now fits against `|raw_torque_nm|` (magnitude) vs `expected_torque_nm`
+      (also magnitude) — `scale`/`offset` now describe how big the torque
+      really is, never which way it's pointing. `corrected_torque_nm()`/
+      `raw_torque_nm_for_corrected()` split the sign off before correcting
+      the magnitude and reapply it unchanged afterward, so direction (still
+      meaningful for control/debugging) is fully preserved everywhere it's
+      needed. Mirrored exactly in `frontend/src/utils/cableGeometry.js`.
+- [x] **Display fix on top:** the Testing tab's main "Measured torque"/
+      "Measured force" stats (the user-facing "how much resistance" numbers)
+      now show `Math.abs(...)` — sign is direction, not resistance
+      magnitude, and resistance itself isn't negative. Left signed in the
+      Developer diagnostics panel and the calibration points table (the
+      raw, as-recorded measurement is exactly what belongs there).
+      `TorqueModelDiagnostics.jsx`'s equation walkthrough updated to
+      describe the sign/magnitude split explicitly.
+- [x] New tests: `core/tests/test_torque_calibration.py` (magnitude-fit
+      recovers a positive scale from the real negative-raw bench data;
+      sign-preservation and zero/near-zero edge cases for both correction
+      directions) and matching cases in `cableGeometry.test.js`.
+
+## Verified
+
+- [x] Backend: `.venv/bin/python -m pytest core/tests -q` — 415 passed.
+- [x] Frontend: `npx vitest run` — 82 passed, 2 skipped (unchanged
+      baseline); `npx eslint src/` — clean (one pre-existing, unrelated
+      warning in `AxisTelemetryCharts.jsx`, part of the user's own
+      in-progress work, untouched here); `npm run build` — succeeds.
+- [ ] **Not yet re-verified on the bench with the sign fix applied** — the
+      screenshot that prompted this round predates the fix. The math above
+      was checked by hand against that screenshot's numbers, but a fresh
+      calibration run (with the corrected model) and a check of Control
+      tab's now-calibrated Torque display/targets on real hardware are
+      still open for the next bench session.

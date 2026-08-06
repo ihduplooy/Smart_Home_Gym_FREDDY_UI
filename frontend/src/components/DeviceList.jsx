@@ -24,10 +24,10 @@ import { useMotorControl } from '../hooks/useMotorControl'
 import { getAxisStateName, getAxisStateDescription } from '../utils/configEnums'
 import { getErrorDescription, getErrorColor, isErrorCritical, describeErrors } from '../utils/odriveErrors'
 import { troubleshootingFor } from '../utils/troubleshooting'
-import { lengthFromTurnsDelta } from '../utils/cableGeometry'
+import { createSpoolGeometry } from '../utils/cableGeometry'
 import ErrorTroubleshootingModal from './modals/ErrorTroubleshootingModal'
 import * as backend from '../api/backend'
-import { getExerciseStatus, startExerciseSession, moveCable, stopExercise } from '../api/exercise'
+import { getExerciseStatus, startExerciseSession, homeExercise, goHomeExercise, stopExercise } from '../api/exercise'
 import '../styles/DeviceList.css'
 
 // Slow poll, just to gate/inform the "Go Home" jog button below -- this
@@ -121,6 +121,7 @@ const DeviceList = () => {
   const [errorsExpanded, setErrorsExpanded] = useState(false)
   const [cableStatus, setCableStatus] = useState(null)
   const [goHomeBusy, setGoHomeBusy] = useState(false)
+  const [homingBusy, setHomingBusy] = useState(false)
 
   // Slow background poll (see CABLE_STATUS_POLL_MS) so the "Go Home" button
   // below knows is_homed/r0/k/current position without needing a Train or
@@ -234,13 +235,11 @@ const DeviceList = () => {
 
   // Jog the cable back to its home position from anywhere in the app --
   // requested so a cable left "out" mid-task doesn't require reopening the
-  // Train tab's Settings/Startup section and re-homing. Reuses the existing
-  // Exercise "move" action (a plain position move via the ODrive's own
-  // trapezoidal-trajectory controller, core/cable/exercise_mode.py's
-  // _tick_moving) which auto-completes on arrival by position tolerance --
-  // it never touches the homing current threshold, so there's no risk of it
-  // mistaking "arrived home" for "cable went taut" the way actual homing
-  // does. Arms a session first if none is running; releases it again once
+  // Train tab's Settings/Startup section and re-homing. Calls the same
+  // current-threshold "go_home" action the Train tab's own Go Home button
+  // uses (core/cable/exercise_mode.py's _apply_go_home) -- one "Go Home"
+  // behavior everywhere, not a separate plain position-move like this used
+  // to do. Arms a session first if none is running; releases it again once
   // the cable arrives so this doesn't leave a lingering Exercise session
   // behind for the Train tab's Settings/Startup to trip over.
   const handleGoHome = useCallback(async () => {
@@ -254,13 +253,13 @@ const DeviceList = () => {
       if (!(s.control.running && s.control.mode === 'exercise')) {
         await startExerciseSession()
       }
-      await moveCable(0, s.cable.homing_velocity_turns_s)
+      await goHomeExercise()
       for (let i = 0; i < 300; i++) {
         await new Promise((r) => setTimeout(r, 200))
         s = await getExerciseStatus()
         setCableStatus(s)
         if (!(s.control.running && s.control.mode === 'exercise')) break
-        if (s.control.extra?.action !== 'moving') break
+        if (s.control.extra?.action !== 'homing') break
       }
       if (s.control.running && s.control.mode === 'exercise') await stopExercise()
       setCableStatus(await getExerciseStatus())
@@ -269,6 +268,41 @@ const DeviceList = () => {
       toast({ title: 'Go Home failed', description: e.message, status: 'error', duration: 5000 })
     } finally {
       setGoHomeBusy(false)
+    }
+  }, [toast])
+
+  // Perform a fresh Home (reel in until current threshold, latch a NEW home
+  // reference) from anywhere in the app -- so the very first home of a
+  // session doesn't require opening the Setup tab. Same
+  // arm-session/poll/release shape as handleGoHome above, just the "home"
+  // action (core/cable/exercise_mode.py's _apply_home) instead of
+  // "go_home" -- and, unlike Go Home, doesn't require an existing home
+  // first (that's the point).
+  const handleHoming = useCallback(async () => {
+    setHomingBusy(true)
+    try {
+      let s = await getExerciseStatus()
+      if (s.control.running && s.control.mode !== 'exercise') {
+        throw new Error(`A ${s.control.mode} session is running — stop it first.`)
+      }
+      if (!(s.control.running && s.control.mode === 'exercise')) {
+        await startExerciseSession()
+      }
+      await homeExercise()
+      for (let i = 0; i < 300; i++) {
+        await new Promise((r) => setTimeout(r, 200))
+        s = await getExerciseStatus()
+        setCableStatus(s)
+        if (!(s.control.running && s.control.mode === 'exercise')) break
+        if (s.control.extra?.action !== 'homing') break
+      }
+      if (s.control.running && s.control.mode === 'exercise') await stopExercise()
+      setCableStatus(await getExerciseStatus())
+      toast({ title: 'Homed', status: 'success', duration: 2000 })
+    } catch (e) {
+      toast({ title: 'Homing failed', description: e.message, status: 'error', duration: 5000 })
+    } finally {
+      setHomingBusy(false)
     }
   }, [toast])
 
@@ -302,16 +336,33 @@ const DeviceList = () => {
 
   const isHomed = cableStatus?.cable?.is_homed ?? false
   const anotherModeRunning = Boolean(cableStatus?.control?.running && cableStatus?.control?.mode !== 'exercise')
-  const cablePositionTurns = cableStatus?.cable?.cable_position_turns
+  const homeTurns = cableStatus?.cable?.home_turns
+  const r0 = cableStatus?.cable?.r0
+  // Computed from the fast, always-on `live.encoder_pos` (150ms, same
+  // WebSocket telemetry Encoder Pos below reads) combined with the
+  // slow-polled calibration constants above -- NOT from
+  // cableStatus.cable.cable_position_turns, which is only as fresh as the
+  // 2s cableStatus poll and was the reason this lagged Train tab's own
+  // Cable Position (which recomputes from its own fast poll). Same
+  // createSpoolGeometry/lengthFromTurnsDelta growth-aware conversion
+  // useTrainTelemetry.js already uses, so both stay in sync.
   const cablePositionM =
-    isHomed && cablePositionTurns != null && cableStatus?.cable?.r0
-      ? lengthFromTurnsDelta(cablePositionTurns, cableStatus.cable.r0, cableStatus.cable.k ?? 0)
+    isHomed && homeTurns != null && r0
+      ? createSpoolGeometry(
+          r0,
+          cableStatus.cable.k ?? 0,
+          (cableStatus.cable.spool_model?.growth_points ?? []).map((p) => [p.turns_from_home, p.length_m]),
+          cableStatus.cable.spool_model?.min_effective_radius_m ?? 0
+        ).lengthFromTurnsDelta(live.encoder_pos - homeTurns)
       : null
   const goHomeDisabledReason = !isHomed
-    ? 'Home the cable first (Train tab → Settings/Startup).'
+    ? 'Home the cable first (Homing button below, or the Setup tab).'
     : anotherModeRunning
       ? `A ${cableStatus.control.mode} session is running — stop it first.`
       : 'Jog the cable back to its home position.'
+  const homingDisabledReason = anotherModeRunning
+    ? `A ${cableStatus?.control?.mode} session is running — stop it first.`
+    : 'Reel in and set this as the new home position.'
 
   return (
     <Box className="device-list">
@@ -392,31 +443,51 @@ const DeviceList = () => {
                     </VStack>
                   </HStack>
                 </Box>
-                <HStack justify="space-between">
-                  <Text fontSize="sm" color="gray.300">Encoder Pos:</Text>
-                  <Text fontSize="sm" fontWeight="bold">{live.encoder_pos.toFixed(2)}</Text>
-                </HStack>
-                <HStack justify="space-between">
-                  <Text fontSize="sm" color="gray.300">Cable Position:</Text>
-                  <Text fontSize="sm" fontWeight="bold">{cablePositionM != null ? `${cablePositionM.toFixed(3)} m` : '—'}</Text>
-                </HStack>
+                <Box>
+                  <Text fontSize="sm" color="gray.300" mb={1}>Position:</Text>
+                  <HStack justify="space-between">
+                    <VStack spacing={0} align="start">
+                      <Text fontSize="2xs" color="gray.500">Encoder</Text>
+                      <Text fontSize="sm" fontWeight="bold">{live.encoder_pos.toFixed(2)}</Text>
+                    </VStack>
+                    <VStack spacing={0} align="end">
+                      <Text fontSize="2xs" color="gray.500">Cable</Text>
+                      <Text fontSize="sm" fontWeight="bold">{cablePositionM != null ? `${cablePositionM.toFixed(3)} m` : '—'}</Text>
+                    </VStack>
+                  </HStack>
+                </Box>
               </VStack>
 
-              <Tooltip label={goHomeDisabledReason}>
-                <Button
-                  width="100%"
-                  size="sm"
-                  variant="outline"
-                  colorScheme="odrive"
-                  mt={3}
-                  onClick={handleGoHome}
-                  isLoading={goHomeBusy}
-                  loadingText="Going home…"
-                  isDisabled={!isHomed || anotherModeRunning}
-                >
-                  Go Home
-                </Button>
-              </Tooltip>
+              <HStack mt={3} spacing={2}>
+                <Tooltip label={homingDisabledReason}>
+                  <Button
+                    flex={1}
+                    size="sm"
+                    variant="outline"
+                    colorScheme="odrive"
+                    onClick={handleHoming}
+                    isLoading={homingBusy}
+                    loadingText="Homing…"
+                    isDisabled={anotherModeRunning}
+                  >
+                    Homing
+                  </Button>
+                </Tooltip>
+                <Tooltip label={goHomeDisabledReason}>
+                  <Button
+                    flex={1}
+                    size="sm"
+                    variant="outline"
+                    colorScheme="odrive"
+                    onClick={handleGoHome}
+                    isLoading={goHomeBusy}
+                    loadingText="Going home…"
+                    isDisabled={!isHomed || anotherModeRunning}
+                  >
+                    Go Home
+                  </Button>
+                </Tooltip>
+              </HStack>
 
               {hasAnyErrors && (
                 <Button size="xs" colorScheme="red" variant="outline" width="100%" mt={3} onClick={clearErrors}>

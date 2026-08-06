@@ -7,6 +7,19 @@ import { AddIcon, DeleteIcon } from '@chakra-ui/icons'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts'
 import { previewTrainProfile } from '../../../api/train'
 import { listTrainProfiles, saveTrainProfile, deleteTrainProfile } from '../../../utils/trainProfilesManager'
+import { forceNFromMassKg, massKgFromForceN } from '../../../utils/cableGeometry'
+
+// Resistance display unit preference (item 2, 5 Aug 2026, set in the Setup
+// tab) -- force is always stored/evaluated in Newtons server-side
+// (core/cable/train_profiles.py); these two convert at this component's own
+// input/output boundary only, same "convert at the edge, keep the core
+// unchanged" precedent as the Testing tab's Torque Limit unit selector.
+// Every params key that carries a force value ends in "force_n" (force_n,
+// start_force_n, end_force_n, peak_force_n) -- peak_pos_m is the only
+// non-force param key, and is deliberately left untouched by both.
+const isForceKey = (key) => key.endsWith('force_n')
+const displayForceFromN = (n, resistanceUnitKg) => (resistanceUnitKg ? massKgFromForceN(n) : n)
+const nFromDisplayForce = (v, resistanceUnitKg) => (resistanceUnitKg ? forceNFromMassKg(v) : v)
 
 const SHAPES = [
   { value: 'constant', label: 'Constant' },
@@ -21,13 +34,14 @@ let nextId = 1
 // TrainSegment before the user gets a chance to hand-edit either boundary.
 const MIN_SPLITTABLE_SPAN_M = 1e-6
 
-function defaultSegment(startPosM, startForce) {
+function defaultSegment(startPosM, startForce, resistanceUnitKg) {
+  const fallback = startForce ?? displayForceFromN(50, resistanceUnitKg)
   return {
     id: nextId++,
     start_pos_m: String(startPosM),
     end_pos_m: String(startPosM + 0.3),
     shape: 'constant',
-    params: { force_n: String(startForce ?? 50) },
+    params: { force_n: String(fallback) },
   }
 }
 
@@ -44,14 +58,15 @@ function endForceOf(segment) {
   return Number.isFinite(n) ? n : null
 }
 
-function paramFields(shape) {
-  if (shape === 'constant') return [{ key: 'force_n', label: 'Force', unit: 'N' }]
-  if (shape === 'linear') return [{ key: 'start_force_n', label: 'Start force', unit: 'N' }, { key: 'end_force_n', label: 'End force', unit: 'N' }]
+function paramFields(shape, resistanceUnitKg) {
+  const forceUnit = resistanceUnitKg ? 'kg' : 'N'
+  if (shape === 'constant') return [{ key: 'force_n', label: 'Force', unit: forceUnit }]
+  if (shape === 'linear') return [{ key: 'start_force_n', label: 'Start force', unit: forceUnit }, { key: 'end_force_n', label: 'End force', unit: forceUnit }]
   return [
     { key: 'peak_pos_m', label: 'Peak position', unit: 'm' },
-    { key: 'peak_force_n', label: 'Peak force', unit: 'N' },
-    { key: 'start_force_n', label: 'Start force', unit: 'N' },
-    { key: 'end_force_n', label: 'End force', unit: 'N' },
+    { key: 'peak_force_n', label: 'Peak force', unit: forceUnit },
+    { key: 'start_force_n', label: 'Start force', unit: forceUnit },
+    { key: 'end_force_n', label: 'End force', unit: forceUnit },
   ]
 }
 
@@ -61,32 +76,42 @@ function paramFields(shape) {
 // keeps newly-added constant segments continuous. Falls back to the
 // original hardcoded defaults when there's no previous segment (or its
 // value isn't numeric yet).
-function defaultParams(shape, startForce) {
-  if (shape === 'constant') return { force_n: String(startForce ?? 50) }
-  if (shape === 'linear') return { start_force_n: String(startForce ?? 0), end_force_n: '80' }
+function defaultParams(shape, startForce, resistanceUnitKg) {
+  const start = String(startForce ?? displayForceFromN(0, resistanceUnitKg))
+  const eighty = String(displayForceFromN(80, resistanceUnitKg))
+  if (shape === 'constant') return { force_n: String(startForce ?? displayForceFromN(50, resistanceUnitKg)) }
+  if (shape === 'linear') return { start_force_n: start, end_force_n: eighty }
   // end defaults to 0 -- the original "bell returns to zero at its far
   // edge" shape -- but can be raised independently (e.g. 3 -> 10 -> 4).
-  return { peak_pos_m: '0.5', peak_force_n: '80', start_force_n: String(startForce ?? 0), end_force_n: '0' }
+  return { peak_pos_m: '0.5', peak_force_n: eighty, start_force_n: start, end_force_n: String(displayForceFromN(0, resistanceUnitKg)) }
 }
 
 // Inverse of buildProfilePayload's segment shape: turns a saved/loaded
-// {start_pos_m, end_pos_m, shape, params} (numeric) back into this editor's
-// internal text-field segment state, with fresh local ids.
-function segmentsFromPayload(payloadSegments) {
+// {start_pos_m, end_pos_m, shape, params} (numeric, always Newtons) back
+// into this editor's internal text-field segment state, with fresh local
+// ids. Force-valued params are converted to the current display unit here
+// (item 2) -- a profile saved while in kg mode and loaded back in N mode
+// (or vice versa) should still show the SAME physical resistance, in
+// whichever unit is currently selected, not the raw number as-saved.
+function segmentsFromPayload(payloadSegments, resistanceUnitKg) {
   return payloadSegments.map((s) => ({
     id: nextId++,
     start_pos_m: String(s.start_pos_m),
     end_pos_m: String(s.end_pos_m),
     shape: s.shape,
-    params: Object.fromEntries(Object.entries(s.params).map(([k, v]) => [k, String(v)])),
+    params: Object.fromEntries(
+      Object.entries(s.params).map(([k, v]) => [k, String(isForceKey(k) ? displayForceFromN(v, resistanceUnitKg) : v)])
+    ),
   }))
 }
 
 // Parses the editor's text-field segments into the {name, segments}
 // TrainProfile.from_dict() shape, or throws with a human-readable message —
 // validation itself stays server-side (core/cable/train_profiles.py); this
-// only checks values are numeric enough to send.
-function buildProfilePayload(name, segments) {
+// only checks values are numeric enough to send. Force-valued params are
+// converted from the current display unit back to Newtons here (item 2) --
+// the wire format/server are always Newtons regardless of what's selected.
+function buildProfilePayload(name, segments, resistanceUnitKg) {
   return {
     name,
     segments: segments.map((seg) => {
@@ -99,16 +124,16 @@ function buildProfilePayload(name, segments) {
       for (const [key, value] of Object.entries(seg.params)) {
         const n = Number(value)
         if (!Number.isFinite(n)) throw new Error(`Segment parameter '${key}' must be a number`)
-        params[key] = n
+        params[key] = isForceKey(key) ? nFromDisplayForce(n, resistanceUnitKg) : n
       }
       return { start_pos_m: start, end_pos_m: end, shape: seg.shape, params }
     }),
   }
 }
 
-const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRangeM }) => {
+const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRangeM, resistanceUnitKg = false }) => {
   const [name, setName] = useState('my profile')
-  const [segments, setSegments] = useState(() => [defaultSegment(0)])
+  const [segments, setSegments] = useState(() => [defaultSegment(0, null, resistanceUnitKg)])
   const [buildError, setBuildError] = useState(null)
   const [previewPoints, setPreviewPoints] = useState([])
   const [previewError, setPreviewError] = useState(null)
@@ -119,6 +144,14 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
   const saveMessageTimer = useRef(null)
 
   const domain = useMemo(() => positionRangeM ?? [0, 1], [positionRangeM])
+  // previewPoints comes back from the backend in Newtons (core/cable/
+  // train_profiles.py never changes unit) -- converted to the current
+  // display unit here, at the chart's own boundary, same as every other
+  // force value in this component (item 2).
+  const chartPoints = useMemo(
+    () => previewPoints.map((p) => ({ ...p, force_n: displayForceFromN(p.force_n, resistanceUnitKg) })),
+    [previewPoints, resistanceUnitKg]
+  )
 
   const updateSegment = (id, patch) => {
     setSegments((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)))
@@ -131,14 +164,14 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
       const index = prev.findIndex((s) => s.id === id)
       const prevSegment = index > 0 ? prev[index - 1] : null
       const startForce = prevSegment ? endForceOf(prevSegment) : null
-      return prev.map((s) => (s.id === id ? { ...s, shape, params: defaultParams(shape, startForce) } : s))
+      return prev.map((s) => (s.id === id ? { ...s, shape, params: defaultParams(shape, startForce, resistanceUnitKg) } : s))
     })
   }
   const addSegment = () => {
     const prevSegment = segments.length ? segments[segments.length - 1] : null
     const lastEnd = prevSegment ? Number(prevSegment.end_pos_m) || 0 : 0
     const prevEndForce = prevSegment ? endForceOf(prevSegment) : null
-    setSegments((prev) => [...prev, defaultSegment(lastEnd, prevEndForce)])
+    setSegments((prev) => [...prev, defaultSegment(lastEnd, prevEndForce, resistanceUnitKg)])
   }
   const removeSegment = (id) => setSegments((prev) => prev.filter((s) => s.id !== id))
 
@@ -185,7 +218,7 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(async () => {
       try {
-        const payload = buildProfilePayload(name, segments)
+        const payload = buildProfilePayload(name, segments, resistanceUnitKg)
         setBuildError(null)
         const { points } = await previewTrainProfile(payload, domain, 150)
         setPreviewPoints(points)
@@ -197,11 +230,11 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
       }
     }, 300)
     return () => clearTimeout(debounceRef.current)
-  }, [name, segments, domain])
+  }, [name, segments, domain, resistanceUnitKg])
 
   const handleStart = () => {
     try {
-      const payload = buildProfilePayload(name, segments)
+      const payload = buildProfilePayload(name, segments, resistanceUnitKg)
       setBuildError(null)
       onStart(payload)
     } catch (e) {
@@ -211,7 +244,7 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
 
   const handleApply = () => {
     try {
-      const payload = buildProfilePayload(name, segments)
+      const payload = buildProfilePayload(name, segments, resistanceUnitKg)
       setBuildError(null)
       onApply(payload)
     } catch (e) {
@@ -221,10 +254,12 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
 
   // Save/load named profiles (localStorage, utils/trainProfilesManager.js) --
   // requested so a segment layout built here can be reused across sessions
-  // instead of re-typing it every time.
+  // instead of re-typing it every time. Saved/loaded profiles are always
+  // Newtons on disk (buildProfilePayload/segmentsFromPayload's own doc
+  // comments) regardless of which unit was selected when saved.
   const handleSaveProfile = () => {
     try {
-      const payload = buildProfilePayload(name, segments)
+      const payload = buildProfilePayload(name, segments, resistanceUnitKg)
       setBuildError(null)
       const updated = saveTrainProfile(payload)
       setSavedProfiles(updated)
@@ -241,7 +276,7 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
     const profile = savedProfiles.find((p) => p.name === loadSelection)
     if (!profile) return
     setName(profile.name)
-    setSegments(segmentsFromPayload(profile.segments))
+    setSegments(segmentsFromPayload(profile.segments, resistanceUnitKg))
     setBuildError(null)
   }
 
@@ -360,7 +395,7 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
                       {SHAPES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                     </Select>
                   </Box>
-                  {paramFields(seg.shape).map((f) => (
+                  {paramFields(seg.shape, resistanceUnitKg).map((f) => (
                     <Box key={f.key}>
                       <Text fontSize="xs" color="gray.400" mb={1}>{f.label}</Text>
                       <InputGroup size="sm" w="110px">
@@ -388,7 +423,7 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
             <Text fontSize="xs" color="gray.400" mb={1}>Live preview (draft, not yet applied)</Text>
             <Box h="160px" bg="gray.900" borderRadius="md" p={2}>
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={previewPoints} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+                <LineChart data={chartPoints} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                   <XAxis
                     dataKey="position_m"
@@ -401,7 +436,7 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
                   <YAxis stroke="#9CA3AF" tick={{ fill: '#9CA3AF', fontSize: 10 }} domain={[0, 'auto']} width={40} />
                   <RechartsTooltip
                     contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #374151', borderRadius: '6px', color: '#F9FAFB', fontSize: '11px' }}
-                    formatter={(v) => [`${Number(v).toFixed(2)} N`, 'force']}
+                    formatter={(v) => [`${Number(v).toFixed(2)} ${resistanceUnitKg ? 'kg' : 'N'}`, 'force']}
                   />
                   <Line type="linear" dataKey="force_n" stroke="#F6E05E" strokeWidth={2} dot={false} isAnimationActive={false} />
                 </LineChart>

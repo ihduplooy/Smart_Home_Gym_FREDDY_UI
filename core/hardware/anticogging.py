@@ -1,6 +1,6 @@
 """Anti-cogging calibration — a maintenance/calibration action, deliberately
-separate from ControlSession's velocity/torque/position/profile/experiment
-modes (core/control/modes.py) and from core/experiments/. Those all model a
+separate from ControlSession's velocity/torque/position/profile/train/
+exercise modes (core/control/modes.py, core/cable/). Those all model a
 continuous per-tick control loop; this is a one-shot ODrive-firmware-driven
 routine (the motor spins through ~1 turn autonomously once
 `start_anticogging_calibration()` is called — nothing here commands it tick

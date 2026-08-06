@@ -76,11 +76,11 @@ def _sample(t, position, velocity=0.0, current_iq=0.0, torque_est=0.0):
 
 
 def _mode(tmp_path):
-    return TrainMode(CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json"))
+    return TrainMode(CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json", torque_calibration_sidecar_path=tmp_path / "torque_calibration.json"))
 
 
 def _homed_mode(tmp_path, home=0.0, max_turns=None):
-    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json")
+    cable_state = CableState(sidecar_path=tmp_path / "spool_calibration.json", growth_sidecar_path=tmp_path / "spool_growth_calibration.json", torque_calibration_sidecar_path=tmp_path / "torque_calibration.json")
     cable_state.latch_home(home)
     if max_turns is not None:
         cable_state.set_max(marked_turns=max_turns, enforced_turns=max_turns)
@@ -219,6 +219,31 @@ def test_tick_commands_torque_at_effective_radius_not_bare_r0(tmp_path):
     wrong_torque_at_bare_r0 = force_to_torque(extra["target_force_n"], r0=m.cable_state.r0)
     assert hw.torque_target == pytest.approx(-CABLE_SIGN * expected_torque)
     assert hw.torque_target != pytest.approx(-CABLE_SIGN * wrong_torque_at_bare_r0)
+
+
+def test_tick_commands_torque_through_torque_calibration_correction(tmp_path):
+    """Items 6/7: once a torque calibration is recorded, the raw Nm value
+    actually sent to hardware must be the INVERSE-corrected one -- so the
+    real, physical torque delivered matches the calibrated real-world
+    relationship, not the raw motor-constant estimate."""
+    m = _homed_mode(tmp_path)
+    m.cable_state.add_torque_calibration_point(known_weight_kg=5.0, raw_torque_nm=0.9, position_turns=0.0)
+    assert m.cable_state.torque_calibration.scale != pytest.approx(1.0)  # sanity: a real correction exists
+
+    hw = RecordingHardware()
+    profile = TrainProfile(segments=[TrainSegment(0.0, 1.0, "constant", {"force_n": 40.0})])
+    _run(m, hw, profile)
+
+    hw.sample = _sample(t=1 / 50, position=0.2)
+    extra = m.tick(hw, hw.sample)
+
+    real_torque_nm = force_to_torque(extra["target_force_n"], r0=m.cable_state.r0)
+    raw_torque_nm = m.cable_state.raw_torque_nm_for_corrected(real_torque_nm)
+    assert raw_torque_nm != pytest.approx(real_torque_nm)  # sanity: correction actually changes something
+    assert hw.torque_target == pytest.approx(-CABLE_SIGN * raw_torque_nm)
+    # extra still reports the REAL torque, not the raw command -- that's
+    # what's meaningful to a human reading it back.
+    assert extra["commanded_torque_nm"] == pytest.approx(real_torque_nm)
 
 
 def test_tick_torque_conversion_is_noop_at_default_k(tmp_path):

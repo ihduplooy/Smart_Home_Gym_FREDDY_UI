@@ -500,25 +500,6 @@ MAX_EXTENSION_FORCE_TAPER_M = 0.15  # Starts well before the enforced limit
                                     # ease-off rather than a last-moment
                                     # flinch.
 
-# --------------------------------------------------------------------------
-# Testing tab (Testing tab Build Spec §2.1) — persisted, live-adjustable
-# CableState defaults (same _PERSISTED_DEFAULTS pattern as k/homing/force/
-# train settings above; see core/cable/state.py). Every one of these is a
-# per-run ExperimentConfig field's *default* -- editing the persisted value
-# changes what a future run's config form pre-fills, never a running
-# experiment (config is snapshotted at configure() time). All untested
-# placeholders pending the first live bench session with a real weight
-# attached, same "flag it, don't guess, verify at the bench" treatment as
-# every other first-pass tuning constant in this file.
-# --------------------------------------------------------------------------
-TEST_INITIAL_TORQUE_NM_DEFAULT = 0.1  # small, safe starting torque command
-TEST_TORQUE_RAMP_RATE_NM_PER_S_DEFAULT = 0.05  # slow enough to watch by eye
-TEST_MOVEMENT_THRESHOLD_M_PER_S_DEFAULT = 0.01  # |v| above this = "cable moving"
-TEST_HOLD_DEADBAND_M_DEFAULT = 0.005  # 5mm -- how close to target before HOLDING
-TEST_HOLD_GAIN_DEFAULT = 5.0  # Nm per metre of position error (proportional only, v1)
-TEST_MAX_TORQUE_NM_DEFAULT = 2.0  # hard ceiling -- abort if commanded torque exceeds this
-TEST_MAX_DURATION_S_DEFAULT = 60.0  # experiment-level timeout safety net
-
 # Sim-only placeholder bus voltage (Session 2's sim_hw.py has no real DC bus
 # to read) -- matches the mock's own vbus_voltage seed
 # (backend/app/mock_odrive.py), not a measured value.
@@ -555,6 +536,16 @@ TRAIN_TELEMETRY_BUFFER_S = 90.0  # Client-side rolling telemetry buffer
                                  # sample *age*, not point count -- see
                                  # docs/decisions.md ("Train tab" entry) for
                                  # why MiniChart's buffer couldn't do this.
+RESISTANCE_DISPLAY_UNIT_KG_DEFAULT = False  # False = Newtons, True = kg
+                                            # equivalent (item 2, 5 Aug 2026):
+                                            # a user-facing display/entry
+                                            # preference only -- resistance
+                                            # profiles (core/cable/
+                                            # train_profiles.py) always store
+                                            # and evaluate force_n in Newtons
+                                            # regardless of this toggle; the
+                                            # conversion happens client-side,
+                                            # at the UI boundary.
 
 # --------------------------------------------------------------------------
 # Axis — axis0 only; axis1 is a ghost node
@@ -731,15 +722,6 @@ def as_dict():
             "train_max_extension_enforced_default": TRAIN_MAX_EXTENSION_ENFORCED_DEFAULT,
             "train_home_guard_enforced_default": TRAIN_HOME_GUARD_ENFORCED_DEFAULT,
             "train_telemetry_buffer_s": TRAIN_TELEMETRY_BUFFER_S,
-        },
-        "testing": {
-            "test_initial_torque_nm_default": TEST_INITIAL_TORQUE_NM_DEFAULT,
-            "test_torque_ramp_rate_nm_per_s_default": TEST_TORQUE_RAMP_RATE_NM_PER_S_DEFAULT,
-            "test_movement_threshold_m_per_s_default": TEST_MOVEMENT_THRESHOLD_M_PER_S_DEFAULT,
-            "test_hold_deadband_m_default": TEST_HOLD_DEADBAND_M_DEFAULT,
-            "test_hold_gain_default": TEST_HOLD_GAIN_DEFAULT,
-            "test_max_torque_nm_default": TEST_MAX_TORQUE_NM_DEFAULT,
-            "test_max_duration_s_default": TEST_MAX_DURATION_S_DEFAULT,
         },
         "axis": {
             "active_axis": ACTIVE_AXIS,

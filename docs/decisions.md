@@ -3136,3 +3136,147 @@ automatically rather than relying on the live board's current flash
 state. `dc_max_negative_current`, `max_regen_current`, and the
 motor/encoder/gain config were deliberately left untouched — out of
 scope for this fix.
+
+## 5 August 2026 — Testing tab redesign: reuse Control's Position mode instead of a dedicated experiment mode
+
+The Testing tab's first design (a `core/experiments/` `ExperimentMode` with
+a configure → confirm → energize → immutable-run lifecycle) matched its own
+build spec, but real use showed the actual complaint was about workflow, not
+features: the user wanted to nudge a parameter and see the effect
+immediately, keep adjusting, no restart — exactly what Control tab's
+`mode: "position"` already does for free. Rather than teaching
+`ExperimentMode` a second, parallel live-retarget path, the Testing tab now
+drives that same session directly. Net effect was code *deletion* (the
+whole `core/experiments/` package, its routes, its frontend plumbing, and
+its tests) in favor of reusing an existing, already-correct mechanism — a
+stronger fit for "keep it simple" than extending the mode that was purpose-
+built for the old flow. Accepted trade-off: Testing-tab moves and Control-
+tab moves both log CSVs under the same `position` mode name, indistinguishable
+by filename alone — not worth a new mode purely for log labeling.
+
+## 5 August 2026 — ExerciseMode's position guard was never wired to the Train enforcement toggles
+
+`train_home_guard_enforced`/`train_max_extension_enforced` were added (an
+earlier session) specifically for `TrainMode.tick()`'s runtime guard, with
+`ExerciseMode.tick()`'s own guard deliberately left unconditional — the
+frontend's own settings text said as much: "has no effect on the setup
+session above ... which always enforces its own always-on guard regardless
+of this toggle." That was a real design decision at the time (a safety
+floor for the setup session), but it surfaced as a bug report from actual
+use: disabling the toggle in the Train tab, then hitting Go Home or making
+a manual move, still hard-stopped with the *generic* ExerciseMode error
+message (no "Train" in it — confirmed this was the code path being hit, not
+TrainMode's). Decided the floor wasn't actually wanted — "if the user has
+disabled the guard, this protection should also be disabled" — and gated
+`ExerciseMode.tick()`'s guard on the same two toggles as `TrainMode`,
+combined with OR rather than per-side. That's a narrower behavior than
+`TrainMode`'s own split per-side gating (`check_runtime_guard_split`):
+disabling either toggle turns ExerciseMode's guard off entirely, rather than
+leaving the untouched side still enforced. Chose the simpler combined gate
+over duplicating `TrainMode`'s split logic a second time; flagged in code as
+revisitable if the finer per-side distinction turns out to matter for
+Exercise-mode operations specifically.
+
+## 5 August 2026 — Torque/force calibration: sign-preserving magnitude fit, not a signed linear fit
+
+Building the torque calibration model (`core/cable/torque_calibration.py`)
+initially fit a straight line directly between the recorded (signed)
+`raw_torque_nm` and the (always positive) `expected_torque_nm =
+known_weight_kg * g * r_eff_m`. This looked fine at first — the two
+calibration points recorded on the actual bench both happened to have a
+negative raw reading (holding a weight against gravity reads negative
+current on this rig's wiring convention), and a line through exactly 2
+points fits exactly regardless of sign, so the fitted `scale` came out
+negative (~-0.512) and still reproduced both points precisely.
+
+The bug: `scale` being negative isn't just an aesthetic oddity — it means
+`corrected_torque_nm()` and its inverse `raw_torque_nm_for_corrected()`
+silently flip the sign of anything with the *other* sign of raw reading.
+This is exactly what produced a real, user-visible symptom: selecting a 5kg
+equivalent for the Testing tab's Torque Limit field computed a NEGATIVE raw
+Nm value (~-0.7 Nm) to send to the hardware as a torque limit — nonsensical,
+since a torque *limit* is a magnitude, never negative. Traced this to the
+fit itself, not a downstream conversion bug: the model was trained on a
+mix of a signed quantity (raw current/torque, direction-dependent) and an
+unsigned one (a known weight's expected torque, never negative), so the
+"correction" it learned baked in whatever sign the calibration holds
+happened to share — physically meaningless outside that one sign regime.
+
+Fix: split sign from magnitude at the model boundary. `fit_linear` now fits
+`|raw_torque_nm|` against `expected_torque_nm` (both always non-negative),
+so `scale`/`offset` describe how big the torque really is — a property of
+the motor and friction, not of which way the cable happened to be moving
+during calibration. `corrected_torque_nm()`/`raw_torque_nm_for_corrected()`
+strip the sign of their input, apply the (now always meaningful) magnitude
+correction, and reapply the original sign unchanged afterward — direction
+still passes through untouched for every caller that needs it for control
+(the sign of `torque_est`/`commanded_torque_nm` encodes which way the motor
+is turning/pushing, genuinely useful information, never something this
+calibration should touch). `raw_torque_nm_for_corrected()` additionally
+floors the corrected magnitude at 0 before dividing — a corrected value
+smaller than the fitted `offset` has no valid non-negative raw magnitude
+that produces it, so clamping to 0 avoids returning a nonsense negative raw
+command. Mirrored exactly in `frontend/src/utils/cableGeometry.js`
+(`correctedTorqueNm`/`rawTorqueNmForCorrected`), same "keep in lockstep,
+don't reintroduce a second drifted formula" rule as every other JS mirror in
+that file.
+
+Separately, wherever torque/force is presented as *resistance* to a human
+(the Testing tab's "Measured torque"/"Measured force" stats, the main
+user-facing numbers, not the Developer diagnostics panel) now display
+`Math.abs(...)` — resistance isn't negative, and showing e.g. "-3.79 Nm" for
+a felt resistance reads as a fault rather than a magnitude. The raw signed
+value is still shown, deliberately, in the Developer diagnostics panel and
+the calibration points table — sign is meaningful there for verifying/
+debugging the model itself.
+
+## 5 August 2026 — Torque calibration wasn't reaching the Control tab
+
+Auditing "is this calibration used everywhere" (explicitly requested)
+surfaced a real gap: `core/control/modes.py`'s generic `PositionMode`/
+`TorqueMode` — used directly by the Control tab, and (via the Testing-tab
+redesign above) by the Testing tab too — have no `CableState` awareness at
+all by design (they're meant to be simple, hardware-generic set-and-forget
+modes; `ProfileMode` is the only one with an outer loop). The Testing tab
+already converts client-side before ever calling these modes (documented in
+its own code from the redesign above), but the Control tab's own Torque
+(est.) display and its Torque-mode/Position-mode-Torque-Limit targets never
+got the same treatment — they read/wrote raw motor-constant Nm directly.
+
+Rather than teaching the generic modes about `CableState` (which would break
+their "hardware-generic, no cable-specific knowledge" design), the fix
+follows the same precedent the Testing tab already established: convert at
+the client boundary. `useControlTelemetry.js` now also polls
+`/api/exercise/status` for the calibration snapshot (mirroring
+`useTestingTelemetry.js`'s existing second poll exactly), and `ControlTab.jsx`
+converts every user-facing Nm value through the calibration before it's
+sent, and every displayed torque reading through it before it's shown —
+making the calibrated model the single source of truth for torque/force
+everywhere in the app that reasons about it, without adding cable-specific
+coupling to the generic control modes themselves.
+
+## 5 August 2026 — Resistance display unit (N vs kg): a display-only preference, Newtons stay the wire format
+
+Added `resistance_display_unit_kg` as a persisted `CableState` setting
+(same `_PERSISTED_DEFAULTS` mechanism as the existing guard toggles),
+settable from the new Setup tab. Deliberately scoped as display/entry-only:
+`core/cable/train_profiles.py` and the wire format between frontend and
+backend are unchanged, always Newtons — conversion happens only at
+`TrainProfileEditor.jsx`'s own input/output boundary (building the payload
+sent to the backend, and populating fields when a saved profile is loaded
+back in). This means a profile saved while in kg mode and reloaded in N
+mode (or vice versa) still represents the same physical resistance, just
+displayed differently — the alternative (persisting profiles in whatever
+unit was active when saved) would make saved profiles' meaning depend on a
+setting that could change later, which is worse.
+
+Deliberately NOT extended to `TrainPositionChart.jsx` (the Planned-vs-Actual
+diagnostic overlay chart, which already has its own manual per-curve
+scale-factor multiplier and axis-range controls — a developer-facing
+diagnostic view, not the "building a profile" surface the request was
+about) or to the Testing tab's existing independent Nm/N/kg Torque Limit
+selector (a different, already-flexible per-field unit choice, not this
+global preference) — kept the change scoped to the one place explicitly
+asked for (the Train tab's resistance profile builder) rather than
+threading a new global preference through every force-shaped field in the
+app.

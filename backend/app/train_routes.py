@@ -102,15 +102,19 @@ def register(app) -> None:
     @app.route("/api/train/update_settings", methods=["POST"])
     def train_update_settings():
         """Live-adjustable Train settings (spec §1/§3): the max-extension and
-        home-guard enforcement toggles (independent, split 25 July 2026) and
-        the graph telemetry buffer duration. Any subset; persisted via
-        CableState the same way homing/force settings already are."""
+        home-guard enforcement toggles (independent, split 25 July 2026), the
+        graph telemetry buffer duration, and the resistance display unit
+        preference (N vs kg, item 2, 5 Aug 2026 -- display-only, doesn't
+        change what unit force is stored/evaluated in). Any subset;
+        persisted via CableState the same way homing/force settings already
+        are."""
         body = request.get_json(silent=True) or {}
         try:
             control_routes.cable_state.set_train_settings(
                 max_extension_enforced=body.get("max_extension_enforced"),
                 home_guard_enforced=body.get("home_guard_enforced"),
                 telemetry_buffer_s=body.get("telemetry_buffer_s"),
+                resistance_display_unit_kg=body.get("resistance_display_unit_kg"),
             )
             return jsonify(_status_dict())
         except (ValueError, TypeError) as e:

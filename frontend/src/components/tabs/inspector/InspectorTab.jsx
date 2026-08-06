@@ -1,79 +1,28 @@
-import { useCallback } from 'react'
-import { useSelector } from 'react-redux'
-import {
-  Box,
-  Grid,
-  GridItem,
-  Alert,
-  AlertIcon,
-  useToast,
-} from '@chakra-ui/react'
-import * as backend from '../../../api/backend'
-import PropertyTree from './property-tree/PropertyTree'
+import { Box, Alert, AlertIcon } from '@chakra-ui/react'
 import AxisTelemetryCharts from './AxisTelemetryCharts'
-import LiveCharts from './LiveCharts'
-import { useApiPropertyTree } from '../../../hooks/useApiPropertyTree'
 import '../../../styles/InspectorTab.css'
 
+// Trimmed down (5 Aug 2026) to just the fixed axis0 telemetry graphs --
+// the free-form property tree/custom-property picker + CSV recording it
+// fed (PropertyTree.jsx, PropertyItem.jsx, LiveCharts.jsx,
+// useApiPropertyTree.js, utils/apiReference.js) were removed: ~130 of its
+// 209 properties were write-only config (gains/limits/calibration, already
+// editable on the Configuration tab) nobody ever ticked here, and the
+// handful of read-only ones actually worth watching (vbus_voltage, ibus,
+// brake_resistor_current, ...) weren't worth keeping the whole browser
+// around for. If ad-hoc property inspection is needed again, that's the
+// feature to rebuild, not a partial patch of what's left here.
 const InspectorTab = ({ isConnected, isActive = true }) => {
-  const toast = useToast()
-  const propertyTree = useApiPropertyTree()
-  const serial = useSelector((s) => s.device.connectedDevice?.serial_number)
-
-  // Write a single property and surface the result as a toast (dev parity).
-  const updateProperty = useCallback(
-    async (path, value) => {
-      if (!serial) {
-        toast({ title: 'Not connected', status: 'warning', duration: 2500 })
-        throw new Error('Not connected')
-      }
-      try {
-        const res = await backend.writeProperties(serial, [{ path, value }])
-        const r = Array.isArray(res) ? res[0] : null
-        if (r && r.status && r.status !== 'ok') throw new Error(r.error || 'Write failed')
-        toast({ title: 'Value updated', description: `${path} = ${value}`, status: 'success', duration: 2000 })
-      } catch (err) {
-        toast({ title: 'Write failed', description: String(err.message || err), status: 'error', duration: 4000 })
-        throw err
-      }
-    },
-    [serial, toast]
-  )
-
   return (
     <Box className="inspector-tab" h="100%" display="flex" flexDirection="column" bg="gray.900">
-      <Box flex="1" minH="0" p={4}>
+      <Box flex="1" minH="0" p={4} overflow="auto">
         {!isConnected && (
           <Alert status="info" variant="left-accent" mb={3} borderRadius="md">
             <AlertIcon />
-            Connect to an ODrive to read and edit live values.
+            Connect to an ODrive to read live values.
           </Alert>
         )}
-        <Grid templateColumns={{ base: '1fr', lg: '1fr 1.5fr' }} gap={4} h="100%" minH="0">
-          {/* Left: property tree */}
-          <GridItem display="flex" flexDirection="column" minH="0">
-            <Box flex="1" minH="0">
-              <PropertyTree
-                propertyTree={propertyTree}
-                isConnected={isConnected}
-                serial={serial}
-                updateProperty={updateProperty}
-              />
-            </Box>
-          </GridItem>
-
-          {/* Right: axis0 telemetry graphs (fixed) + live charts (user-picked) */}
-          <GridItem display="flex" flexDirection="column" minH="0" overflow="hidden">
-            <Box flex="1" minH="0" overflow="auto">
-              <Box p={4}>
-                <AxisTelemetryCharts isActive={isActive} />
-              </Box>
-              <Box h="600px">
-                <LiveCharts isActive={isActive} serial={serial} />
-              </Box>
-            </Box>
-          </GridItem>
-        </Grid>
+        <AxisTelemetryCharts isActive={isActive} />
       </Box>
     </Box>
   )

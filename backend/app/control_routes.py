@@ -14,7 +14,6 @@ from flask import jsonify, request
 from core.cable import CableState, ExerciseMode, TrainMode
 from core.control.modes import MODES_BY_NAME
 from core.control.session import ControlSession, DEFAULT_HARDWARE_FACTORIES
-from core.experiments import ExperimentMode
 from core.hardware.odrive_hw import OdriveHardware
 from core.profiles import PROFILE_REGISTRY, OverloadWrapper, Phase
 
@@ -63,10 +62,12 @@ control_session = ControlSession(
         # same shared cable_state -- not added to MODES_BY_NAME itself,
         # following the "exercise" precedent directly above.
         "train": lambda: TrainMode(cable_state),
-        # Testing tab (Testing tab Build Spec §2): same mode_factories hook,
-        # same shared cable_state -- proof there's no second ODrive
-        # connection, exactly the "train"/"exercise" precedent above.
-        "experiment": lambda: ExperimentMode(cable_state),
+        # Testing tab (items 2/6/7): drives this same shared session's
+        # existing "position" mode directly (MODES_BY_NAME's PositionMode,
+        # already in the spread above) -- no dedicated mode of its own.
+        # Calibration-point recording is a direct CableState mutation
+        # (backend/app/exercise_routes.py's record_torque_calibration_point),
+        # not a ControlSession action, so it needs nothing registered here.
     },
 )
 

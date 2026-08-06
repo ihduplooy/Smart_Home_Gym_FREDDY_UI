@@ -69,6 +69,7 @@ log = logging.getLogger(__name__)
 _LAYER_A_ACTIONS = frozenset({
     "arm",
     "home",
+    "go_home",
     "abort_homing",
     "start_max_calibration",
     "confirm_max",
@@ -123,6 +124,12 @@ class ExerciseMode(BaseMode):
         # ---- Layer A (positioning) state ----
         self._action = "idle"
         self._homing_sm = None
+        # Whether the in-progress homing reel-in should latch a NEW home
+        # reference on completion ("Home", True) or just stop in place
+        # without touching the existing one ("Go Home", False) -- same
+        # reel-in-until-current-threshold mechanics either way, see
+        # _apply_home/_apply_go_home/_tick_homing below.
+        self._homing_relatches = True
         self._move_target_turns = None
 
         # ---- Layer B (force feedback) state ----
@@ -177,7 +184,10 @@ class ExerciseMode(BaseMode):
         extra: Dict[str, Any] = {
             "force_state": self._force_state.value,
             "commanded_force_n": 0.0,
-            "estimated_force_n": torque_to_force(sample.torque_est, r0=self.cable_state.r0),
+            "estimated_force_n": torque_to_force(
+                self.cable_state.corrected_torque_nm(sample.torque_est),
+                r0=self.cable_state.r_eff_at_position(sample.position),
+            ),
             "cable_velocity_m_s": speed_m_s_from_turns_s(cable_velocity_turns_s, self.cable_state.r0),
             "regen_power_w": 0.0,
             "power_limiter_active": False,
@@ -191,9 +201,22 @@ class ExerciseMode(BaseMode):
         # a hard stop on first overrun was too abrupt). Computed once, up
         # front, so the force branch below can use the warning to actively
         # brake, and the raise at the bottom uses the same result.
+        #
+        # Gated on the same train_home_guard_enforced/train_max_extension_
+        # enforced toggles TrainMode.tick() already respects (item 4, "safety
+        # guard still fires even when disabled in the Train tab"): this used
+        # to run unconditionally whenever homed+has_max, regardless of either
+        # toggle, which was a deliberate "always on" floor for the setup
+        # session -- but in practice that reads as the toggle silently not
+        # applying to Go Home/Homing/manual moves, not a floor the user
+        # asked for. Combined (OR), not per-side like TrainMode's own split
+        # check: disabling either toggle turns this guard off entirely for
+        # Exercise-mode operations, rather than staying half-enforced.
         position_warning = False
         position_violated = False
-        if self.cable_state.is_homed and self.cable_state.has_max:
+        if self.cable_state.is_homed and self.cable_state.has_max and (
+            self.cable_state.train_home_guard_enforced or self.cable_state.train_max_extension_enforced
+        ):
             position_warning, position_violated = check_position_tiers(
                 sample.position,
                 self.cable_state.home_turns,
@@ -208,7 +231,7 @@ class ExerciseMode(BaseMode):
         elif self._action == "moving":
             self._tick_moving(sample, extra)
         elif self._action in ("max_calibrating", "spool_growth_calibrating"):
-            self._tick_max_calibrating(hardware)
+            self._tick_max_calibrating(hardware, sample)
         elif self._action == "idle":
             self._tick_force(hardware, sample, cable_velocity_turns_s, position_warning, extra)
 
@@ -250,6 +273,21 @@ class ExerciseMode(BaseMode):
 
     def _apply_home(self, hardware: HardwareInterface, value: Dict[str, Any]) -> None:
         self._require_layer_a_available("start homing")
+        self._start_homing(hardware, relatches=True)
+
+    def _apply_go_home(self, hardware: HardwareInterface, value: Dict[str, Any]) -> None:
+        """Reels the cable back in using the exact same current-threshold
+        detection as Home, but does NOT redefine the home reference on
+        completion (see _tick_homing) -- lets the carriage be returned home
+        safely without recalibrating anything. Requires an existing home
+        reference (same "Go Home only makes sense once homed at least once"
+        gate the frontend already applies), even though the reel-in itself
+        doesn't consult it."""
+        validate_homed(self.cable_state.is_homed)
+        self._require_layer_a_available("go home")
+        self._start_homing(hardware, relatches=False)
+
+    def _start_homing(self, hardware: HardwareInterface, relatches: bool) -> None:
         hardware.set_current_limit(self.cable_state.homing_current_limit_a)
         hardware.set_mode(ControlMode.VELOCITY)
         hardware.set_velocity_target(0.0)
@@ -257,6 +295,7 @@ class ExerciseMode(BaseMode):
             velocity_turns_s=self.cable_state.homing_velocity_turns_s,
             current_threshold_a=self.cable_state.homing_current_threshold_a,
         )
+        self._homing_relatches = relatches
         self._action = "homing"
         self.cable_state.homing_in_progress = True
         self.cable_state.last_homing_fault = None
@@ -274,8 +313,9 @@ class ExerciseMode(BaseMode):
         validate_homed(self.cable_state.is_homed)
         self._require_layer_a_available("start max-extension calibration")
         hardware.set_mode(ControlMode.TORQUE)
-        hold_torque = force_to_torque(self.cable_state.calib_hold_force_n, r0=self.cable_state.r0)
-        hardware.set_torque_target(-CABLE_SIGN * hold_torque)
+        r_eff = self.cable_state.r_eff_at_position(hardware.get_state().position)
+        hold_torque_nm = force_to_torque(self.cable_state.calib_hold_force_n, r0=r_eff)
+        hardware.set_torque_target(-CABLE_SIGN * self.cable_state.raw_torque_nm_for_corrected(hold_torque_nm))
         self._action = "max_calibrating"
         self.cable_state.max_calibration_in_progress = True
 
@@ -314,8 +354,9 @@ class ExerciseMode(BaseMode):
         validate_homed(self.cable_state.is_homed)
         self._require_layer_a_available("start spool-growth calibration")
         hardware.set_mode(ControlMode.TORQUE)
-        hold_torque = force_to_torque(self.cable_state.calib_hold_force_n, r0=self.cable_state.r0)
-        hardware.set_torque_target(-CABLE_SIGN * hold_torque)
+        r_eff = self.cable_state.r_eff_at_position(hardware.get_state().position)
+        hold_torque_nm = force_to_torque(self.cable_state.calib_hold_force_n, r0=r_eff)
+        hardware.set_torque_target(-CABLE_SIGN * self.cable_state.raw_torque_nm_for_corrected(hold_torque_nm))
         self._action = "spool_growth_calibrating"
         self.cable_state.spool_growth_calibration_in_progress = True
 
@@ -375,7 +416,8 @@ class ExerciseMode(BaseMode):
         extra["homing_state"] = result.state.value
 
         if result.state == HomingState.HOMED:
-            self.cable_state.latch_home(result.home_position_turns)
+            if self._homing_relatches:
+                self.cable_state.latch_home(result.home_position_turns)
             hardware.set_current_limit(board_constants.MOTOR_CURRENT_LIM)
             self._action = "idle"
             self.cable_state.homing_in_progress = False
@@ -395,9 +437,10 @@ class ExerciseMode(BaseMode):
         if self._move_target_turns is not None and abs(sample.position - self._move_target_turns) < _MOVE_DONE_TOLERANCE_TURNS:
             self._action = "idle"
 
-    def _tick_max_calibrating(self, hardware: HardwareInterface) -> None:
-        hold_torque = force_to_torque(self.cable_state.calib_hold_force_n, r0=self.cable_state.r0)
-        hardware.set_torque_target(-CABLE_SIGN * hold_torque)
+    def _tick_max_calibrating(self, hardware: HardwareInterface, sample: TelemetrySample) -> None:
+        r_eff = self.cable_state.r_eff_at_position(sample.position)
+        hold_torque_nm = force_to_torque(self.cable_state.calib_hold_force_n, r0=r_eff)
+        hardware.set_torque_target(-CABLE_SIGN * self.cable_state.raw_torque_nm_for_corrected(hold_torque_nm))
 
     # ---- Layer B (force feedback) action handlers ----
 
@@ -568,7 +611,18 @@ class ExerciseMode(BaseMode):
                 self.cable_state.r0,
             )
             final_force = limited_force
-            signed_torque = -CABLE_SIGN * force_to_torque(final_force, r0=self.cable_state.r0)
+            # The actual resistance-force -> motor-torque conversion --
+            # growth-corrected (r_eff), same as TrainMode/calibration holds
+            # above, so a configured force feels consistent regardless of
+            # how far the cable has paid out (item 5: this used to be the
+            # bare r0, silently diverging from Train's already-correct
+            # conversion as the effective radius grew). Then through the
+            # torque-calibration inverse correction (items 6/7) so the
+            # ACTUAL physical torque delivered matches the real-world force
+            # the calibration model says it should, not just the raw
+            # motor-constant estimate.
+            desired_torque_nm = force_to_torque(final_force, r0=self.cable_state.r_eff_at_position(sample.position))
+            signed_torque = -CABLE_SIGN * self.cable_state.raw_torque_nm_for_corrected(desired_torque_nm)
             hardware.set_torque_target(signed_torque)
         else:
             self._power_limiter_active = False

@@ -157,20 +157,24 @@ class TrainMode(BaseMode):
         # torque commanded for a given target force silently drifted across
         # the travel range (spec: "calibration overhaul" item 3 -- surfaced
         # by a strap-thickness change large enough to make the drift
-        # noticeable). r_eff_at_turns_delta() reduces to plain r0 when
-        # uncalibrated (k=0, no growth points), so this is a no-op until a
-        # spool model is actually calibrated. Floored at
-        # SPOOL_MIN_EFFECTIVE_RADIUS_M: the piecewise model's final segment
-        # extrapolates its slope indefinitely past the last calibration
-        # point with no floor of its own, and a disabled guard (this
-        # module's home/max toggles exist precisely so a session CAN travel
-        # beyond the calibrated envelope) can reach that unbounded region --
-        # an unclamped r_eff there could approach zero or go negative,
-        # corrupting this conversion instead of just being imprecise.
-        r_eff = self.cable_state.spool_geometry.r_eff_at_turns_delta(sample.position - self.cable_state.home_turns)
-        r_eff = max(r_eff, board_constants.SPOOL_MIN_EFFECTIVE_RADIUS_M)
+        # noticeable). CableState.r_eff_at_position() is the shared home for
+        # this conversion (also used by ExerciseMode's force feedback and
+        # calibration holds, and the Testing tab) -- reduces to plain r0 when
+        # uncalibrated, and floors at SPOOL_MIN_EFFECTIVE_RADIUS_M so a
+        # disabled range guard traveling past the last calibration point
+        # can't drive r_eff toward zero/negative.
+        r_eff = self.cable_state.r_eff_at_position(sample.position)
         torque_nm = force_to_torque(force_n, r0=r_eff)
-        hardware.set_torque_target(-CABLE_SIGN * torque_nm)
+        # Torque-calibration inverse correction (items 6/7): torque_nm above
+        # is the real, physical torque this force is supposed to need --
+        # raw_torque_nm_for_corrected() maps that to whatever raw Nm value
+        # actually needs to be commanded so the calibrated real-world
+        # relationship holds (identity until at least one calibration point
+        # is recorded). `extra`/`_commanded_torque_nm` keep reporting the
+        # real torque_nm, not the raw command -- that's what's meaningful to
+        # a human reading it back.
+        raw_torque_nm = self.cable_state.raw_torque_nm_for_corrected(torque_nm)
+        hardware.set_torque_target(-CABLE_SIGN * raw_torque_nm)
 
         self._target_force_n = force_n
         self._commanded_torque_nm = torque_nm

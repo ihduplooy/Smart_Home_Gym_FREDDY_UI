@@ -70,12 +70,14 @@ from core.profiles.detectors import CABLE_SIGN
 
 from . import geometry
 from .limits import validate_max_extension_candidate
+from .torque_calibration import TorqueCalibration, TorqueCalibrationPoint
 
 log = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_SIDECAR_PATH = _REPO_ROOT / "config" / "spool_calibration.json"
 _DEFAULT_GROWTH_SIDECAR_PATH = _REPO_ROOT / "config" / "spool_growth_calibration.json"
+_DEFAULT_TORQUE_CALIBRATION_SIDECAR_PATH = _REPO_ROOT / "config" / "torque_calibration.json"
 
 # Settings key -> board_constants default. Single source of truth for what
 # persists in the sidecar file and what each falls back to when the file is
@@ -101,20 +103,24 @@ _PERSISTED_DEFAULTS = {
     "train_max_extension_enforced": lambda: board_constants.TRAIN_MAX_EXTENSION_ENFORCED_DEFAULT,
     "train_home_guard_enforced": lambda: board_constants.TRAIN_HOME_GUARD_ENFORCED_DEFAULT,
     "train_telemetry_buffer_s": lambda: board_constants.TRAIN_TELEMETRY_BUFFER_S,
-    "test_initial_torque_nm": lambda: board_constants.TEST_INITIAL_TORQUE_NM_DEFAULT,
-    "test_torque_ramp_rate_nm_per_s": lambda: board_constants.TEST_TORQUE_RAMP_RATE_NM_PER_S_DEFAULT,
-    "test_movement_threshold_m_per_s": lambda: board_constants.TEST_MOVEMENT_THRESHOLD_M_PER_S_DEFAULT,
-    "test_hold_deadband_m": lambda: board_constants.TEST_HOLD_DEADBAND_M_DEFAULT,
-    "test_hold_gain": lambda: board_constants.TEST_HOLD_GAIN_DEFAULT,
-    "test_max_torque_nm": lambda: board_constants.TEST_MAX_TORQUE_NM_DEFAULT,
-    "test_max_duration_s": lambda: board_constants.TEST_MAX_DURATION_S_DEFAULT,
+    "resistance_display_unit_kg": lambda: board_constants.RESISTANCE_DISPLAY_UNIT_KG_DEFAULT,
 }
 
 
 class CableState:
-    def __init__(self, sidecar_path: Optional[Path] = None, growth_sidecar_path: Optional[Path] = None):
+    def __init__(
+        self,
+        sidecar_path: Optional[Path] = None,
+        growth_sidecar_path: Optional[Path] = None,
+        torque_calibration_sidecar_path: Optional[Path] = None,
+    ):
         self._sidecar_path = sidecar_path if sidecar_path is not None else _DEFAULT_SIDECAR_PATH
         self._growth_sidecar_path = growth_sidecar_path if growth_sidecar_path is not None else _DEFAULT_GROWTH_SIDECAR_PATH
+        self._torque_calibration_sidecar_path = (
+            torque_calibration_sidecar_path
+            if torque_calibration_sidecar_path is not None
+            else _DEFAULT_TORQUE_CALIBRATION_SIDECAR_PATH
+        )
         settings = self._load_settings()
         self.k = settings["k"]
         self.r0 = settings["r0"]
@@ -141,13 +147,7 @@ class CableState:
         self.train_max_extension_enforced = bool(settings["train_max_extension_enforced"])
         self.train_home_guard_enforced = bool(settings["train_home_guard_enforced"])
         self.train_telemetry_buffer_s = settings["train_telemetry_buffer_s"]
-        self.test_initial_torque_nm = settings["test_initial_torque_nm"]
-        self.test_torque_ramp_rate_nm_per_s = settings["test_torque_ramp_rate_nm_per_s"]
-        self.test_movement_threshold_m_per_s = settings["test_movement_threshold_m_per_s"]
-        self.test_hold_deadband_m = settings["test_hold_deadband_m"]
-        self.test_hold_gain = settings["test_hold_gain"]
-        self.test_max_torque_nm = settings["test_max_torque_nm"]
-        self.test_max_duration_s = settings["test_max_duration_s"]
+        self.resistance_display_unit_kg = bool(settings["resistance_display_unit_kg"])
 
         # Experimental multi-point spool-growth calibration (turns_from_home,
         # length_m) pairs -- persisted separately from the float-only sidecar
@@ -157,6 +157,26 @@ class CableState:
         # existed.
         self.spool_growth_points: List[Tuple[float, float]] = self._load_growth_points()
         self.spool_geometry = geometry.SpoolGeometry(self.r0, self.k, self.spool_growth_points)
+
+        # Torque/force calibration (items 6/7) -- corrects the fixed-
+        # MOTOR_TORQUE_CONSTANT torque estimate against known-weight
+        # measurements. Same "own dedicated sidecar, empty/identity by
+        # default" pattern as spool_growth_points above -- see
+        # core/cable/torque_calibration.py's module docstring for the model.
+        self.torque_calibration_points: List[TorqueCalibrationPoint] = self._load_torque_calibration_points()
+        self.torque_calibration = TorqueCalibration(self.torque_calibration_points)
+
+        # Physical max-extension length (m, from home), persisted the same
+        # sidecar as k/r0 above but handled as its own explicit Optional key
+        # (like spool_growth_points) rather than through the float-only
+        # _PERSISTED_DEFAULTS loop, since "not yet calibrated" (None) is a
+        # real, valid state. Unlike home_turns/max_turns (absolute encoder
+        # turns, meaningless once the reference frame moves), a physical
+        # length survives a re-home unchanged -- latch_home() below
+        # reapplies it against the new home_turns automatically, so a
+        # calibrated max extension is only ever lost by an explicit new
+        # calibration, never by re-homing or reset().
+        self.max_extension_length_m: Optional[float] = settings["max_extension_length_m"]
 
         # In-memory only -- see module docstring.
         self.home_turns: Optional[float] = None
@@ -173,6 +193,59 @@ class CableState:
         self.pending_growth_points: List[Tuple[float, float]] = []
         self.last_homing_fault: Optional[str] = None
 
+    def r_eff_at_position(self, position_turns: float) -> float:
+        """The effective spool radius to use for a force<->torque conversion
+        at a live position -- the ONE place that decision is made, so every
+        caller (force feedback, calibration holds, telemetry display) uses
+        the same growth-corrected radius core/cable/train_mode.py already
+        uses, instead of each re-deriving (or forgetting to derive) it
+        themselves. Floored at SPOOL_MIN_EFFECTIVE_RADIUS_M for the same
+        reason train_mode.py's own inline version is: the piecewise growth
+        model's final segment extrapolates unbounded past the last
+        calibration point. Falls back to the bare r0 when not yet homed --
+        there's no turns-from-home reference to compute r_eff against."""
+        if not self.is_homed:
+            return self.r0
+        r_eff = self.spool_geometry.r_eff_at_turns_delta(position_turns - self.home_turns)
+        return max(r_eff, board_constants.SPOOL_MIN_EFFECTIVE_RADIUS_M)
+
+    def corrected_torque_nm(self, raw_nm: float) -> float:
+        """Raw (motor-constant-only) torque estimate -> calibrated real
+        torque -- the ONE place that decision is made, mirroring
+        r_eff_at_position() above. Identity (no-op) until at least one
+        torque-calibration point is recorded."""
+        return self.torque_calibration.corrected_torque_nm(raw_nm)
+
+    def raw_torque_nm_for_corrected(self, corrected_nm: float) -> float:
+        """Inverse of corrected_torque_nm() -- what raw Nm value to actually
+        command so the real, physical torque delivered matches
+        `corrected_nm` (the value the rest of the codebase reasons about in
+        force/torque terms). Identity until calibrated."""
+        return self.torque_calibration.raw_torque_nm_for_corrected(corrected_nm)
+
+    def add_torque_calibration_point(self, known_weight_kg: float, raw_torque_nm: float, position_turns: float) -> None:
+        """Records one calibration measurement (item 6) -- known_weight_kg
+        is whatever the user is currently holding via a position move,
+        raw_torque_nm is the live torque_est at that same moment. r_eff is
+        derived here (not passed in) so callers never have to duplicate
+        r_eff_at_position()'s own floor/model logic."""
+        if not self.is_homed:
+            raise RuntimeError("Cable is not homed -- home before recording a torque calibration point")
+        if known_weight_kg < 0:
+            raise ValueError(f"known_weight_kg must be non-negative, got {known_weight_kg!r}")
+        r_eff_m = self.r_eff_at_position(position_turns)
+        point = TorqueCalibrationPoint(known_weight_kg=known_weight_kg, raw_torque_nm=raw_torque_nm, r_eff_m=r_eff_m)
+        self.torque_calibration_points.append(point)
+        self.torque_calibration = TorqueCalibration(self.torque_calibration_points)
+        self._save_torque_calibration_points()
+
+    def clear_torque_calibration(self) -> None:
+        """Wipes every recorded point, reverting to the identity model --
+        same "start over" convention clear_growth_calibration() already has."""
+        self.torque_calibration_points = []
+        self.torque_calibration = TorqueCalibration(self.torque_calibration_points)
+        self._save_torque_calibration_points()
+
     @property
     def is_homed(self) -> bool:
         return self.home_turns is not None
@@ -182,18 +255,33 @@ class CableState:
         return self.max_turns is not None
 
     def latch_home(self, position_turns: float) -> None:
-        """A fresh home reference invalidates any previously-set max: max was
-        marked relative to the old (now-discarded) reference, and re-homing
-        only ever happens because something about the physical setup may
-        have changed (cable slip, reattachment) -- the old marking can't be
-        trusted to still be valid either."""
+        """A fresh home reference always clears the old, turns-based max
+        (it was marked relative to the now-discarded reference). If a
+        physical max-extension LENGTH is already known (max_extension_length_m,
+        persisted across re-homes -- see module docstring), it's immediately
+        reapplied against the new home reference instead of being lost: the
+        physical travel range of the rig didn't change just because the
+        encoder's zero point did. Falls back to a bare ValueError from
+        validate_max_extension_candidate propagating up (leaving max
+        uncalibrated) only if the persisted length has somehow become
+        invalid for the new reference -- a discarded/corrupt sidecar, not a
+        normal case."""
         self.home_turns = position_turns
         self.max_turns = None
         self.marked_max_turns = None
+        if self.max_extension_length_m is not None:
+            turns_delta = self.spool_geometry.turns_delta_from_length(self.max_extension_length_m)
+            marked_turns = self.home_turns + CABLE_SIGN * turns_delta
+            validate_max_extension_candidate(marked_turns, self.home_turns, board_constants.MAX_EXTENSION_MIN_TRAVEL_TURNS)
+            self.set_max(marked_turns, marked_turns)
 
     def set_max(self, marked_turns: float, enforced_turns: float) -> None:
         self.marked_max_turns = marked_turns
         self.max_turns = enforced_turns
+        # Persist the physical length (not the turns) so it survives a
+        # future re-home -- see latch_home() above and the module docstring.
+        self.max_extension_length_m = self.spool_geometry.length_from_turns_delta(enforced_turns - self.home_turns)
+        self._save_settings()
 
     def reset(self) -> None:
         """Manual position reset (spec §3.5) -- clears home/max, does NOT
@@ -398,6 +486,7 @@ class CableState:
         max_extension_enforced: Optional[bool] = None,
         home_guard_enforced: Optional[bool] = None,
         telemetry_buffer_s: Optional[float] = None,
+        resistance_display_unit_kg: Optional[bool] = None,
     ) -> None:
         """Train tab settings (train_tab_build_spec.md §1/§3): same subset-
         update/validate-together/persist pattern as set_homing_settings/
@@ -407,10 +496,20 @@ class CableState:
         side while only max-extension enforcement had been disabled, and a
         single combined toggle can't express "relax one side, keep the
         other"). ExerciseMode's own runtime guard is untouched by either
-        flag."""
+        flag.
+
+        `resistance_display_unit_kg` (item 2, 5 Aug 2026) is display-only --
+        it never changes what unit force is stored/evaluated in
+        (core/cable/train_profiles.py stays Newtons throughout); it only
+        tells the frontend which unit to show/accept in the Train tab's
+        profile builder (and anywhere else resistance is presented to a
+        user, not a developer)."""
         new_max_enforced = self.train_max_extension_enforced if max_extension_enforced is None else bool(max_extension_enforced)
         new_home_enforced = self.train_home_guard_enforced if home_guard_enforced is None else bool(home_guard_enforced)
         new_buffer_s = self.train_telemetry_buffer_s if telemetry_buffer_s is None else telemetry_buffer_s
+        new_resistance_unit_kg = (
+            self.resistance_display_unit_kg if resistance_display_unit_kg is None else bool(resistance_display_unit_kg)
+        )
 
         if isinstance(new_buffer_s, bool) or not isinstance(new_buffer_s, (int, float)) or new_buffer_s <= 0:
             raise ValueError(f"telemetry_buffer_s must be a positive number, got {new_buffer_s!r}")
@@ -418,59 +517,7 @@ class CableState:
         self.train_max_extension_enforced = new_max_enforced
         self.train_home_guard_enforced = new_home_enforced
         self.train_telemetry_buffer_s = float(new_buffer_s)
-        self._save_settings()
-
-    def set_test_settings(
-        self,
-        initial_torque_nm: Optional[float] = None,
-        torque_ramp_rate_nm_per_s: Optional[float] = None,
-        movement_threshold_m_per_s: Optional[float] = None,
-        hold_deadband_m: Optional[float] = None,
-        hold_gain: Optional[float] = None,
-        max_torque_nm: Optional[float] = None,
-        max_duration_s: Optional[float] = None,
-    ) -> None:
-        """Testing tab (Testing tab Build Spec §2.1) persisted defaults --
-        same subset-update/validate-together/persist pattern as
-        set_force_settings/set_train_settings. These are only the *defaults*
-        a new experiment's config form pre-fills from -- a per-run
-        ExperimentConfig snapshots its own values at configure() time, so
-        editing these never touches an experiment already in progress."""
-        new = {
-            "initial_torque_nm": initial_torque_nm if initial_torque_nm is not None else self.test_initial_torque_nm,
-            "torque_ramp_rate_nm_per_s": torque_ramp_rate_nm_per_s if torque_ramp_rate_nm_per_s is not None else self.test_torque_ramp_rate_nm_per_s,
-            "movement_threshold_m_per_s": movement_threshold_m_per_s if movement_threshold_m_per_s is not None else self.test_movement_threshold_m_per_s,
-            "hold_deadband_m": hold_deadband_m if hold_deadband_m is not None else self.test_hold_deadband_m,
-            "hold_gain": hold_gain if hold_gain is not None else self.test_hold_gain,
-            "max_torque_nm": max_torque_nm if max_torque_nm is not None else self.test_max_torque_nm,
-            "max_duration_s": max_duration_s if max_duration_s is not None else self.test_max_duration_s,
-        }
-
-        if new["torque_ramp_rate_nm_per_s"] <= 0:
-            raise ValueError(f"torque_ramp_rate_nm_per_s must be positive, got {new['torque_ramp_rate_nm_per_s']!r}")
-        if new["movement_threshold_m_per_s"] <= 0:
-            raise ValueError(f"movement_threshold_m_per_s must be positive, got {new['movement_threshold_m_per_s']!r}")
-        if new["hold_deadband_m"] <= 0:
-            raise ValueError(f"hold_deadband_m must be positive, got {new['hold_deadband_m']!r}")
-        if new["hold_gain"] < 0:
-            raise ValueError(f"hold_gain must be non-negative, got {new['hold_gain']!r}")
-        if new["max_torque_nm"] <= 0:
-            raise ValueError(f"max_torque_nm must be positive, got {new['max_torque_nm']!r}")
-        if new["max_duration_s"] <= 0:
-            raise ValueError(f"max_duration_s must be positive, got {new['max_duration_s']!r}")
-        if abs(new["initial_torque_nm"]) > new["max_torque_nm"]:
-            raise ValueError(
-                f"initial_torque_nm ({new['initial_torque_nm']!r}) must not exceed "
-                f"max_torque_nm ({new['max_torque_nm']!r})."
-            )
-
-        self.test_initial_torque_nm = new["initial_torque_nm"]
-        self.test_torque_ramp_rate_nm_per_s = new["torque_ramp_rate_nm_per_s"]
-        self.test_movement_threshold_m_per_s = new["movement_threshold_m_per_s"]
-        self.test_hold_deadband_m = new["hold_deadband_m"]
-        self.test_hold_gain = new["hold_gain"]
-        self.test_max_torque_nm = new["max_torque_nm"]
-        self.test_max_duration_s = new["max_duration_s"]
+        self.resistance_display_unit_kg = new_resistance_unit_kg
         self._save_settings()
 
     def _load_settings(self) -> dict:
@@ -483,11 +530,18 @@ class CableState:
         except Exception:
             log.exception("Failed to load %s; using board_constants defaults", self._sidecar_path)
             data = {}
-        return {key: float(data[key]) if key in data else default() for key, default in _PERSISTED_DEFAULTS.items()}
+        settings = {key: float(data[key]) if key in data else default() for key, default in _PERSISTED_DEFAULTS.items()}
+        # Optional, unlike everything in _PERSISTED_DEFAULTS above -- "not yet
+        # calibrated" (None) is a real, common state, not a missing-key
+        # fallback to a board_constants default (see set_max()/latch_home()).
+        raw_max_length = data.get("max_extension_length_m")
+        settings["max_extension_length_m"] = float(raw_max_length) if raw_max_length is not None else None
+        return settings
 
     def _save_settings(self) -> None:
         self._sidecar_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {key: getattr(self, key) for key in _PERSISTED_DEFAULTS}
+        payload["max_extension_length_m"] = self.max_extension_length_m
         tmp = self._sidecar_path.with_suffix(".json.tmp")
         with open(tmp, "w") as f:
             json.dump(payload, f)
@@ -516,3 +570,39 @@ class CableState:
         with open(tmp, "w") as f:
             json.dump(payload, f)
         tmp.replace(self._growth_sidecar_path)
+
+    def _load_torque_calibration_points(self) -> List[TorqueCalibrationPoint]:
+        """Own dedicated sidecar, same load-tolerant-of-missing/corrupt-file
+        shape as _load_growth_points() above -- a list of calibration
+        points doesn't fit the float-only _PERSISTED_DEFAULTS mechanism."""
+        try:
+            with open(self._torque_calibration_sidecar_path) as f:
+                data = json.load(f)
+            return [
+                TorqueCalibrationPoint(
+                    known_weight_kg=float(p["known_weight_kg"]),
+                    raw_torque_nm=float(p["raw_torque_nm"]),
+                    r_eff_m=float(p["r_eff_m"]),
+                )
+                for p in data.get("points", [])
+            ]
+        except FileNotFoundError:
+            return []
+        except Exception:
+            log.exception(
+                "Failed to load %s; starting with no torque calibration", self._torque_calibration_sidecar_path
+            )
+            return []
+
+    def _save_torque_calibration_points(self) -> None:
+        self._torque_calibration_sidecar_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "points": [
+                {"known_weight_kg": p.known_weight_kg, "raw_torque_nm": p.raw_torque_nm, "r_eff_m": p.r_eff_m}
+                for p in self.torque_calibration_points
+            ]
+        }
+        tmp = self._torque_calibration_sidecar_path.with_suffix(".json.tmp")
+        with open(tmp, "w") as f:
+            json.dump(payload, f)
+        tmp.replace(self._torque_calibration_sidecar_path)

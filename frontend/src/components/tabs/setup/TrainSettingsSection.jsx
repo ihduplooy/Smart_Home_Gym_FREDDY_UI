@@ -6,23 +6,32 @@ import {
 } from '@chakra-ui/react'
 import { ChevronDownIcon, ChevronRightIcon } from '@chakra-ui/icons'
 import {
-  startExerciseSession, homeExercise, abortHoming,
+  startExerciseSession, homeExercise, goHomeExercise, abortHoming,
   startMaxCalibration, confirmMax, cancelMaxCalibration,
-  stopExercise, calibrateSpoolK, updateHomingSettings,
-  updateSpoolRadius, updateSpoolK, setMaxExtensionManual,
+  stopExercise, updateHomingSettings,
+  updateSpoolRadius, setMaxExtensionManual,
 } from '../../../api/exercise'
 import { updateTrainSettings } from '../../../api/train'
 import SpoolGrowthCalibration from './SpoolGrowthCalibration'
 import SpoolModelDiagnostics from './SpoolModelDiagnostics'
 
-// Train's Settings/Startup section (spec §3) -- reuses Exercise's existing
+// The Setup tab's Settings/Startup section -- reuses Exercise's existing
 // homing/max-extension/spool-calibration routes directly rather than
 // duplicating that machinery: they all operate on the one shared
-// cable_state regardless of which ControlSession mode is currently active,
-// and `status` here is the same /api/train/status response TrainTab already
-// polls, so `status.control.mode` reads "exercise" while this section's
-// setup flow is driving the shared session, and "train" once a Train
-// session is running -- no second poll loop needed.
+// cable_state regardless of which ControlSession mode is currently active.
+// `status` is the {control, cable} shape /api/exercise/status returns
+// (SetupTab.jsx polls it directly) -- `status.control.mode` reads
+// "exercise" while this section's own setup flow is driving the shared
+// session, and something else (train/position/...) whenever another tab
+// owns it instead.
+//
+// Originally lived inside the Train tab as a "Settings/Startup" collapse;
+// moved out into its own top-level Setup tab (between Configuration and
+// Control) since it's general cable setup, not training-specific -- purely
+// a move, not a redesign. Also no longer takes a `trainSessionRunning`
+// prop: decoupled from Train tab, "another mode running" now just means
+// "the shared session is running and it isn't this section's own exercise
+// mode."
 //
 // Manual jogging used to live in this section too; removed 25 July 2026 at
 // the user's request -- it was coupled to a running Train session in a way
@@ -38,15 +47,11 @@ const HOMING_STATE_LABEL = {
   aborted: 'Aborted',
 }
 
-const TrainSettingsSection = ({ status, trainSessionRunning }) => {
+const TrainSettingsSection = ({ status }) => {
   const { isOpen, onToggle } = useDisclosure({ defaultIsOpen: true })
 
   const [setupError, setSetupError] = useState(null)
   const [setupBusy, setSetupBusy] = useState(false)
-
-  const [measuredLengthText, setMeasuredLengthText] = useState('')
-  const [calibError, setCalibError] = useState(null)
-  const [calibBusy, setCalibBusy] = useState(false)
 
   const [maxLengthText, setMaxLengthText] = useState('')
   const [maxLengthError, setMaxLengthError] = useState(null)
@@ -56,12 +61,9 @@ const TrainSettingsSection = ({ status, trainSessionRunning }) => {
   const [r0Error, setR0Error] = useState(null)
   const [r0Busy, setR0Busy] = useState(false)
 
-  const [kText, setKText] = useState('')
-  const [kError, setKError] = useState(null)
-  const [kBusy, setKBusy] = useState(false)
-
   const [enforcedBusy, setEnforcedBusy] = useState(false)
   const [homeEnforcedBusy, setHomeEnforcedBusy] = useState(false)
+  const [resistanceUnitBusy, setResistanceUnitBusy] = useState(false)
   const [bufferText, setBufferText] = useState('')
   const [bufferError, setBufferError] = useState(null)
   const [bufferBusy, setBufferBusy] = useState(false)
@@ -96,7 +98,7 @@ const TrainSettingsSection = ({ status, trainSessionRunning }) => {
   const control = status?.control
   const cable = status?.cable
   const setupSessionRunning = Boolean(control?.running && control?.mode === 'exercise')
-  const anotherModeRunning = Boolean(control?.running && !trainSessionRunning && !setupSessionRunning)
+  const anotherModeRunning = Boolean(control?.running && !setupSessionRunning)
   const action = setupSessionRunning ? control?.extra?.action ?? null : null
   const homingState = setupSessionRunning ? control?.extra?.homing_state ?? null : null
   const isHomed = cable?.is_homed ?? false
@@ -111,23 +113,6 @@ const TrainSettingsSection = ({ status, trainSessionRunning }) => {
       setSetupError(e.message)
     } finally {
       setSetupBusy(false)
-    }
-  }
-
-  const handleCalibrate = async () => {
-    const measured = Number(measuredLengthText)
-    if (measuredLengthText === '' || !Number.isFinite(measured) || measured < 0) {
-      setCalibError('Measured length must be a non-negative number')
-      return
-    }
-    setCalibError(null)
-    setCalibBusy(true)
-    try {
-      await calibrateSpoolK(measured)
-    } catch (e) {
-      setCalibError(e.message)
-    } finally {
-      setCalibBusy(false)
     }
   }
 
@@ -167,24 +152,6 @@ const TrainSettingsSection = ({ status, trainSessionRunning }) => {
     }
   }
 
-  const kNumber = Number(kText)
-  const kValid = kText !== '' && Number.isFinite(kNumber)
-  const handleUpdateK = async () => {
-    if (!kValid) {
-      setKError('k must be a number')
-      return
-    }
-    setKError(null)
-    setKBusy(true)
-    try {
-      await updateSpoolK(kNumber)
-    } catch (e) {
-      setKError(e.message)
-    } finally {
-      setKBusy(false)
-    }
-  }
-
   const handleToggleEnforced = async () => {
     setEnforcedBusy(true)
     try {
@@ -204,6 +171,22 @@ const TrainSettingsSection = ({ status, trainSessionRunning }) => {
       setSetupError(e.message)
     } finally {
       setHomeEnforcedBusy(false)
+    }
+  }
+
+  // Resistance display unit preference (item 2, 5 Aug 2026) -- display-only:
+  // never changes what unit force is stored/evaluated in
+  // (core/cable/train_profiles.py stays Newtons), only which unit the Train
+  // tab's profile builder (and anywhere else resistance is shown to a user)
+  // presents. Persisted the same way the guard toggles above are.
+  const handleToggleResistanceUnit = async () => {
+    setResistanceUnitBusy(true)
+    try {
+      await updateTrainSettings({ resistanceDisplayUnitKg: !cable?.resistance_display_unit_kg })
+    } catch (e) {
+      setSetupError(e.message)
+    } finally {
+      setResistanceUnitBusy(false)
     }
   }
 
@@ -287,6 +270,29 @@ const TrainSettingsSection = ({ status, trainSessionRunning }) => {
                 </Text>
               )}
 
+              {/* Resistance display unit preference (item 2) -- no setup
+                  session needed, this is a pure display preference, not a
+                  hardware action. */}
+              <Box>
+                <FormControl display="flex" alignItems="center">
+                  <FormLabel htmlFor="resistance-unit-kg" mb="0" fontSize="sm" color="gray.200">
+                    Display resistance in kilograms (instead of Newtons)
+                  </FormLabel>
+                  <Switch
+                    id="resistance-unit-kg"
+                    colorScheme="odrive"
+                    isChecked={Boolean(cable?.resistance_display_unit_kg)}
+                    onChange={handleToggleResistanceUnit}
+                    isDisabled={resistanceUnitBusy}
+                  />
+                </FormControl>
+                <Text fontSize="xs" color="gray.500" mt={1}>
+                  Applies to the Train tab's resistance profile builder (and anywhere else resistance is shown to
+                  you, not to a developer). Internally, everything is still stored and calculated in Newtons --
+                  this only changes which unit you enter/read values in.
+                </Text>
+              </Box>
+
               {/* Homing -- same routes/state machine ExerciseTab.jsx uses */}
               <Box borderTop="1px solid" borderColor="gray.700" pt={3}>
                 <HStack justify="space-between" mb={2}>
@@ -299,16 +305,25 @@ const TrainSettingsSection = ({ status, trainSessionRunning }) => {
                 </HStack>
                 <HStack spacing={3} wrap="wrap" mb={3}>
                   {!setupSessionRunning ? (
-                    <Button size="sm" colorScheme="odrive" onClick={() => run(startExerciseSession)} isDisabled={setupBusy || trainSessionRunning || anotherModeRunning}>
+                    <Button size="sm" colorScheme="odrive" onClick={() => run(startExerciseSession)} isDisabled={setupBusy || anotherModeRunning}>
                       Start setup session
                     </Button>
                   ) : (
                     <>
                       <Button size="sm" colorScheme="odrive" onClick={() => run(homeExercise)} isDisabled={setupBusy || action === 'homing'}>Home</Button>
+                      <Button size="sm" variant="outline" onClick={() => run(goHomeExercise)} isDisabled={setupBusy || action === 'homing' || !isHomed}>
+                        Go Home
+                      </Button>
                       <Button size="sm" colorScheme="red" variant="outline" onClick={() => run(abortHoming)} isDisabled={setupBusy || action !== 'homing'}>Abort</Button>
                     </>
                   )}
                 </HStack>
+                <Text fontSize="xs" color="gray.500" mb={3}>
+                  <Text as="span" fontWeight="semibold" color="gray.400">Home</Text> reels in and sets that
+                  point as the new zero. <Text as="span" fontWeight="semibold" color="gray.400">Go Home</Text> reels
+                  in the same controlled way but leaves the existing home reference untouched -- use it to return
+                  the carriage safely without recalibrating.
+                </Text>
 
                 {homingSettingsError && (
                   <Alert status="error" variant="left-accent" mb={2}><AlertIcon /><AlertDescription>{homingSettingsError}</AlertDescription></Alert>
@@ -372,7 +387,7 @@ const TrainSettingsSection = ({ status, trainSessionRunning }) => {
 
                 <FormControl display="flex" alignItems="center">
                   <FormLabel htmlFor="train-enforce-home" mb="0" fontSize="sm" color="gray.200">
-                    Enforce home-side guard during Train
+                    Enforce home-side guard
                   </FormLabel>
                   <Switch
                     id="train-enforce-home"
@@ -383,17 +398,13 @@ const TrainSettingsSection = ({ status, trainSessionRunning }) => {
                   />
                 </FormControl>
                 <Text fontSize="xs" color="gray.500" mt={1} mb={3}>
-                  When on, a Train session hard-stops if the cable goes past the home end of the calibrated range.
-                  Independent of the max-extension toggle below.{' '}
-                  <Text as="span" color="gray.400" fontStyle="italic">
-                    Only takes effect once a Train session is running — has no effect on the setup session above
-                    (homing/calibration), which always enforces its own always-on guard regardless of this toggle.
-                  </Text>
+                  When on, hard-stops any session (Train, or Go Home/Homing/manual moves right here) if the cable
+                  goes past the home end of the calibrated range. Independent of the max-extension toggle below.
                 </Text>
 
                 <FormControl display="flex" alignItems="center">
                   <FormLabel htmlFor="train-enforce-max" mb="0" fontSize="sm" color="gray.200">
-                    Enforce max-extension guard during Train
+                    Enforce max-extension guard
                   </FormLabel>
                   <Switch
                     id="train-enforce-max"
@@ -404,15 +415,19 @@ const TrainSettingsSection = ({ status, trainSessionRunning }) => {
                   />
                 </FormControl>
                 <Text fontSize="xs" color="gray.500" mt={1}>
-                  When on, a Train session hard-stops if the cable goes past the max end of the calibrated range.{' '}
-                  <Text as="span" color="gray.400" fontStyle="italic">
-                    Only takes effect once a Train session is running — has no effect on the setup session above
-                    (homing/calibration), which always enforces its own always-on guard regardless of this toggle.
-                  </Text>
+                  When on, hard-stops any session (Train, or Go Home/Homing/manual moves right here) if the cable
+                  goes past the max end of the calibrated range. Disabling either toggle turns this guard off
+                  entirely for Go Home/Homing/manual moves (not per-side); Train still enforces each side
+                  independently.
                 </Text>
               </Box>
 
-              {/* Spool calibration: radius (r0) + wrap-growth correction (k) */}
+              {/* Spool calibration: base radius (r0) only -- the manual
+                  wrap-growth correction (k) controls were removed (no
+                  longer used; the Experimental Spool Growth Calibration
+                  below supersedes it). k/calibrate_k still exist server-side
+                  as the fallback model and for SpoolModelDiagnostics'
+                  visibility -- nothing to migrate, this is UI-only. */}
               <Box borderTop="1px solid" borderColor="gray.700" pt={3}>
                 <Text fontSize="sm" fontWeight="semibold" color="gray.200" mb={2}>Spool calibration</Text>
 
@@ -420,7 +435,7 @@ const TrainSettingsSection = ({ status, trainSessionRunning }) => {
                 {r0Error && (
                   <Alert status="error" variant="left-accent" mb={2}><AlertIcon /><AlertDescription>{r0Error}</AlertDescription></Alert>
                 )}
-                <HStack spacing={3} align="flex-end" mb={4}>
+                <HStack spacing={3} align="flex-end">
                   <InputGroup size="sm" w="130px">
                     <Input type="text" inputMode="decimal" fontFamily="mono" value={r0Text} onChange={(e) => setR0Text(e.target.value)} />
                     <InputRightAddon px={2} fontSize="xs">m</InputRightAddon>
@@ -430,43 +445,9 @@ const TrainSettingsSection = ({ status, trainSessionRunning }) => {
                     Bare spool radius, before any cable/webbing wrap builds up. Affects every force/velocity conversion.
                   </Text>
                 </HStack>
-
-                <Text fontSize="xs" color="gray.400" mb={1}>
-                  Wrap-growth correction (k) — how much the effective radius grows per turn as cable wraps on top of itself.
-                </Text>
-                {calibError && (
-                  <Alert status="error" variant="left-accent" mb={2}><AlertIcon /><AlertDescription>{calibError}</AlertDescription></Alert>
-                )}
-                <HStack spacing={3} align="flex-end" mb={3}>
-                  <Box>
-                    <Text fontSize="xs" color="gray.400" mb={1}>Measured length</Text>
-                    <InputGroup size="sm" w="130px">
-                      <Input type="text" inputMode="decimal" fontFamily="mono" value={measuredLengthText} onChange={(e) => setMeasuredLengthText(e.target.value)} />
-                      <InputRightAddon px={2} fontSize="xs">m</InputRightAddon>
-                    </InputGroup>
-                  </Box>
-                  <Button size="sm" onClick={handleCalibrate} isLoading={calibBusy} isDisabled={!setupSessionRunning || !isHomed}>
-                    Calibrate from measurement
-                  </Button>
-                  <Text fontSize="xs" color="gray.400">current k: {cable?.k != null ? cable.k.toFixed(6) : '—'}</Text>
-                </HStack>
-                <Text fontSize="xs" color="gray.400" mb={1}>
-                  Or set k directly (already know it from a previous calibration) — still checked against the same
-                  physical-plausibility range as above.
-                </Text>
-                {kError && (
-                  <Alert status="error" variant="left-accent" mb={2}><AlertIcon /><AlertDescription>{kError}</AlertDescription></Alert>
-                )}
-                <HStack spacing={3} align="flex-end">
-                  <InputGroup size="sm" w="130px">
-                    <Input type="text" inputMode="decimal" fontFamily="mono" value={kText} onChange={(e) => setKText(e.target.value)} />
-                    <InputRightAddon px={2} fontSize="xs">m/rad</InputRightAddon>
-                  </InputGroup>
-                  <Button size="sm" onClick={handleUpdateK} isLoading={kBusy}>Set k</Button>
-                </HStack>
               </Box>
 
-              <SpoolGrowthCalibration status={status} trainSessionRunning={trainSessionRunning} />
+              <SpoolGrowthCalibration status={status} />
 
               {/* Graph telemetry buffer duration */}
               <Box borderTop="1px solid" borderColor="gray.700" pt={3}>

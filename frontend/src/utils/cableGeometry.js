@@ -13,6 +13,21 @@
 
 const TURNS_TO_RADIANS = 2 * Math.PI
 
+/** Mirrors core/cable/torque_calibration.py's GRAVITY_M_S2. */
+export const GRAVITY_M_S2 = 9.81
+
+/** Force (N) <-> equivalent lifted mass (kg) -- a direct force/g
+ * relationship, no spool geometry involved. Used wherever a resistance
+ * value is displayed/entered in kg instead of N (item 2, resistance display
+ * unit preference). */
+export function forceNFromMassKg(massKg) {
+  return massKg * GRAVITY_M_S2
+}
+
+export function massKgFromForceN(forceN) {
+  return forceN / GRAVITY_M_S2
+}
+
 /** Mirrors core/cable/geometry.py's length_from_turns_delta(). */
 export function lengthFromTurnsDelta(turnsDelta, r0, k) {
   const theta = Math.abs(turnsDelta) * TURNS_TO_RADIANS
@@ -43,6 +58,44 @@ export function speedMsFromTurnsS(turnsPerS, r0) {
 /** Mirrors core/profiles/units.py's torque_to_force(). */
 export function forceFromTorque(torqueNm, r0) {
   return torqueNm / r0
+}
+
+/** Mirrors core/profiles/units.py's force_to_torque(). */
+export function torqueFromForce(forceN, r0) {
+  return forceN * r0
+}
+
+// ---- Torque/force calibration (items 6/7) -- mirrors
+// core/cable/torque_calibration.py's TorqueCalibration.corrected_torque_nm()/
+// raw_torque_nm_for_corrected(). `scale`/`offset` come straight from
+// `cable.torque_model` (backend/app/exercise_routes.py's _cable_status_dict()),
+// default to the identity model (1, 0) so an uncalibrated rig is unaffected.
+//
+// Sign-preserving, magnitude-only correction (5 Aug 2026 fix -- see the
+// Python original's module docstring for the full rationale): the fitted
+// scale/offset correct how BIG the torque is, never which direction it's
+// in. Fitting/correcting the signed value directly baked whatever sign the
+// calibration holds happened to be recorded with into `scale` itself,
+// producing a model that silently broke (even flipped sign) for a raw
+// reading in the other direction. Keep in exact lockstep with the Python
+// original; do not reintroduce a second, drifted formula.
+
+/** Raw (motor-constant-only) torque estimate -> calibrated real torque. */
+export function correctedTorqueNm(rawNm, scale = 1.0, offset = 0.0) {
+  if (rawNm === 0) return 0
+  const sign = Math.sign(rawNm)
+  return sign * (scale * Math.abs(rawNm) + offset)
+}
+
+/** Inverse of correctedTorqueNm() -- what raw Nm value to actually command
+ * so the real, physical torque delivered matches `correctedNm`. Magnitude is
+ * floored at 0 -- a raw torque magnitude can't be negative. */
+export function rawTorqueNmForCorrected(correctedNm, scale = 1.0, offset = 0.0) {
+  if (scale === 0) return 0
+  if (correctedNm === 0) return 0
+  const sign = Math.sign(correctedNm)
+  const magnitude = Math.max(0, (Math.abs(correctedNm) - offset) / scale)
+  return sign * magnitude
 }
 
 // ---- Piecewise growth-calibration mirror (train_tab_build_spec.md

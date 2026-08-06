@@ -72,6 +72,16 @@ def _cable_status_dict() -> dict:
             ),
             "spool_growth_calibration_in_progress": cs.spool_growth_calibration_in_progress,
         },
+        # Torque/force calibration (items 6/7): corrects the fixed-
+        # MOTOR_TORQUE_CONSTANT torque estimate against recorded known-
+        # weight measurements -- see core/cable/torque_calibration.py. The
+        # board constant is included alongside it so the developer panel can
+        # show the starting-point estimate the calibration is correcting,
+        # not just the corrected model in isolation.
+        "torque_model": {
+            **cs.torque_calibration.describe(),
+            "motor_torque_constant_nm_per_a": board_constants.MOTOR_TORQUE_CONSTANT,
+        },
         "homing_current_threshold_a": cs.homing_current_threshold_a,
         "homing_velocity_turns_s": cs.homing_velocity_turns_s,
         "homing_current_limit_a": cs.homing_current_limit_a,
@@ -87,6 +97,11 @@ def _cable_status_dict() -> dict:
         "isokinetic_governor_gain": cs.isokinetic_governor_gain,
         "isokinetic_velocity_filter_alpha": cs.isokinetic_velocity_filter_alpha,
         "max_extension_force_taper_m": cs.max_extension_force_taper_m,
+        # Resistance display unit preference (item 2): display-only, set via
+        # /api/train/update_settings (Setup tab), surfaced here too so any
+        # consumer of /api/exercise/status (Control/Testing) can read it
+        # without a second round-trip through /api/train/status.
+        "resistance_display_unit_kg": cs.resistance_display_unit_kg,
         "position_guard_warning_turns": cs.position_guard_warning_turns,
         "position_guard_hard_turns": cs.position_guard_hard_turns,
         # Zeroed-at-home position, distinct from the raw absolute encoder
@@ -145,6 +160,14 @@ def register(app) -> None:
     @app.route("/api/exercise/home", methods=["POST"])
     def exercise_home():
         return _dispatch_action("home")
+
+    @app.route("/api/exercise/go_home", methods=["POST"])
+    def exercise_go_home():
+        """Reels the cable back to home the same controlled way Home does,
+        but never redefines the home reference (core/cable/exercise_mode.py's
+        _apply_go_home) -- lets the carriage be returned home without
+        recalibrating."""
+        return _dispatch_action("go_home")
 
     @app.route("/api/exercise/abort_homing", methods=["POST"])
     def exercise_abort_homing():
@@ -466,4 +489,43 @@ def register(app) -> None:
         growth calibration, reverting to the plain r0/k model. The "start
         over" button."""
         control_routes.cable_state.set_growth_points([])
+        return jsonify({"cable": _cable_status_dict()})
+
+    # ---- Torque/force calibration (items 6/7) ----
+
+    @app.route("/api/exercise/record_torque_calibration_point", methods=["POST"])
+    def exercise_record_torque_calibration_point():
+        """Records one calibration measurement: pair the known weight the
+        user is currently holding (e.g. via a Testing-tab position move)
+        with the live torque_est at that same moment. Direct CableState
+        mutation, same shape as calibrate_k/record_growth_point -- no mode
+        action needed, since this just reads whatever sample is already
+        flowing through the shared control_session, regardless of which
+        mode is actually driving the motor right now."""
+        body = request.get_json(silent=True) or {}
+        known_weight_kg = body.get("known_weight_kg")
+        if known_weight_kg is None:
+            return jsonify({"error": "known_weight_kg required"}), 400
+
+        cs = control_routes.cable_state
+        latest = control_routes.control_session.status().get("latest_sample")
+        if not latest:
+            return jsonify({"error": "No live telemetry available -- start a session first"}), 400
+
+        try:
+            cs.add_torque_calibration_point(
+                known_weight_kg=float(known_weight_kg),
+                raw_torque_nm=latest["torque_est"],
+                position_turns=latest["position"],
+            )
+            return jsonify({"cable": _cable_status_dict()})
+        except (ValueError, TypeError, RuntimeError) as e:
+            return jsonify({"error": str(e)}), 400
+
+    @app.route("/api/exercise/clear_torque_calibration", methods=["POST"])
+    def exercise_clear_torque_calibration():
+        """Always available -- wipes the SAVED torque calibration,
+        reverting to the identity (scale=1, offset=0) model. Same "start
+        over" convention as clear_growth_calibration above."""
+        control_routes.cable_state.clear_torque_calibration()
         return jsonify({"cable": _cable_status_dict()})

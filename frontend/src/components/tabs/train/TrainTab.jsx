@@ -6,7 +6,6 @@ import {
 } from '@chakra-ui/react'
 import { useTrainTelemetry } from '../../../hooks/useTrainTelemetry'
 import { startTrainSession, stopTrainSession, setTrainProfile, previewTrainProfile } from '../../../api/train'
-import TrainSettingsSection from './TrainSettingsSection'
 import TrainProfileEditor from './TrainProfileEditor'
 import TelemetryTimeSeriesChart from '../../shared/TelemetryTimeSeriesChart'
 import TrainPositionChart from './TrainPositionChart'
@@ -173,7 +172,7 @@ const TrainTab = ({ isActive = true }) => {
         {!isHomed && !anotherModeRunning && (
           <Alert status="info" variant="left-accent">
             <AlertIcon />
-            <AlertDescription>Cable is not homed yet — open Settings / Startup below to home before starting Train.</AlertDescription>
+            <AlertDescription>Cable is not homed yet — open the Setup tab to home before starting Train.</AlertDescription>
           </Alert>
         )}
 
@@ -240,8 +239,6 @@ const TrainTab = ({ isActive = true }) => {
           </CardBody>
         </Card>
 
-        <TrainSettingsSection status={status} trainSessionRunning={trainSessionRunning} />
-
         <TrainProfileEditor
           key={`profile-editor-${profileEditorKey}`}
           onStart={handleStart}
@@ -249,6 +246,7 @@ const TrainTab = ({ isActive = true }) => {
           sessionRunning={trainSessionRunning}
           busy={busy || anotherModeRunning || !isHomed}
           positionRangeM={positionRangeM}
+          resistanceUnitKg={Boolean(cable?.resistance_display_unit_kg)}
         />
 
         <TelemetryTimeSeriesChart

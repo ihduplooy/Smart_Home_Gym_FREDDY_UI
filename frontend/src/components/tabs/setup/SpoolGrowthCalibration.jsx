@@ -24,7 +24,7 @@ import {
 // action shape as start_max_calibration, just a different action name
 // (start_spool_growth_calibration) so it can't be confused with actually
 // setting the max extension.
-const SpoolGrowthCalibration = ({ status, trainSessionRunning }) => {
+const SpoolGrowthCalibration = ({ status }) => {
   const [lengthText, setLengthText] = useState('')
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -33,7 +33,7 @@ const SpoolGrowthCalibration = ({ status, trainSessionRunning }) => {
   const cable = status?.cable
   const spoolModel = cable?.spool_model
   const setupSessionRunning = Boolean(control?.running && control?.mode === 'exercise')
-  const anotherModeRunning = Boolean(control?.running && !trainSessionRunning && !setupSessionRunning)
+  const anotherModeRunning = Boolean(control?.running && !setupSessionRunning)
   const action = setupSessionRunning ? control?.extra?.action ?? null : null
   const isHomed = cable?.is_homed ?? false
   const inProgress = action === 'spool_growth_calibrating'
