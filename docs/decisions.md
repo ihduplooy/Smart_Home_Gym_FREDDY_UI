@@ -3280,3 +3280,84 @@ global preference) — kept the change scoped to the one place explicitly
 asked for (the Train tab's resistance profile builder) rather than
 threading a new global preference through every force-shaped field in the
 app.
+
+## 17 August 2026 — Repetitive testing sub-tab, adjustable settle tolerance, and a mock-fidelity gap found along the way
+
+Added a **Repetitive testing** sub-tab alongside Configure move in the
+Testing tab (`RepetitiveTesting.jsx`), for running a defined sequence of
+position-mode moves (each with its own distance/unit, velocity, torque
+limit) a chosen number of times in a row — built ahead of upcoming
+endurance/thermal characterization work. Configure move itself is
+untouched, just relocated one level deeper into its own `TabPanel` of a new
+`Tabs` wrapper around the same card (`TestingTab.jsx`'s own header comment
+and behavior — Known Weight, Move Distance, Move Velocity, single Torque
+Limit, live Update — are unchanged).
+
+There's no backend "move finished" signal to build a sequence off of —
+`ControlSession.status()`/`PositionMode` never expose anything like
+`trajectory_done` (confirmed: nothing in `core/control/modes.py`,
+`core/hardware/odrive_hw.py`, or the ODrive attributes read anywhere in
+this codebase reports trajectory completion). "Settled" is instead
+inferred client-side: the live sample's position within a tolerance of the
+commanded target AND velocity below a threshold, sustained for 3
+consecutive polls (debounces normal trajectory-following noise before a
+move has actually stopped), with a 20s per-move timeout as a safety net
+against a move that never settles (e.g. torque-limited against real load).
+
+That position tolerance is now a user-adjustable "Settle tolerance" field
+(default 0.02 turns) rather than a fixed constant — a tight tolerance can
+leave a real rig chasing the last fraction of a turn before a move is
+allowed to advance, needlessly slowing a long repetition sequence down.
+The velocity threshold isn't exposed as its own field; it scales with the
+same input at the ratio the two were originally fixed at (1.5×), so the
+one control loosens both halves of "settled" together rather than adding a
+second field for a distinction most users won't care to tune separately.
+
+**Bug found via an actual browser run, not by lint/build/the test suite**:
+the first version of the "stopped externally" safety net (catches the
+top-level STOP button, another tab, or a hardware auto-stop cancelling the
+sequence out from under it) checked a `running` boolean prop in its own
+`useEffect([running, busy])`. That prop only updates on the parent's own
+~150ms telemetry poll cycle, which lags just behind this component's own
+start/resume call finishing — so the effect fired inside that gap and
+misread the sequence's own just-started session as an external stop,
+halting every run immediately after Start. Fixed by folding the same check
+into the effect that's already gated on a *new* telemetry sample arriving
+(`status?.latest_sample?.t` changing) instead of its own independent
+trigger — that guarantees `status` is at least as fresh as the render that
+caused it, so the check can only ever evaluate once genuinely caught up.
+Caught by starting a sequence against the mock backend in a headless
+browser and watching it self-abort within the first render; none of
+lint, the build, or the existing test suite exercise real telemetry
+timing closely enough to have caught it.
+
+**Separately found while trying to verify a full run completes naturally
+against `ODRIVE_MOCK=1`**: it can't. `backend/app/mock_odrive.py`'s
+`encoder.pos_estimate` is driven purely by wall-clock time (`2.0 *
+sin(t * 0.5)`, `_animated_value()`) — it never reads back
+`axis.controller.input_pos`, so it doesn't track a commanded position
+target regardless of what's sent; current/torque telemetry animates the
+same time-driven way, independent of the command. "Wait for live position
+to approach the commanded target" — the whole basis of this feature's
+settle detection — can therefore never reliably succeed against the mock.
+This is a pre-existing mock-fidelity gap, not introduced here and not
+specific to this feature (the same kind of check against Configure Move's
+own moves would hit it too), not a bug in the new code. Verifying this
+feature's settle/advance behavior end-to-end requires real hardware; no
+workaround exists in the mock today.
+
+Also worth recording here: while researching the brake-resistor question
+for the accompanying real-hardware testing plan, confirmed this rig's
+brake resistor is driven by two independent mechanisms (see 5 August
+2026's DC-bus-overvoltage-ramp entry above) — a current-based path
+(`max_regen_current`) reacting to *sustained* regenerative current, and a
+voltage-ramp path added specifically because a fast/hard pull could
+outrun the current-based path. Repeated automated lifting/lowering of a
+hung weight (no human pulling involved) generates sustained regenerative
+current during the lowering — and to a lesser extent, the deceleration —
+phases, exactly like any other regenerative-braking event: it exercises
+the *current-based* path the same way a real workout would, just without
+the fast-transient case a hard yank specifically stresses. This directly
+informs open item #2 (brake-resistor thermal verification, v1.9 §6) and is
+written up for hands-on use in
+`docs/testing_tab_experiment_guide.md`.

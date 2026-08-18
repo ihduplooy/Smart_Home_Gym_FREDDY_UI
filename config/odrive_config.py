@@ -207,7 +207,7 @@ odrv0.config.dc_bus_overvoltage_trip_level = 27.0    # raised from the prior 25V
 odrv0.config.enable_dc_bus_overvoltage_ramp = True
 odrv0.config.dc_bus_overvoltage_ramp_start = 24.0
 odrv0.config.dc_bus_overvoltage_ramp_end = 25.0
-odrv0.config.dc_max_positive_current = 15.0          # bus-side draw limit, above motor current_lim
+odrv0.config.dc_max_positive_current = 20.0          # bus-side draw limit, must be >= motor current_lim (20.0A)
 odrv0.config.dc_max_negative_current = -3.0          # conservative: brake resistor wattage tbc
 odrv0.config.max_regen_current = 0                   # conservative: brake resistor wattage tbc
 

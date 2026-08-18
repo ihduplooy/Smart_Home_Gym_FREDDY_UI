@@ -66,6 +66,15 @@ from .state import CableState
 
 log = logging.getLogger(__name__)
 
+
+def _estimated_power_w(sample: TelemetrySample) -> float:
+    """Mechanical power estimate: torque (Nm) * angular velocity (rad/s).
+    Local helper rather than a shared import since the module it used to
+    live in (core/experiments/telemetry.py) is gone from this checkout --
+    same formula TrainMode.tick() also uses."""
+    return sample.torque_est * sample.velocity * 2.0 * math.pi
+
+
 _LAYER_A_ACTIONS = frozenset({
     "arm",
     "home",
@@ -195,6 +204,8 @@ class ExerciseMode(BaseMode):
             "fault_reason": self._last_fault_reason,
             "range_start_length_m": None,
             "range_end_length_m": None,
+            "bus_voltage_v": sample.bus_voltage_v,
+            "estimated_power_w": _estimated_power_w(sample),
         }
 
         # Two-tier position guard (spec: warning band added 24 July 2026 --

@@ -1,15 +1,16 @@
 """core/cable/power_limiter.py tests (exercise_tab_build_spec_layerB.md §12).
 
 Uses the real, measured constants (SPOOL_RADIUS_M=0.035, MOTOR_TORQUE_CONSTANT
-=0.516875 (still an estimate), MOTOR_PHASE_RESISTANCE_OHM=0.38) so these
-tests double as a standing check on the §5.2 break-even analysis.
+=0.492 (bench-measured, open item #13 resolved), MOTOR_PHASE_RESISTANCE_OHM
+=0.38) so these tests double as a standing check on the §5.2 break-even
+analysis.
 """
 
 import pytest
 
 from core.cable.power_limiter import apply_power_limit, estimate_regen_power_w
 
-KT = 0.516875
+KT = 0.492
 R_PHASE = 0.38
 R_SPOOL = 0.035
 

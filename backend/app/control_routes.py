@@ -12,7 +12,7 @@ from dataclasses import asdict
 from flask import jsonify, request
 
 from core.cable import CableState, ExerciseMode, TrainMode
-from core.control.modes import MODES_BY_NAME
+from core.control.modes import MODES_BY_NAME, PositionMode, TorqueMode, VelocityMode
 from core.control.session import ControlSession, DEFAULT_HARDWARE_FACTORIES
 from core.hardware.odrive_hw import OdriveHardware
 from core.profiles import PROFILE_REGISTRY, OverloadWrapper, Phase
@@ -51,6 +51,16 @@ control_session = ControlSession(
     hardware_factories={**DEFAULT_HARDWARE_FACTORIES, "real": _real_hardware_factory},
     mode_factories={
         **MODES_BY_NAME,
+        # Control tab (Velocity/Torque/Position): same shared cable_state
+        # injected as Exercise/Train below, so their tick()s can also fill
+        # the sensor-derived CSV columns (bus_voltage_v/estimated_force_n/
+        # cable_velocity_m_s/etc, see core/control/modes.py's module
+        # docstring) instead of leaving them blank the way MODES_BY_NAME's
+        # own bare-class factories (still used as the ControlSession default
+        # elsewhere, e.g. tests) would.
+        "velocity": lambda: VelocityMode(cable_state),
+        "torque": lambda: TorqueMode(cable_state),
+        "position": lambda: PositionMode(cable_state),
         # Force feedback (formerly a separate "force" mode) is now just a
         # set of actions (engage/disengage/update_params/resume) on this
         # same ExerciseMode instance -- merged 24 July 2026 so home/move and
@@ -63,8 +73,8 @@ control_session = ControlSession(
         # following the "exercise" precedent directly above.
         "train": lambda: TrainMode(cable_state),
         # Testing tab (items 2/6/7): drives this same shared session's
-        # existing "position" mode directly (MODES_BY_NAME's PositionMode,
-        # already in the spread above) -- no dedicated mode of its own.
+        # existing "position" mode directly ("position" above, now also
+        # cable_state-injected) -- no dedicated mode of its own.
         # Calibration-point recording is a direct CableState mutation
         # (backend/app/exercise_routes.py's record_torque_calibration_point),
         # not a ControlSession action, so it needs nothing registered here.

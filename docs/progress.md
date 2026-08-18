@@ -2674,3 +2674,118 @@ when it's presented as "resistance."
       calibration run (with the corrected model) and a check of Control
       tab's now-calibrated Torque display/targets on real hardware are
       still open for the next bench session.
+
+---
+
+# Repetitive testing sub-tab, adjustable settle tolerance — 17 August 2026
+
+Built ahead of upcoming endurance/brake-resistor thermal testing (open
+items #2/#3, v1.9 §6): a way to run a defined sequence of position-mode
+moves a chosen number of times without babysitting Configure Move's single
+Start/Update button per rep.
+
+## Item 1 — Repetitive testing sub-tab
+
+- [x] New `RepetitiveTesting.jsx`, added as a second `TabPanel` inside a
+      `Tabs` wrapper now around the Testing tab's "Configure move" card
+      (`TestingTab.jsx`). Configure move's own content/behavior is
+      byte-for-byte unchanged, just moved one level deeper into the first
+      panel.
+- [x] Move list (add/remove rows): each row has its own Move Distance
+      (m/turns), Move Velocity, and Torque Limit (Nm/N/kg) — same field
+      set and conversions as Configure Move, minus Known Weight (not a
+      calibration workflow here).
+- [x] Repetitions count, a user-adjustable Settle tolerance (turns,
+      default 0.02 — see Item 2), and Start / Pause / Resume / Stop
+      controls with a live "Repetition X/Y — Move A/B" readout.
+- [x] Settle detection is client-side (no backend "move finished" signal
+      exists — confirmed nothing in `core/control/modes.py` or
+      `core/hardware/odrive_hw.py` exposes `trajectory_done`): live
+      position within tolerance of the commanded target AND velocity below
+      a threshold, sustained 3 consecutive polls, 20s per-move timeout as
+      a safety net.
+- [x] Pause stops the motor immediately (`stopControlSession()`) and
+      remembers the current rep/move so Resume re-issues the same move and
+      continues; Stop resets the whole sequence.
+
+## Item 2 — Settle tolerance made adjustable
+
+- [x] The position-tolerance half of "settled" was a fixed 0.02-turn
+      constant in the first version; a tight tolerance can leave a real
+      rig chasing the last fraction of a turn before a move is allowed to
+      advance. Now a "Settle tolerance" input (turns), editable while
+      idle, feeding the same settle check directly.
+- [x] Velocity threshold isn't a separate field — it scales with the same
+      input at the ratio the two were originally fixed at (1.5×), so one
+      control loosens both halves of "settled" together.
+
+## Item 3 — Bug found via an actual browser run
+
+- [x] **Bug**: the "stopped externally" safety net (catches the top-level
+      STOP button, another tab, or a hardware auto-stop) originally lived
+      in its own `useEffect([running, busy])`, reading a `running` prop
+      that only updates on the parent's ~150ms poll cycle. That lagged
+      just behind this component's own start/resume call finishing, so
+      the effect fired inside the gap and misread the sequence's own
+      just-started session as an external stop — every run halted
+      immediately after Start.
+- [x] **Fixed**: folded the same check into the effect already gated on a
+      *new* telemetry sample arriving (`status?.latest_sample?.t`
+      changing) rather than its own independent trigger — guarantees
+      `status` is at least as fresh as the render that caused it.
+- [x] **Caught by**: launching the mock backend + frontend and driving it
+      with a headless Chrome instance (Playwright against the system
+      Chrome install, no project dependency added) — not by lint, the
+      build, or the existing test suite, none of which exercise real
+      telemetry timing.
+
+## Item 4 — Mock-fidelity gap found while verifying a full run
+
+- [x] **Found**: `ODRIVE_MOCK=1`'s `encoder.pos_estimate`
+      (`backend/app/mock_odrive.py`) is driven purely by wall-clock time
+      (`2.0 * sin(t * 0.5)`) — it never reads back
+      `axis.controller.input_pos`, so it doesn't track a commanded
+      position target at all. "Wait for position to reach target" (this
+      feature's whole settle-detection basis) can never reliably succeed
+      against the mock.
+- [x] **Scoped correctly**: confirmed against the mock's actual source,
+      not inferred from behavior alone. Pre-existing, not introduced here,
+      and not specific to this feature (the same check against Configure
+      Move's own moves would hit it too). No workaround exists in the mock
+      today — verifying settle/advance behavior end-to-end requires real
+      hardware.
+
+## Item 5 — Brake-resistor question, answered from the actual regen path
+
+- [x] Researched (not asked to implement) whether repeated automated
+      lifting/lowering — no human pulling involved — can exercise the
+      brake resistor at all, ahead of the project owner's planned
+      endurance test. Confirmed from the 5 August DC-bus-overvoltage-ramp
+      work (`core/hardware/odrive_hw.py`, `config/board_constants.py`):
+      the brake resistor is driven by two independent mechanisms, a
+      current-based path (`max_regen_current`, reacts to *sustained* regen
+      current) and a voltage-ramp path (reacts to *fast* transients,
+      added because a hard pull could outrun the current-based path
+      alone). Repeated automated up/down motion under a hung weight
+      generates sustained regenerative current during the lowering phase
+      exactly like a real workout would — it exercises the current-based
+      path with no yank required. Write-up for hands-on use in
+      `docs/testing_tab_experiment_guide.md`.
+
+## Verified
+
+- [x] Backend: `.venv/bin/python -m pytest core/tests -q` — 415 passed
+      (unchanged; no backend files touched this round).
+- [x] Frontend: `npx vitest run` — 79 passed, 2 skipped (unchanged
+      baseline); `npx eslint src/` — clean; `npm run build` — succeeds.
+- [x] Live-verified against `ODRIVE_MOCK=1` in a real browser (Playwright
+      driving the system Chrome install): sub-tab renders, Configure Move
+      unchanged, move list add/remove works, Start/Pause/Resume/Stop cycle
+      works end-to-end, Settle tolerance field renders/validates/disables
+      correctly while running. The one thing NOT verified against the mock
+      is a sequence completing *naturally* (advancing move-to-move via
+      real settle detection) — see Item 4, a mock limitation, not a gap in
+      this testing pass.
+- [ ] **Not yet run on real hardware.** Everything above is mock-verified
+      only; the settle/advance behavior this whole feature depends on
+      needs a real bench session to confirm.

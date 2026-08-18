@@ -3,6 +3,7 @@ import {
   Box, VStack, HStack, Text, Heading, Badge, Button, Card, CardHeader, CardBody,
   SimpleGrid, Stat, StatLabel, StatNumber, Input, InputGroup, InputRightAddon, Select,
   Alert, AlertIcon, AlertTitle, AlertDescription, List, ListItem,
+  Tabs, TabList, TabPanels, Tab, TabPanel,
 } from '@chakra-ui/react'
 import { useTestingTelemetry } from '../../../hooks/useTestingTelemetry'
 import { startControlSession, setControlTarget, stopControlSession } from '../../../api/control'
@@ -12,6 +13,7 @@ import {
 } from '../../../utils/cableGeometry'
 import TelemetryTimeSeriesChart from '../../shared/TelemetryTimeSeriesChart'
 import TorqueModelDiagnostics from './TorqueModelDiagnostics'
+import RepetitiveTesting from './RepetitiveTesting'
 
 // Item 2: rebuilt on Control tab's own `mode: "position"` session (see
 // useTestingTelemetry.js's header comment) instead of a dedicated
@@ -34,7 +36,7 @@ const CHART_LINES = [
 // Not user-facing (item 2: "we don't need acceleration or deceleration
 // controls for now") -- matches board_constants.TRAP_TRAJ_ACCEL_LIMIT, the
 // same default ExerciseMode._apply_move/PositionMode fall back to.
-const DEFAULT_ACCEL_DECEL = 1.0
+export const DEFAULT_ACCEL_DECEL = 1.0
 
 const TestingTab = ({ isActive = true }) => {
   const { status, cable, series, connected } = useTestingTelemetry(isActive)
@@ -283,8 +285,16 @@ const TestingTab = ({ isActive = true }) => {
         </Card>
 
         <Card bg="gray.800" variant="elevated">
-          <CardHeader><Heading size="sm" color="white">Configure move</Heading></CardHeader>
-          <CardBody>
+          <Tabs colorScheme="odrive" isLazy lazyBehavior="keepMounted">
+            <CardHeader pb={0}>
+              <TabList border="none">
+                <Tab color="gray.300" _selected={{ color: 'odrive.300', borderColor: 'odrive.300' }}>Configure move</Tab>
+                <Tab color="gray.300" _selected={{ color: 'odrive.300', borderColor: 'odrive.300' }}>Repetitive testing</Tab>
+              </TabList>
+            </CardHeader>
+            <CardBody>
+              <TabPanels>
+                <TabPanel p={0}>
             <VStack align="stretch" spacing={4}>
               <HStack spacing={4} wrap="wrap">
                 <Box>
@@ -394,7 +404,21 @@ const TestingTab = ({ isActive = true }) => {
                 </Stat>
               </SimpleGrid>
             </VStack>
-          </CardBody>
+                </TabPanel>
+                <TabPanel p={0}>
+                  <RepetitiveTesting
+                    status={status}
+                    cable={cable}
+                    running={running}
+                    anotherModeRunning={anotherModeRunning}
+                    isHomed={isHomed}
+                    rEffAtCurrent={rEffAtCurrent}
+                    latestSample={latestSample}
+                  />
+                </TabPanel>
+              </TabPanels>
+            </CardBody>
+          </Tabs>
         </Card>
 
         <Card bg="gray.800" variant="elevated">

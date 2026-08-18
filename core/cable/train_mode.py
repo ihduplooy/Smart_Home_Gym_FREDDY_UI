@@ -33,19 +33,30 @@ itself (see decisions.md; "exercise" was never added there either).
 """
 
 import logging
+import math
 from typing import Any, Dict
 
 from config import board_constants
 from core.hardware.interface import ControlMode, HardwareInterface, TelemetrySample
 from core.profiles.detectors import CABLE_SIGN
-from core.profiles.units import force_to_torque
+from core.profiles.units import force_to_torque, torque_to_force
 
 from ..control.modes import BaseMode
+from .geometry import speed_m_s_from_turns_s
 from .limits import check_runtime_guard_split, validate_homed
+from .power_limiter import estimate_regen_power_w
 from .state import CableState
 from .train_profiles import TrainProfile
 
 log = logging.getLogger(__name__)
+
+
+def _estimated_power_w(sample: TelemetrySample) -> float:
+    """Mechanical power estimate: torque (Nm) * angular velocity (rad/s).
+    Same formula ExerciseMode.tick() uses -- kept as a local helper rather
+    than a shared import since the module it used to live in
+    (core/experiments/telemetry.py) is gone from this checkout."""
+    return sample.torque_est * sample.velocity * 2.0 * math.pi
 
 _VALID_ACTIONS = frozenset({"run", "set_profile"})
 
@@ -109,10 +120,45 @@ class TrainMode(BaseMode):
     # ---- tick ----
 
     def tick(self, hardware: HardwareInterface, sample: TelemetrySample) -> Dict[str, Any]:
+        # bus_voltage_v/estimated_power_w/estimated_force_n/cable_velocity_m_s
+        # are plain sample-derived readings (not profile-dependent), so
+        # they're set here unconditionally -- same reasoning as
+        # ExerciseMode.tick()'s own top-of-function extra dict -- rather than
+        # only on the profile-evaluated path below, so the CSV logger
+        # (core/telemetry/csv_logger.py's already-reserved columns) gets them
+        # even on the un-homed early return. r_eff_at_position()/r0 both fall
+        # back to sensible un-homed defaults (see CableState), so these are
+        # safe to compute before the is_homed check. commanded_force_n
+        # mirrors target_force_n under the CSV logger's column name
+        # (core/control/session.py reads "commanded_force_n", not
+        # "target_force_n" -- that key is left alone since test_train_mode.py
+        # and TrainTab.jsx both depend on it).
+        #
+        # force_state/experiment_state and Testing-tab's position_m/
+        # velocity_m_s/target_position_m are left out of `extra` entirely --
+        # they're concepts from ExerciseMode's force-feedback state machine
+        # and the (currently unbuilt) Testing tab that don't map onto Train's
+        # single-state profile playback; the CSV logger writes an empty cell
+        # for any key a mode doesn't set. power_limiter_active is set (not
+        # omitted) but always False: Train intentionally never clamps force
+        # against the regen power budget the way ExerciseMode does, so False
+        # here means "not applied", same as it would for any other mode that
+        # doesn't use the limiter.
+        cable_velocity_m_s = speed_m_s_from_turns_s(CABLE_SIGN * sample.velocity, self.cable_state.r0)
         extra: Dict[str, Any] = {
             "target_force_n": 0.0,
+            "commanded_force_n": 0.0,
             "commanded_torque_nm": 0.0,
             "cable_length_m": None,
+            "bus_voltage_v": sample.bus_voltage_v,
+            "estimated_power_w": _estimated_power_w(sample),
+            "estimated_force_n": torque_to_force(
+                self.cable_state.corrected_torque_nm(sample.torque_est),
+                r0=self.cable_state.r_eff_at_position(sample.position),
+            ),
+            "cable_velocity_m_s": cable_velocity_m_s,
+            "regen_power_w": 0.0,
+            "power_limiter_active": False,
         }
 
         if self.cable_state.is_homed:
@@ -179,5 +225,17 @@ class TrainMode(BaseMode):
         self._target_force_n = force_n
         self._commanded_torque_nm = torque_nm
         extra["target_force_n"] = force_n
+        extra["commanded_force_n"] = force_n
         extra["commanded_torque_nm"] = torque_nm
+        # Informational only (spec decision: telemetry, not enforcement) --
+        # P_mech - P_copper for the force actually being commanded here, same
+        # formula ExerciseMode's power limiter uses, but Train never clamps
+        # against it (power_limiter_active above stays False unconditionally).
+        extra["regen_power_w"] = estimate_regen_power_w(
+            force_n,
+            cable_velocity_m_s,
+            board_constants.MOTOR_TORQUE_CONSTANT,
+            board_constants.MOTOR_PHASE_RESISTANCE_OHM,
+            self.cable_state.r0,
+        )
         return extra

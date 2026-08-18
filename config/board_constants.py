@@ -33,8 +33,9 @@ MOTOR_TYPE_HIGH_CURRENT = 0  # odrive.enums.MOTOR_TYPE_HIGH_CURRENT
 # typical hobby aircraft/actuator motors. These values are conservative starting
 # points confirmed against a reference config written specifically for hoverboard
 # motors on ODrive v3.6 (see config/odrive_config.py for full annotations).
-MOTOR_CURRENT_LIM = 15.0  # A — live-tuned at the bench 21 July 2026 (was 10.0 conservative
-                          # first pass); still conservative/bench-safe. See docs/decisions.md
+MOTOR_CURRENT_LIM = 20.0  # A — raised from 15.0 (confirmed safe on live hardware, 7 Aug
+                          # 2026). Prior history: live-tuned at the bench 21 July 2026
+                          # (was 10.0 conservative first pass). See docs/decisions.md
                           # ("Live gain tuning" entry). May need revisiting once real cable
                           # load (not a free-spinning wheel) is introduced in 2A.
 MOTOR_REQUESTED_CURRENT_RANGE = 25.0
@@ -48,21 +49,22 @@ MOTOR_RESISTANCE_CALIB_MAX_VOLTAGE = 4.0
 MOTOR_CURRENT_CONTROL_BANDWIDTH = 100  # reduced from ODrive's default for stability
                                        # given this motor's higher inductance
 
-# Fallback estimate carried over from Layer B WHAT planning (23 July 2026,
-# exercise_tab_WHAT_plan.md §4.6): 8.27 / 16, using ODrive's published
-# hoverboard-motor KV fallback of ~16. This replaces the old 0.06 placeholder,
-# which was wrong by roughly an order of magnitude. Still a FALLBACK ESTIMATE,
-# NOT a bench-measured value — the hand-spin KV measurement (open item #13) is
-# the trustworthy path before this number is relied on for any reported
-# result. Used by core/hardware to compute torque_est = MOTOR_TORQUE_CONSTANT
-# * current_iq, and (Layer A, exercise_tab_build_spec_layerA.md §3.2) as the
-# one force->torque conversion site alongside SPOOL_RADIUS_M for
-# CALIB_HOLD_FORCE_N. NOTE: raising this also raises OdriveHardware's derived
-# torque clamp ceiling (current_lim * torque_constant) on the Control/Profiles
-# tabs' TorqueMode/ProfileMode — a real, visible, spec-mandated behavior
-# change on those tabs, not just an Exercise-tab-local one (docs/decisions.md,
-# "Exercise tab Layer A" entry).
-MOTOR_TORQUE_CONSTANT = 0.492  # Nm/A, fallback estimate (8.27 / 16)
+# RESOLVED (open item #13, 7 Aug 2026): bench-measured via hand-spin KV
+# measurement -- confirms the fallback value this constant already carried
+# (8.27 / 16, from Layer B WHAT planning, 23 July 2026, exercise_tab_WHAT_
+# plan.md §4.6, using ODrive's published hoverboard-motor KV fallback of
+# ~16 -- itself a replacement for the old 0.06 placeholder, which was wrong
+# by roughly an order of magnitude). No longer a fallback estimate pending
+# verification; 0.492 is the confirmed value. Used by core/hardware to
+# compute torque_est = MOTOR_TORQUE_CONSTANT * current_iq, and (Layer A,
+# exercise_tab_build_spec_layerA.md §3.2) as the one force->torque
+# conversion site alongside SPOOL_RADIUS_M for CALIB_HOLD_FORCE_N. NOTE:
+# raising this also raises OdriveHardware's derived torque clamp ceiling
+# (current_lim * torque_constant) on the Control/Profiles tabs' TorqueMode/
+# ProfileMode -- a real, visible, spec-mandated behavior change on those
+# tabs, not just an Exercise-tab-local one (docs/decisions.md, "Exercise
+# tab Layer A" entry).
+MOTOR_TORQUE_CONSTANT = 0.492  # Nm/A, bench-measured (hand-spin KV, open item #13 resolved)
 
 # Measured phase resistance — consistent across every motor calibration run
 # on this unit (Layer B §5.2, exercise_tab_build_spec_layerB.md). Distinct
@@ -325,8 +327,8 @@ SPOOL_MIN_EFFECTIVE_RADIUS_M = 0.005  # 5mm floor on r_eff -- below this the
 # --------------------------------------------------------------------------
 # Exercise tab, Layer B Session B1 (concentric force feedback) — tuning
 # values. Chosen against this board's live config plus the measured
-# SPOOL_RADIUS_M=0.035m, MOTOR_PHASE_RESISTANCE_OHM=0.38ohm, and the still-
-# estimated MOTOR_TORQUE_CONSTANT=0.516875 (open item #13, unresolved).
+# SPOOL_RADIUS_M=0.035m, MOTOR_PHASE_RESISTANCE_OHM=0.38ohm, and the
+# bench-measured MOTOR_TORQUE_CONSTANT=0.492 (open item #13, resolved).
 # Full reasoning for each in docs/decisions.md ("Exercise tab Layer B"
 # entry), including the §5.2 break-even power analysis these numbers feed.
 # Two rows from the spec's own §9 table are intentionally NOT added as new
@@ -356,24 +358,19 @@ SPOOL_MIN_EFFECTIVE_RADIUS_M = 0.005  # 5mm floor on r_eff -- below this the
 # --------------------------------------------------------------------------
 
 # Force ceiling/floor.
-FORCE_MAX_N = 150.0  # Hard ceiling on commanded cable force. Bound by two
-                     # independent things: (1) _TORQUE_LIMIT_NM (core/
-                     # hardware/odrive_hw.py) = MOTOR_CURRENT_LIM *
-                     # MOTOR_TORQUE_CONSTANT = 15A * 0.516875 = 7.753 Nm ->
-                     # F = torque/SPOOL_RADIUS_M ~= 221.5 N is the absolute
-                     # structural ceiling; (2) thermal -- at 150N, Iq~=10.16A,
-                     # P_copper~=58.8W continuously REGARDLESS of velocity
-                     # (heating the motor, not the bus -- see the
-                     # MOTOR_PHASE_RESISTANCE_OHM comment above), and this
-                     # board has no thermal sensing (open item #1). 150N sits
-                     # well below the structural ceiling (spec §9: "start
-                     # well below what the hardware can do") while still
-                     # being a meaningful heavy-pull force for early testing.
-                     # The §14 first-live-run protocol starts at the LOWEST
-                     # force and escalates by hand while checking motor
-                     # temperature -- this constant is the software ceiling
-                     # that testing approaches gradually, not a recommended
-                     # starting point.
+FORCE_MAX_N = 250.0  # Hard ceiling on commanded cable force. Raised from the
+                     # original 150.0 (2026-08-07). Structural ceiling derivation:
+                     # _TORQUE_LIMIT_NM (core/hardware/odrive_hw.py) =
+                     # MOTOR_CURRENT_LIM * MOTOR_TORQUE_CONSTANT = 20.0A * 0.492
+                     # = 9.84 Nm -> F = torque/SPOOL_RADIUS_M = 9.84/0.035 ~=
+                     # 281 N, the absolute structural ceiling. Current value (250 N)
+                     # is well below this ceiling. Also constrained by thermal
+                     # concerns: at 250N, Iq~=17.86A, P_copper~=152W continuously
+                     # REGARDLESS of velocity (heating the motor, not the bus -- see
+                     # MOTOR_PHASE_RESISTANCE_OHM comment above), and this board has
+                     # no thermal sensing (open item #1). The §14 first-live-run
+                     # protocol (start at LOWEST force, escalate by hand while
+                     # checking motor temperature) applies with urgency.
 FORCE_MIN_N = 5.0  # Hold-state floor (spec §4.1: HOLDING drops to a low hold
                    # force, never a hard zero -- that would drop the load).
                    # Also reused, per spec §9's "F_base may be non-zero"
@@ -712,11 +709,15 @@ def as_dict():
             "regen_power_budget_w": REGEN_POWER_BUDGET_W,
             "max_extension_force_taper_m": MAX_EXTENSION_FORCE_TAPER_M,
             "motor_phase_resistance_ohm": MOTOR_PHASE_RESISTANCE_OHM,
-            "torque_constant_is_estimate": True,  # spec §10.3: UI honesty label
-                                                   # gate. Flip to False only
-                                                   # once open item #13 (KV
-                                                   # hand-spin measurement)
-                                                   # lands.
+            "torque_constant_is_estimate": False,  # spec §10.3: UI honesty
+                                                    # label gate. Flipped
+                                                    # False 7 Aug 2026 --
+                                                    # open item #13 (KV
+                                                    # hand-spin measurement)
+                                                    # landed; MOTOR_TORQUE_
+                                                    # CONSTANT=0.492 is now
+                                                    # bench-measured, not a
+                                                    # fallback.
         },
         "train": {
             "train_max_extension_enforced_default": TRAIN_MAX_EXTENSION_ENFORCED_DEFAULT,

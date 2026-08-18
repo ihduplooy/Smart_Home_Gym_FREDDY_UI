@@ -18,13 +18,93 @@ stay fully generic across Velocity/Torque/Profile without isinstance checks:
   - status_target(validated_value): JSON/CSV-safe representation of the
     currently active target (identity by default; ProfileMode reports the
     profile's current primary parameter instead of the raw profile object).
+
+Control-tab telemetry (mirrors train_tab_build_spec.md's TrainMode amendment
+-- see core/cable/train_mode.py's own tick() comment for the fuller
+rationale): Velocity/Torque/Position all optionally take the shared
+`CableState` singleton (backend/app/control_routes.py's `mode_factories`
+overrides inject it, same "exercise"/"train" precedent) and, when given one,
+fill the same sensor-derived CSV columns Train/Exercise do --
+bus_voltage_v/estimated_power_w/estimated_force_n/cable_velocity_m_s/
+cable_length_m/regen_power_w -- purely informational, never clamped
+(power_limiter_active always False; nothing here changes what gets commanded
+to the hardware). `cable_state` defaults to None so bare VelocityMode()/
+TorqueMode()/PositionMode() construction (core/tests/test_modes.py, and
+MODES_BY_NAME's own bare-class factories below) keeps working unchanged --
+tick() just returns {} in that case, same as BaseMode's own default.
+PositionMode additionally aliases cable_length_m/cable_velocity_m_s into
+position_m/velocity_m_s and derives target_position_m from its own move
+target -- the Testing tab drives this same "position" mode directly
+(frontend/src/hooks/useTestingTelemetry.js's header comment) and already
+computes those exact three fields client-side for its chart; this is that
+same math, finally landing in the CSV instead of only ever existing in the
+browser tab's memory.
+
+`core.cable`'s geometry/power_limiter helpers are imported lazily inside
+_cable_extra() below rather than at module level: core/cable/__init__.py
+eagerly imports ExerciseMode/TrainMode, which import BaseMode from *this*
+module, so a top-level `from core.cable... import ...` here would be a real
+import cycle (core.control.modes -> core.cable -> core.control.modes,
+mid-initialization) the first time anything imports this module before
+core.cable has already been loaded. Deferring the import to call time sidesteps
+it entirely -- by the time any tick() actually runs, the whole app has long
+since finished importing both packages in whatever order backend/app/
+control_routes.py (or a test) started with.
 """
 
+import math
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
+from config import board_constants
 from core.hardware.interface import ControlMode, HardwareInterface, TelemetrySample
 from core.profiles import PhaseDetector, ProfileState, RepCounter, ResistanceProfile
+from core.profiles.detectors import CABLE_SIGN
+from core.profiles.units import torque_to_force
+
+
+def _cable_extra(cable_state, sample: TelemetrySample) -> Dict[str, Any]:
+    """Sensor-derived cable telemetry shared by Velocity/Torque/PositionMode
+    below -- same formulas core/cable/train_mode.py's tick() uses (r_eff_at_
+    position()/corrected_torque_nm() are CableState's shared home for the
+    force<->torque conversion, per its own docstring), just factored out
+    once here since three classes in this file need the identical
+    computation rather than TrainMode/ExerciseMode's one-off need each."""
+    if cable_state is None:
+        return {}
+    from core.cable.geometry import speed_m_s_from_turns_s
+    from core.cable.power_limiter import estimate_regen_power_w
+
+    estimated_force_n = torque_to_force(
+        cable_state.corrected_torque_nm(sample.torque_est),
+        r0=cable_state.r_eff_at_position(sample.position),
+    )
+    cable_velocity_m_s = speed_m_s_from_turns_s(CABLE_SIGN * sample.velocity, cable_state.r0)
+    extra: Dict[str, Any] = {
+        "bus_voltage_v": sample.bus_voltage_v,
+        "estimated_power_w": sample.torque_est * sample.velocity * 2.0 * math.pi,
+        "estimated_force_n": estimated_force_n,
+        "cable_velocity_m_s": cable_velocity_m_s,
+        "cable_length_m": None,
+        # Informational only, same as TrainMode's own regen_power_w -- based
+        # on the *estimated* (measured) force here rather than a commanded
+        # one, since Velocity/Torque/Position don't command a target force
+        # at all (there's nothing analogous to Train's profile/Exercise's
+        # force-feedback target to base it on instead).
+        "regen_power_w": estimate_regen_power_w(
+            estimated_force_n,
+            cable_velocity_m_s,
+            board_constants.MOTOR_TORQUE_CONSTANT,
+            board_constants.MOTOR_PHASE_RESISTANCE_OHM,
+            cable_state.r0,
+        ),
+        "power_limiter_active": False,
+    }
+    if cable_state.is_homed:
+        extra["cable_length_m"] = cable_state.spool_geometry.length_from_turns_delta(
+            sample.position - cable_state.home_turns
+        )
+    return extra
 
 
 class BaseMode(ABC):
@@ -61,6 +141,9 @@ class VelocityMode(BaseMode):
     hardware_mode = ControlMode.VELOCITY
     unit = "turns/s"
 
+    def __init__(self, cable_state=None):
+        self.cable_state = cable_state
+
     def validate_target(self, value) -> float:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise TypeError(f"Velocity target must be numeric, got {value!r}")
@@ -68,6 +151,9 @@ class VelocityMode(BaseMode):
 
     def apply_target(self, hardware: HardwareInterface, value: float) -> None:
         hardware.set_velocity_target(value)
+
+    def tick(self, hardware: HardwareInterface, sample: TelemetrySample) -> Dict[str, Any]:
+        return _cable_extra(self.cable_state, sample)
 
 
 class TorqueMode(BaseMode):
@@ -77,6 +163,9 @@ class TorqueMode(BaseMode):
     hardware_mode = ControlMode.TORQUE
     unit = "Nm"
 
+    def __init__(self, cable_state=None):
+        self.cable_state = cable_state
+
     def validate_target(self, value) -> float:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise TypeError(f"Torque target must be numeric, got {value!r}")
@@ -84,6 +173,9 @@ class TorqueMode(BaseMode):
 
     def apply_target(self, hardware: HardwareInterface, value: float) -> None:
         hardware.set_torque_target(value)
+
+    def tick(self, hardware: HardwareInterface, sample: TelemetrySample) -> Dict[str, Any]:
+        return _cable_extra(self.cable_state, sample)
 
 
 class PositionMode(BaseMode):
@@ -106,8 +198,9 @@ class PositionMode(BaseMode):
     hardware_mode = ControlMode.POSITION
     unit = "turns"
 
-    def __init__(self):
+    def __init__(self, cable_state=None):
         self._last_absolute_target = None
+        self.cable_state = cable_state
 
     def validate_target(self, value) -> Dict[str, Any]:
         if not isinstance(value, dict):
@@ -159,6 +252,26 @@ class PositionMode(BaseMode):
             "accel_decel": validated_value["accel_decel"],
             "torque_limit": validated_value["torque_limit"],
         }
+
+    def tick(self, hardware: HardwareInterface, sample: TelemetrySample) -> Dict[str, Any]:
+        extra = _cable_extra(self.cable_state, sample)
+        # The Testing tab drives this same mode directly (see module
+        # docstring) and already names these fields position_m/velocity_m_s/
+        # target_position_m for its own chart -- aliased here from the
+        # cable_length_m/cable_velocity_m_s _cable_extra() already computed,
+        # rather than recomputing the same conversion twice.
+        extra["position_m"] = extra.get("cable_length_m")
+        extra["velocity_m_s"] = extra.get("cable_velocity_m_s")
+        extra["target_position_m"] = None
+        if (
+            self.cable_state is not None
+            and self.cable_state.is_homed
+            and self._last_absolute_target is not None
+        ):
+            extra["target_position_m"] = self.cable_state.spool_geometry.length_from_turns_delta(
+                self._last_absolute_target - self.cable_state.home_turns
+            )
+        return extra
 
 
 class ProfileMode(BaseMode):
