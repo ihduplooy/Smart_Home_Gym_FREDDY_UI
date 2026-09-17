@@ -90,6 +90,13 @@ class ControlSession:
         self._ring: deque = deque(maxlen=RING_BUFFER_SIZE)
         self._logger: Optional[CsvLogger] = None
         self._last_extra: Dict = {}
+        # Survives past stop() (unlike status()'s "log_path", which reads
+        # straight off self._logger and goes back to None once a session
+        # ends) -- added for torque-calibration run analysis
+        # (backend/app/exercise_routes.py's analyze_torque_calibration_run),
+        # which needs to read back the CSV of a run that has already
+        # finished, not the one currently in progress.
+        self._last_log_path: Optional[str] = None
 
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -181,6 +188,8 @@ class ControlSession:
             self._running = False
             thread = self._thread
             if self._logger is not None:
+                if self._logger.path is not None:
+                    self._last_log_path = str(self._logger.path)
                 try:
                     self._logger.close()
                 except Exception:
@@ -287,6 +296,7 @@ class ControlSession:
                 "error_message": self._error_message,
                 "errors": list(self._last_errors),
                 "log_path": str(self._logger.path) if self._logger and self._logger.path else None,
+                "last_log_path": self._last_log_path,
                 "latest_sample": asdict(latest) if latest is not None else None,
                 "phase": self._last_extra.get("phase"),
                 "rep_count": self._last_extra.get("rep_count"),

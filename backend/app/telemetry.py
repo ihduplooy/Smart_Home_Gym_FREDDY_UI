@@ -43,10 +43,32 @@ def telemetry_session(ws, serial: str):
     """
     paths: List[str] = []
     interval_ms = 200
-    odrv = attach_or_get(serial)
     lock = io_lock(serial)
 
     while True:
+        # Re-resolved every tick rather than captured once: attach_or_get()
+        # is cheap when the cached handle is alive (a dict lookup + two
+        # attribute touches), and self-heals via _handle_is_alive() when it
+        # isn't -- e.g. after a reboot() issued from the Command Console.
+        # Capturing `odrv` once for the WebSocket's whole lifetime left this
+        # loop reading a permanently-dead handle after any mid-session
+        # reboot (every read raising, reported as a stale {"error": ...} per
+        # path -- rendered as 0 on the sidebar) even though other routes
+        # (e.g. control_routes.py's get_shared_handle()) had already
+        # rediscovered a live one; only closing and reopening the connection
+        # (a full "Restart Freddy") picked up the healed handle. Found live,
+        # 20 Aug 2026.
+        try:
+            odrv = attach_or_get(serial)
+        except Exception as e:
+            log.warning("telemetry: device %s unavailable: %s", serial, e)
+            ws.send(json.dumps({
+                "timestamp": int(time.time() * 1000),
+                "data": {p: {"error": str(e)} for p in paths},
+            }))
+            time.sleep(interval_ms / 1000.0)
+            continue
+
         try:
             msg_raw = ws.receive(timeout=0.0)
         except Exception:

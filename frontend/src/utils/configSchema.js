@@ -16,6 +16,7 @@ export const STEPS = [
   { id: 'encoder', label: 'Encoder', description: 'Encoder type and calibration' },
   { id: 'control', label: 'Control', description: 'Control mode, gains and limits' },
   { id: 'interface', label: 'Interface', description: 'CAN, UART, step/dir and safety' },
+  { id: 'force', label: 'Force', description: 'The chain of limits that governs delivered force' },
   { id: 'apply', label: 'Apply', description: 'Review and write changes' },
 ]
 
@@ -47,7 +48,6 @@ export const SCHEMA = {
       {
         title: 'Current Limits & Brake',
         fields: [
-          f('config.dc_max_positive_current', 'Max Positive DC Current', { unit: 'A', decimals: 1, step: 1, tooltip: 'Maximum current drawn from the power supply. Typically your PSU/battery rating (e.g. 10–40 A).' }),
           f('config.dc_max_negative_current', 'Max Negative DC Current', { unit: 'A', decimals: 1, step: 0.1, tooltip: 'Maximum regenerative current returned to the supply. Must be negative (e.g. -1). With a brake resistor this can be small.' }),
           f('config.max_regen_current', 'Max Regen Current', { unit: 'A', decimals: 1, step: 0.5, tooltip: 'Limit on regenerative braking current. Start at 0 if unsure.' }),
           f('config.brake_resistance', 'Brake Resistance', { unit: 'Ω', decimals: 2, step: 0.1, tooltip: 'Resistance of the connected brake resistor (ODrive ships with 2Ω). Set 0 to disable.' }),
@@ -74,7 +74,6 @@ export const SCHEMA = {
           f('axis{n}.motor.config.motor_type', 'Motor Type', { kind: 'enum', enumName: 'ODrive.Motor.MotorType', tooltip: 'High Current for most BLDC/PMSM motors, Gimbal for high-resistance gimbal motors.' }),
           f('axis{n}.motor.config.pole_pairs', 'Pole Pairs', { unit: 'pairs', decimals: 0, step: 1, tooltip: 'Number of magnet pole pairs (magnets ÷ 2).' }),
           f('axis{n}.motor.config.torque_constant', 'Torque Constant (Kt)', { unit: 'Nm/A', decimals: 4, step: 0.001, derivedFromKv: true, tooltip: 'Nm per amp. Computed from motor Kv: Kt = 8.27 / Kv.' }),
-          f('axis{n}.motor.config.current_lim', 'Current Limit', { unit: 'A', decimals: 1, step: 1, tooltip: 'Maximum phase current. Gimbal motors ~10 A; hobby/high-current motors 20–100 A. Keep below your PSU and motor rating.' }),
         ],
       },
       {
@@ -83,7 +82,6 @@ export const SCHEMA = {
           f('axis{n}.motor.config.calibration_current', 'Calibration Current', { unit: 'A', decimals: 2, step: 0.1, tooltip: 'Current applied while measuring motor resistance/inductance.' }),
           f('axis{n}.motor.config.phase_resistance', 'Phase Resistance', { unit: 'Ω', decimals: 4, step: 0.001, tooltip: 'Motor winding resistance (measured by calibration).' }),
           f('axis{n}.motor.config.phase_inductance', 'Phase Inductance', { unit: 'H', decimals: 6, step: 0.00001, tooltip: 'Motor winding inductance (measured by calibration).' }),
-          f('axis{n}.motor.config.torque_lim', 'Torque Limit', { unit: 'Nm', decimals: 2, step: 0.1, allowInfinity: true, tooltip: 'Maximum commanded torque. Leave at Inf to be bounded only by the current limit; set ~2–5× your load torque to cap it.' }),
           f('axis{n}.motor.config.pre_calibrated', 'Pre-Calibrated', { kind: 'boolean', tooltip: 'Skip motor calibration on startup using stored resistance/inductance. Set after a successful calibration.' }),
         ],
       },
@@ -236,6 +234,30 @@ export const SCHEMA = {
         group: 'Step/Direction',
         fields: [
           f('axis{n}.config.step_dir_always_on', 'Step/Dir Always On', { kind: 'boolean', importance: 'advanced', tooltip: 'Keep step/direction input active even when the axis is idle.' }),
+        ],
+      },
+    ],
+  },
+
+  // The force delivered at the cable is bounded by a chain of limits, checked
+  // in this order: the PSU/bus can only source so much current
+  // (dc_max_positive_current), which bounds the motor phase current
+  // (current_lim), which — via the torque constant — bounds torque
+  // (torque_lim, currently unconstrained on the ODrive), which the app's own
+  // Software Power Limits then re-clamp in force/power terms. Whichever of
+  // these is smallest, converted to force, is what actually governs delivered
+  // force — hence grouping them together in the order they're enforced,
+  // rather than leaving them split across the Power/Motor steps where that
+  // relationship isn't visible.
+  force: {
+    axisScoped: true,
+    groups: [
+      {
+        title: 'Force & Torque Limit Chain',
+        fields: [
+          f('config.dc_max_positive_current', 'Max Positive DC Current', { unit: 'A', decimals: 1, step: 1, global: true, tooltip: 'Maximum current drawn from the power supply. Typically your PSU/battery rating (e.g. 10–40 A). First link in the chain: bounds everything downstream.' }),
+          f('axis{n}.motor.config.current_lim', 'Current Limit', { unit: 'A', decimals: 1, step: 1, tooltip: 'Maximum phase current. Gimbal motors ~10 A; hobby/high-current motors 20–100 A. Keep below your PSU and motor rating.' }),
+          f('axis{n}.motor.config.torque_lim', 'Torque Limit', { unit: 'Nm', decimals: 2, step: 0.1, allowInfinity: true, tooltip: 'Maximum commanded torque (ODrive register, currently unconstrained). Leave at Inf to be bounded only by the current limit; set ~2–5× your load torque to cap it.' }),
         ],
       },
     ],

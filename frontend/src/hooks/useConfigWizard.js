@@ -85,15 +85,23 @@ export function useConfigWizard() {
       setUnreadable(bad)
       // This project's board-constant defaults pre-fill the small, curated set
       // of fields we have an opinion on (config/board_constants.py) — but only
-      // the first time this axis is viewed this connection. After that,
-      // `desired` just tracks the live device snapshot (still overridable by
-      // the user's own edits via setValue/setValueByPath), so an Apply doesn't
-      // keep re-suggesting the project's fixed target as a "pending change"
-      // every time you deviate from it on purpose (e.g. testing a different
-      // mode from the Control tab).
+      // for a field the device itself didn't report a value for, and only the
+      // first time this axis is viewed this connection. After that, `desired`
+      // just tracks the live device snapshot (still overridable by the user's
+      // own edits via setValue/setValueByPath), so an Apply doesn't keep
+      // re-suggesting the project's fixed target as a "pending change" every
+      // time you deviate from it on purpose (e.g. testing a different mode
+      // from the Control tab). Live `snap` values are spread LAST so a
+      // successfully-read device value always wins over a board default for
+      // the same path — board_constants.py can drift from what's actually on
+      // the board (e.g. a gain re-tuned at the bench without updating this
+      // file), and a stale default silently winning here would both show the
+      // wrong value on load AND flag as a bogus pending Apply change (that
+      // stale value would look like a real, unread device value once merged
+      // into `desired`).
       if (!seededAxesRef.current.has(selectedAxis)) {
         seededAxesRef.current.add(selectedAxis)
-        setDesired({ ...snap, ...expandValues(boardDefaults, selectedAxis) })
+        setDesired({ ...expandValues(boardDefaults, selectedAxis), ...snap })
       } else {
         setDesired(snap)
       }
@@ -191,6 +199,19 @@ export function useConfigWizard() {
     const failed = (results || []).filter((r) => r.status !== 'ok')
     await backend.invokeCommand(serial, 'save_configuration', [])
     await pullConfig()
+    // save_configuration() reboots the board; the AS5047P absolute encoder's
+    // SPI link needs a moment to re-sync after power-up, and the reconnect
+    // above sometimes lands right in that window, latching spurious
+    // ENCODER_ERROR_ABS_SPI/AXIS_ERROR flags that don't reflect any real
+    // ongoing fault (confirmed live, 20 Aug 2026 — a Command Console write
+    // of the identical property, which never reboots, never trips this).
+    // core/hardware/odrive_hw.py's connect() already treats this class of
+    // stale post-reboot error as expected and clears it unconditionally on
+    // every fresh Control-session connect; this mirrors that same backstop
+    // for the Configuration wizard's own reconnect, which had no equivalent
+    // and was surfacing the raw transient straight to the user. Best-effort:
+    // a failure here shouldn't fail the whole Apply & Save.
+    await backend.invokeCommand(serial, 'clear_errors', []).catch(() => {})
     return { written: writes.length - failed.length, failed }
   }, [serial, changes, pullConfig])
 
@@ -247,6 +268,9 @@ export function useConfigWizard() {
       }
       await backend.invokeCommand(serial, 'save_configuration', [])
       await pullConfig()
+      // See applyChanges' matching comment: clears spurious post-reboot
+      // encoder/axis errors from save_configuration()'s reboot, best-effort.
+      await backend.invokeCommand(serial, 'clear_errors', []).catch(() => {})
       return { written: writes.length + calls.length - failed.length, failed }
     },
     [serial, pullConfig]

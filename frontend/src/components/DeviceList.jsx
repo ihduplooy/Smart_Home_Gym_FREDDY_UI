@@ -42,7 +42,7 @@ const StatusBadge = memo(({ connected }) => (
 ))
 StatusBadge.displayName = 'StatusBadge'
 
-const DeviceCard = memo(({ device, connected, onConnect, onDisconnect }) => (
+const DeviceCard = memo(({ device, connected, connecting, onConnect, onDisconnect }) => (
   <Card w="100%" className="device-card" bg={connected ? 'odrive.700' : 'gray.700'} variant="elevated">
     <CardBody p={2}>
       <VStack align="stretch" spacing={1}>
@@ -54,7 +54,7 @@ const DeviceCard = memo(({ device, connected, onConnect, onDisconnect }) => (
           {connected ? (
             <Button size="xs" colorScheme="red" onClick={onDisconnect}>Disconnect</Button>
           ) : (
-            <Button size="xs" colorScheme="green" onClick={() => onConnect(device)}>Connect</Button>
+            <Button size="xs" colorScheme="green" onClick={() => onConnect(device)} isLoading={connecting} loadingText="Connecting">Connect</Button>
           )}
         </HStack>
         <Text fontSize="xs" color="gray.300" fontFamily="mono" noOfLines={1}>
@@ -118,6 +118,7 @@ const DeviceList = () => {
   const [selectedError, setSelectedError] = useState(null)
   const [eStopBusy, setEStopBusy] = useState(false)
   const [resetBusy, setResetBusy] = useState(false)
+  const [connectBusy, setConnectBusy] = useState(false)
   const [errorsExpanded, setErrorsExpanded] = useState(false)
   const [cableStatus, setCableStatus] = useState(null)
   const [goHomeBusy, setGoHomeBusy] = useState(false)
@@ -154,8 +155,37 @@ const DeviceList = () => {
 
   // Stable callbacks so the memoized DeviceCard / ErrorRow children can bail out
   // of re-rendering when only live-status numbers change.
+  //
+  // Verifies the device actually answers before flipping to "Connected" --
+  // `d` here is just whatever the last Scan happened to return, which can be
+  // stale (found live, 20 Aug 2026: a physically-unplugged board can still
+  // be reported by discover_and_index()'s cache-first read for a while, and
+  // this used to accept that at face value and celebrate a "Connected" toast
+  // regardless -- readings then sit at zero with no indication anything's
+  // wrong until you try to actually do something). A cheap vbus_voltage
+  // read through the same /read route every other tab already uses is
+  // enough to distinguish "actually reachable right now" from "was in the
+  // last Scan's list."
   const handleConnect = useCallback(
-    (d) => {
+    async (d) => {
+      setConnectBusy(true)
+      try {
+        const result = await backend.readProperties(d.serial_number, ['vbus_voltage'])
+        const probe = result?.vbus_voltage
+        if (probe && typeof probe === 'object' && 'error' in probe) {
+          throw new Error(probe.error)
+        }
+      } catch (e) {
+        toast({
+          title: 'Connect failed',
+          description: e.message || 'Device did not respond. It may be unplugged, or the USB link may need a Restart Freddy.',
+          status: 'error',
+          duration: 6000,
+        })
+        return
+      } finally {
+        setConnectBusy(false)
+      }
       dispatch(connectDevice(d))
       toast({ title: 'Connected', description: `ODrive ${d.serial_number || ''}`.trim(), status: 'success', duration: 2000 })
     },
@@ -391,6 +421,7 @@ const DeviceList = () => {
             <DeviceCard
               device={availableDevices[0]}
               connected={isConnected && connectedDevice?.serial_number === availableDevices[0].serial_number}
+              connecting={connectBusy}
               onConnect={handleConnect}
               onDisconnect={handleDisconnect}
             />

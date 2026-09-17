@@ -24,6 +24,10 @@
 //                                                 isokinetic_governor_gain?, isokinetic_velocity_filter_alpha?,
 //                                                 max_extension_force_taper_m?, position_guard_warning_turns?,
 //                                                 position_guard_hard_turns? }
+//   POST /api/exercise/update_power_limits     { force_max_n?, regen_power_budget_w? } -- hardware safety
+//                                                 ceilings, live-adjustable since 18 Aug 2026 (see
+//                                                 core/cable/state.py); force_max_n is bounds-checked
+//                                                 against this board's structural force ceiling.
 //
 // Train tab calibration overhaul -- manual max-extension entry and the
 // experimental multi-point spool-growth calibration (see status.cable
@@ -37,9 +41,17 @@
 //   POST /api/exercise/save_growth_calibration
 //   POST /api/exercise/clear_growth_calibration
 //
-// Torque/force calibration (items 6/7 -- see status.cable.torque_model for
-// the currently-fitted scale/offset/equation/points):
-//   POST /api/exercise/record_torque_calibration_point { known_weight_kg }
+// Torque/force calibration (items 6/7; direction-aware run-based workflow,
+// replacing the old single-live-snapshot-while-holding approach, 21 Aug
+// 2026 -- see status.cable.torque_model for the currently-fitted per-
+// direction scale/offset/equation/points). Workflow: hang a known weight,
+// run it through real reps (e.g. Testing tab -> Repetitive testing), stop,
+// then analyze -> review -> record:
+//   POST /api/exercise/analyze_torque_calibration_run { known_weight_kg }
+//     -> { log_path, up: {..., rep_count, per_rep_raw_torque_nm} | null, down: {...} | null }
+//     read-only -- nothing saved until record_torque_calibration_point below.
+//   POST /api/exercise/record_torque_calibration_point { known_weight_kg, raw_torque_nm, r_eff_m, direction }
+//     normally called with one direction's result straight out of analyze above.
 //   POST /api/exercise/clear_torque_calibration
 //
 // Force Feedback (formerly a separate "force" session, merged 24 July 2026
@@ -176,8 +188,17 @@ export function clearGrowthCalibration() {
   return postJson('/api/exercise/clear_growth_calibration')
 }
 
-export function recordTorqueCalibrationPoint(knownWeightKg) {
-  return postJson('/api/exercise/record_torque_calibration_point', { known_weight_kg: knownWeightKg })
+export function analyzeTorqueCalibrationRun(knownWeightKg) {
+  return postJson('/api/exercise/analyze_torque_calibration_run', { known_weight_kg: knownWeightKg })
+}
+
+export function recordTorqueCalibrationPoint({ knownWeightKg, rawTorqueNm, rEffM, direction }) {
+  return postJson('/api/exercise/record_torque_calibration_point', {
+    known_weight_kg: knownWeightKg,
+    raw_torque_nm: rawTorqueNm,
+    r_eff_m: rEffM,
+    direction,
+  })
 }
 
 export function clearTorqueCalibration() {
@@ -208,4 +229,11 @@ export function updateForceSettings({
   if (positionGuardWarningTurns != null) body.position_guard_warning_turns = positionGuardWarningTurns
   if (positionGuardHardTurns != null) body.position_guard_hard_turns = positionGuardHardTurns
   return postJson('/api/exercise/update_force_settings', body)
+}
+
+export function updatePowerLimits({ forceMaxN, regenPowerBudgetW } = {}) {
+  const body = {}
+  if (forceMaxN != null) body.force_max_n = forceMaxN
+  if (regenPowerBudgetW != null) body.regen_power_budget_w = regenPowerBudgetW
+  return postJson('/api/exercise/update_power_limits', body)
 }

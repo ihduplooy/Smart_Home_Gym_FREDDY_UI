@@ -33,10 +33,14 @@ MOTOR_TYPE_HIGH_CURRENT = 0  # odrive.enums.MOTOR_TYPE_HIGH_CURRENT
 # typical hobby aircraft/actuator motors. These values are conservative starting
 # points confirmed against a reference config written specifically for hoverboard
 # motors on ODrive v3.6 (see config/odrive_config.py for full annotations).
-MOTOR_CURRENT_LIM = 20.0  # A — raised from 15.0 (confirmed safe on live hardware, 7 Aug
-                          # 2026). Prior history: live-tuned at the bench 21 July 2026
-                          # (was 10.0 conservative first pass). See docs/decisions.md
-                          # ("Live gain tuning" entry). May need revisiting once real cable
+MOTOR_CURRENT_LIM = 20  # I Set it to 20A, on 20 Aug, for testing
+                        # A — synced to the live board's actual current_lim, 18 Aug
+                          # 2026 (this file had drifted to 20.0 after the 7 Aug 2026
+                          # entry below; the live device was confirmed still at 15.0).
+                          # Prior history: live-tuned at the bench 21 July 2026 (was 10.0
+                          # conservative first pass), then this file was bumped to 20.0
+                          # on 7 Aug 2026 — see docs/decisions.md ("Live gain tuning"
+                          # entry) for that history. May need revisiting once real cable
                           # load (not a free-spinning wheel) is introduced in 2A.
 MOTOR_REQUESTED_CURRENT_RANGE = 25.0
 # NOTE: config/odrive_config.py's encoder offset calibration retry loop (open item
@@ -104,9 +108,12 @@ ENCODER_CALIB_RANGE = 10
 CONTROL_MODE_POSITION_CONTROL = 3  # odrive.enums.CONTROL_MODE_POSITION_CONTROL
 INPUT_MODE_TRAP_TRAJ = 5  # odrive.enums.INPUT_MODE_TRAP_TRAJ
 CONTROLLER_VEL_LIMIT = 10.0  # turns/s
-CONTROLLER_POS_GAIN = 6.0
-CONTROLLER_VEL_GAIN = 0.05
-CONTROLLER_VEL_INTEGRATOR_GAIN = 0.1
+# Re-synced to the live board's actual gains, 18 Aug 2026 -- this file had
+# drifted from what the 21 July 2026 session above landed on (pos_gain 6.0,
+# vel_gain 0.05, vel_integrator_gain 0.1) and no longer matched the device.
+CONTROLLER_POS_GAIN = 10.0
+CONTROLLER_VEL_GAIN = 0.6
+CONTROLLER_VEL_INTEGRATOR_GAIN = 1.23
 
 TRAP_TRAJ_VEL_LIMIT = 1.0  # turns/s
 TRAP_TRAJ_ACCEL_LIMIT = 1.0  # turns/s^2
@@ -361,10 +368,18 @@ SPOOL_MIN_EFFECTIVE_RADIUS_M = 0.005  # 5mm floor on r_eff -- below this the
 FORCE_MAX_N = 250.0  # Hard ceiling on commanded cable force. Raised from the
                      # original 150.0 (2026-08-07). Structural ceiling derivation:
                      # _TORQUE_LIMIT_NM (core/hardware/odrive_hw.py) =
-                     # MOTOR_CURRENT_LIM * MOTOR_TORQUE_CONSTANT = 20.0A * 0.492
-                     # = 9.84 Nm -> F = torque/SPOOL_RADIUS_M = 9.84/0.035 ~=
-                     # 281 N, the absolute structural ceiling. Current value (250 N)
-                     # is well below this ceiling. Also constrained by thermal
+                     # MOTOR_CURRENT_LIM * MOTOR_TORQUE_CONSTANT = 15.0A * 0.492
+                     # = 7.38 Nm -> F = torque/SPOOL_RADIUS_M = 7.38/0.035 ~=
+                     # 211 N, the absolute structural ceiling. NOTE (18 Aug 2026):
+                     # MOTOR_CURRENT_LIM was just re-synced from a stale 20.0 down to
+                     # the live board's actual 15.0 (see that constant's own comment),
+                     # which drops this derivation from ~281N to ~211N -- FORCE_MAX_N
+                     # (250N) now sits ABOVE the recomputed structural ceiling and is
+                     # only reachable in practice because OdriveHardware.set_torque_
+                     # target() independently clamps to _TORQUE_LIMIT_NM anyway.
+                     # Flagged, not changed here -- lowering FORCE_MAX_N to match is a
+                     # bench/product call, not part of this current_lim sync. Also
+                     # constrained by thermal
                      # concerns: at 250N, Iq~=17.86A, P_copper~=152W continuously
                      # REGARDLESS of velocity (heating the motor, not the bus -- see
                      # MOTOR_PHASE_RESISTANCE_OHM comment above), and this board has

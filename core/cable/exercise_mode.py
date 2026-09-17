@@ -194,7 +194,7 @@ class ExerciseMode(BaseMode):
             "force_state": self._force_state.value,
             "commanded_force_n": 0.0,
             "estimated_force_n": torque_to_force(
-                self.cable_state.corrected_torque_nm(sample.torque_est),
+                self.cable_state.corrected_torque_nm(sample.torque_est, cable_velocity_turns_s),
                 r0=self.cable_state.r_eff_at_position(sample.position),
             ),
             "cable_velocity_m_s": speed_m_s_from_turns_s(cable_velocity_turns_s, self.cable_state.r0),
@@ -494,8 +494,8 @@ class ExerciseMode(BaseMode):
         for label, v in (("concentric_force_n", concentric_force_n), ("eccentric_force_n", eccentric_force_n)):
             if isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0:
                 raise ValueError(f"{label} must be a non-negative number, got {v!r}")
-            if v > board_constants.FORCE_MAX_N:
-                raise ValueError(f"{label} {v!r} exceeds FORCE_MAX_N={board_constants.FORCE_MAX_N}")
+            if v > self.cable_state.force_max_n:
+                raise ValueError(f"{label} {v!r} exceeds force_max_n={self.cable_state.force_max_n}")
 
         velocity_target = value.get("velocity_target_turns_s", self._isokinetic_velocity_target_turns_s)
         if mode == "isokinetic":
@@ -598,7 +598,7 @@ class ExerciseMode(BaseMode):
 
         final_force = 0.0
         if self._force_state != ForceState.FAULT:
-            rate = board_constants.FORCE_MAX_N / (
+            rate = self.cable_state.force_max_n / (
                 self.cable_state.force_ramp_in_s
                 if self._target_force_n >= self._commanded_force_n
                 else self.cable_state.force_ramp_out_s
@@ -610,7 +610,7 @@ class ExerciseMode(BaseMode):
             limited_force, active = apply_power_limit(
                 self._commanded_force_n,
                 cable_velocity_m_s,
-                board_constants.REGEN_POWER_BUDGET_W,
+                self.cable_state.regen_power_budget_w,
                 board_constants.MOTOR_TORQUE_CONSTANT,
                 board_constants.MOTOR_PHASE_RESISTANCE_OHM,
                 self.cable_state.r0,
@@ -633,7 +633,7 @@ class ExerciseMode(BaseMode):
             # the calibration model says it should, not just the raw
             # motor-constant estimate.
             desired_torque_nm = force_to_torque(final_force, r0=self.cable_state.r_eff_at_position(sample.position))
-            signed_torque = -CABLE_SIGN * self.cable_state.raw_torque_nm_for_corrected(desired_torque_nm)
+            signed_torque = -CABLE_SIGN * self.cable_state.raw_torque_nm_for_corrected(desired_torque_nm, cable_velocity_turns_s)
             hardware.set_torque_target(signed_torque)
         else:
             self._power_limiter_active = False
@@ -729,11 +729,11 @@ class ExerciseMode(BaseMode):
                 velocity_turns_s=governing_velocity,
                 velocity_target_turns_s=self._isokinetic_velocity_target_turns_s,
                 force_base_n=base_force_n,
-                force_max_n=board_constants.FORCE_MAX_N,
+                force_max_n=self.cable_state.force_max_n,
                 governor_gain=self.cable_state.isokinetic_governor_gain,
             )
         else:
-            base_force = min(base_force_n, board_constants.FORCE_MAX_N)
+            base_force = min(base_force_n, self.cable_state.force_max_n)
 
         taper = 1.0
         if self._range_start_turns is not None and self._range_end_turns is not None:
@@ -766,7 +766,7 @@ class ExerciseMode(BaseMode):
             excess = excess_beyond_range(sample.position, self.cable_state.home_turns, self.cable_state.max_turns)
             span = max(self.cable_state.position_guard_hard_turns - self.cable_state.position_guard_warning_turns, 1e-9)
             brake_frac = min(1.0, max(0.0, excess - self.cable_state.position_guard_warning_turns) / span)
-            brake_force = board_constants.FORCE_MIN_N + brake_frac * (board_constants.FORCE_MAX_N - board_constants.FORCE_MIN_N)
+            brake_force = board_constants.FORCE_MIN_N + brake_frac * (self.cable_state.force_max_n - board_constants.FORCE_MIN_N)
             target = max(target, brake_force)
 
         self._target_force_n = target

@@ -75,11 +75,12 @@ def _cable_extra(cable_state, sample: TelemetrySample) -> Dict[str, Any]:
     from core.cable.geometry import speed_m_s_from_turns_s
     from core.cable.power_limiter import estimate_regen_power_w
 
+    cable_velocity_turns_s = CABLE_SIGN * sample.velocity  # + = paying out
     estimated_force_n = torque_to_force(
-        cable_state.corrected_torque_nm(sample.torque_est),
+        cable_state.corrected_torque_nm(sample.torque_est, cable_velocity_turns_s),
         r0=cable_state.r_eff_at_position(sample.position),
     )
-    cable_velocity_m_s = speed_m_s_from_turns_s(CABLE_SIGN * sample.velocity, cable_state.r0)
+    cable_velocity_m_s = speed_m_s_from_turns_s(cable_velocity_turns_s, cable_state.r0)
     extra: Dict[str, Any] = {
         "bus_voltage_v": sample.bus_voltage_v,
         "estimated_power_w": sample.torque_est * sample.velocity * 2.0 * math.pi,

@@ -15,16 +15,45 @@ established for Control/Profiles (see frontend/src/hooks/useControlTelemetry
 .js's header comment on why the websocket route was abandoned there).
 """
 
+import csv
 import logging
+from typing import List, Optional
 
 from flask import jsonify, request
 
 from config import board_constants
 from core.cable.geometry import calibrate_k
+from core.cable.torque_calibration_run import RunSample, extract_calibration_points_from_run
+from core.profiles.detectors import CABLE_SIGN
 
 from . import control_routes
 
 log = logging.getLogger(__name__)
+
+
+def _read_run_samples(cs, log_path: str) -> List[RunSample]:
+    """Reads a Testing-tab telemetry CSV (core/telemetry/csv_logger.py) back
+    into RunSample triples for torque_calibration_run.py. `velocity_turns_s`
+    /`torque_est_nm`/`position_turns` are the base columns every mode
+    populates (unlike the amendment-only ones), so no mode filtering is
+    needed -- one CSV file is already exactly one contiguous run (opened on
+    ControlSession.start(), closed on stop()). r_eff_m is derived per-row
+    from cs.r_eff_at_position() (the live, possibly since-recalibrated
+    spool-growth model) rather than read from the CSV, same as
+    add_torque_calibration_point()'s old single-snapshot path used to."""
+    samples: List[RunSample] = []
+    with open(log_path, newline="") as f:
+        for row in csv.DictReader(f):
+            velocity_turns_s = float(row["velocity_turns_s"])
+            position_turns = float(row["position_turns"])
+            samples.append(
+                RunSample(
+                    cable_velocity_turns_s=CABLE_SIGN * velocity_turns_s,
+                    raw_torque_nm=float(row["torque_est_nm"]),
+                    r_eff_m=cs.r_eff_at_position(position_turns),
+                )
+            )
+    return samples
 
 
 def _cable_status_dict() -> dict:
@@ -97,6 +126,12 @@ def _cable_status_dict() -> dict:
         "isokinetic_governor_gain": cs.isokinetic_governor_gain,
         "isokinetic_velocity_filter_alpha": cs.isokinetic_velocity_filter_alpha,
         "max_extension_force_taper_m": cs.max_extension_force_taper_m,
+        # Hardware safety ceilings -- live-adjustable via update_power_limits
+        # below (18 Aug 2026), unlike the other board_constants ceilings
+        # (MOTOR_CURRENT_LIM, DC bus regen limits) which stay fixed; see
+        # core/cable/state.py's module docstring for why these two differ.
+        "force_max_n": cs.force_max_n,
+        "regen_power_budget_w": cs.regen_power_budget_w,
         # Resistance display unit preference (item 2): display-only, set via
         # /api/train/update_settings (Setup tab), surfaced here too so any
         # consumer of /api/exercise/status (Control/Testing) can read it
@@ -358,9 +393,11 @@ def register(app) -> None:
         debounce, hold duration, force ramp rates, isokinetic governor
         gain/filter, max-extension force taper, and the two-tier position
         guard tolerances. Any subset may be given; omitted ones are left
-        as-is. Deliberately does NOT cover hard hardware ceilings
-        (FORCE_MAX_N, REGEN_POWER_BUDGET_W, MOTOR_CURRENT_LIM, DC bus regen
-        limits) -- those stay fixed board_constants, see core/cable/state.py."""
+        as-is. Deliberately does NOT cover MOTOR_CURRENT_LIM or the DC bus
+        regen limits (those stay fixed board_constants) -- FORCE_MAX_N/
+        REGEN_POWER_BUDGET_W have their own dedicated route below instead,
+        since they get a different (hardware-derived) validation, see
+        core/cable/state.py's module docstring."""
         body = request.get_json(silent=True) or {}
         try:
             control_routes.cable_state.set_force_settings(
@@ -374,6 +411,24 @@ def register(app) -> None:
                 max_extension_force_taper_m=body.get("max_extension_force_taper_m"),
                 position_guard_warning_turns=body.get("position_guard_warning_turns"),
                 position_guard_hard_turns=body.get("position_guard_hard_turns"),
+            )
+            return jsonify({"cable": _cable_status_dict()})
+        except (ValueError, TypeError) as e:
+            return jsonify({"error": str(e)}), 400
+
+    @app.route("/api/exercise/update_power_limits", methods=["POST"])
+    def exercise_update_power_limits():
+        """Live-adjustable hardware safety ceilings (added 18 Aug 2026) --
+        force_max_n and regen_power_budget_w. Any subset may be given;
+        omitted ones are left as-is. Unlike update_force_settings above,
+        force_max_n is validated against this board's structural force
+        ceiling (MOTOR_CURRENT_LIM * MOTOR_TORQUE_CONSTANT / SPOOL_RADIUS_M,
+        see CableState.set_power_limits), not just "must be positive"."""
+        body = request.get_json(silent=True) or {}
+        try:
+            control_routes.cable_state.set_power_limits(
+                force_max_n=body.get("force_max_n"),
+                regen_power_budget_w=body.get("regen_power_budget_w"),
             )
             return jsonify({"cable": _cable_status_dict()})
         except (ValueError, TypeError) as e:
@@ -491,32 +546,98 @@ def register(app) -> None:
         control_routes.cable_state.set_growth_points([])
         return jsonify({"cable": _cable_status_dict()})
 
-    # ---- Torque/force calibration (items 6/7) ----
+    # ---- Torque/force calibration (items 6/7; direction-aware run-based
+    # workflow replacing the old single-live-snapshot-while-holding
+    # approach, 21 Aug 2026 -- see core/cable/torque_calibration.py and
+    # core/cable/torque_calibration_run.py's module docstrings) ----
 
-    @app.route("/api/exercise/record_torque_calibration_point", methods=["POST"])
-    def exercise_record_torque_calibration_point():
-        """Records one calibration measurement: pair the known weight the
-        user is currently holding (e.g. via a Testing-tab position move)
-        with the live torque_est at that same moment. Direct CableState
-        mutation, same shape as calibrate_k/record_growth_point -- no mode
-        action needed, since this just reads whatever sample is already
-        flowing through the shared control_session, regardless of which
-        mode is actually driving the motor right now."""
+    def _direction_result_to_dict(result) -> Optional[dict]:
+        if result is None:
+            return None
+        return {
+            "known_weight_kg": result.point.known_weight_kg,
+            "raw_torque_nm": result.point.raw_torque_nm,
+            "r_eff_m": result.point.r_eff_m,
+            "direction": result.direction,
+            "expected_torque_nm": result.point.expected_torque_nm,
+            "rep_count": result.rep_count,
+            "per_rep_raw_torque_nm": result.per_rep_raw_torque_nm,
+        }
+
+    @app.route("/api/exercise/analyze_torque_calibration_run", methods=["POST"])
+    def exercise_analyze_torque_calibration_run():
+        """Reads back the CSV log of the most recently completed run (any
+        finished position-move session -- typically the Testing tab's
+        Repetitive testing sequence, run with a known weight hung on the
+        cable) and extracts up to two candidate calibration points -- one
+        from steady-state "lifting" samples, one from steady-state
+        "lowering" samples -- via core/cable/torque_calibration_run.py. Read
+        -only: nothing is saved to CableState until a candidate is POSTed to
+        record_torque_calibration_point below, so a bad run (wrong weight
+        typo, too few reps, run against the mock backend) can be discarded
+        just by not inserting it."""
         body = request.get_json(silent=True) or {}
         known_weight_kg = body.get("known_weight_kg")
         if known_weight_kg is None:
             return jsonify({"error": "known_weight_kg required"}), 400
+        try:
+            known_weight_kg = float(known_weight_kg)
+        except (TypeError, ValueError):
+            return jsonify({"error": f"known_weight_kg must be a number, got {known_weight_kg!r}"}), 400
+        if known_weight_kg < 0:
+            return jsonify({"error": f"known_weight_kg must be non-negative, got {known_weight_kg!r}"}), 400
 
         cs = control_routes.cable_state
-        latest = control_routes.control_session.status().get("latest_sample")
-        if not latest:
-            return jsonify({"error": "No live telemetry available -- start a session first"}), 400
+        if not cs.is_homed:
+            return jsonify({"error": "Cable is not homed -- home before analyzing a calibration run"}), 400
+
+        status = control_routes.control_session.status()
+        if status.get("running"):
+            return jsonify({"error": "Stop the run before analyzing it -- its CSV log is still being written"}), 400
+        log_path = status.get("last_log_path")
+        if not log_path:
+            return jsonify({
+                "error": "No completed run to analyze -- run a rep sequence with the known weight hung "
+                "on the cable first (e.g. Testing tab → Repetitive testing)"
+            }), 400
 
         try:
+            samples = _read_run_samples(cs, log_path)
+        except FileNotFoundError:
+            return jsonify({"error": f"Log file not found: {log_path}"}), 400
+        except (OSError, csv.Error) as e:
+            return jsonify({"error": f"Failed to read log file {log_path}: {e}"}), 400
+
+        results = extract_calibration_points_from_run(samples, known_weight_kg=known_weight_kg)
+        return jsonify({
+            "log_path": log_path,
+            "up": _direction_result_to_dict(results["up"]),
+            "down": _direction_result_to_dict(results["down"]),
+        })
+
+    @app.route("/api/exercise/record_torque_calibration_point", methods=["POST"])
+    def exercise_record_torque_calibration_point():
+        """Commits one calibration point -- known_weight_kg/raw_torque_nm/
+        r_eff_m/direction, normally copied straight from one direction's
+        result out of analyze_torque_calibration_run above (a human reviews
+        it, e.g. checking rep_count/per_rep_raw_torque_nm for a sane spread,
+        before it's inserted). Direct CableState mutation, same shape as
+        calibrate_k/record_growth_point."""
+        body = request.get_json(silent=True) or {}
+        try:
+            known_weight_kg = float(body["known_weight_kg"])
+            raw_torque_nm = float(body["raw_torque_nm"])
+            r_eff_m = float(body["r_eff_m"])
+            direction = body["direction"]
+        except KeyError as e:
+            return jsonify({"error": f"{e.args[0]} required"}), 400
+        except (TypeError, ValueError):
+            return jsonify({"error": "known_weight_kg/raw_torque_nm/r_eff_m must be numbers"}), 400
+
+        cs = control_routes.cable_state
+        try:
             cs.add_torque_calibration_point(
-                known_weight_kg=float(known_weight_kg),
-                raw_torque_nm=latest["torque_est"],
-                position_turns=latest["position"],
+                known_weight_kg=known_weight_kg, raw_torque_nm=raw_torque_nm, r_eff_m=r_eff_m, direction=direction
             )
             return jsonify({"cable": _cable_status_dict()})
         except (ValueError, TypeError, RuntimeError) as e:

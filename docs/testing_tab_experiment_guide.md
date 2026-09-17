@@ -21,17 +21,21 @@ workflow below it), Move Distance (relative to current position, metres or
 turns), Move Velocity, Torque Limit (Nm / N / kg). Start begins the move;
 while running, the same button becomes Update — change a field, click it,
 the move retargets live without stopping. Below it: a torque/force
-calibration workflow (hang a known weight, record a point) and a live
-telemetry chart.
+calibration workflow (see "Torque/force calibration workflow" below) and a
+live telemetry chart.
 
 ### Repetitive testing (new, 17 August 2026)
 
 Runs a *sequence* of moves, a chosen number of times, without touching
-anything mid-run. This is the tool for the endurance test below.
+anything mid-run. This is the tool for the endurance test below, and also
+the intended way to collect torque/force calibration data (see below) —
+Known Weight lives in Configure move above, decoupled from which sub-tab
+actually ran the reps, since calibration analysis reads back the
+completed run's CSV log after the fact rather than needing a live session.
 
 - **Move list**: add/remove rows, each with its own Move Distance
   (m/turns), Move Velocity, and Torque Limit (Nm/N/kg). No Known Weight
-  field here — this isn't a calibration workflow.
+  field here — set it in Configure move before analyzing the run instead.
 - **Repetitions**: how many times the whole move list repeats. Example:
   two moves (+0.2 m, then −0.2 m) at 5 repetitions runs 10 individual
   moves total (up-down, up-down, ×5).
@@ -57,6 +61,48 @@ simulated position never actually tracks a commanded move, so a sequence
 run against the mock will time out per move (20s) rather than advance.
 **Any real testing session must run against real hardware**, not
 `npm run mock_dev`.
+
+## Torque/force calibration workflow (rewritten 21 August 2026)
+
+Replaces the old "hang a known weight, hold it still, hit record" workflow.
+That approach only ever sampled a static hold, but the raw torque estimate
+turned out to be systematically different depending on whether the motor
+was actually lifting or lowering (friction opposes whichever way it's
+turning) — a static point can't represent either regime, which is why a
+calibration built from one could look right at rest and still be
+noticeably off once the weight was actually moving.
+
+The new workflow instead reads back a REAL run's telemetry after the fact:
+
+1. Set **Known Weight** (Configure move) to the mass you've hung on the
+   cable.
+2. Run it through several reps — either Repetitive testing (recommended:
+   e.g. two moves, +X/−X, for 5–10 repetitions) or a few manual moves via
+   Configure move. Either way this is real hardware only, same caveat as
+   above.
+3. **Stop** the run.
+4. In the "Torque/Force calibration" card, click **Analyze last run**. This
+   reads back the CSV log the run just wrote, finds the steady-state
+   (constant-velocity, not accelerating/decelerating) portion of every rep
+   leg, and shows one candidate point for "up" (lifting) and one for "down"
+   (lowering) — each with its rep count and the per-rep raw torque values
+   that went into the average, so a run with too few clean reps or an
+   implausible spread is visible before it's used.
+5. Click **Insert** on whichever direction(s) look right. This is the only
+   step that actually saves anything — Analyze is read-only, so a bad run
+   can just be discarded by not inserting it.
+6. Repeat at a few different known weights (e.g. 5/10/15 kg) — each
+   Analyze/Insert pass adds points to whichever direction(s) you inserted,
+   and the fit improves as points accumulate, same as before.
+
+Recorded points are now tagged "up" or "down" and fitted as two separate
+lines (see `core/cable/torque_calibration.py`'s module docstring for the
+full model, including what happens near zero velocity, e.g. an isometric
+hold). **Existing calibration points recorded under the old static-hold
+workflow have no direction and are not migrated** — `core/cable/state.py`
+skips them (with a log warning) on load, so a rig with old points reverts
+to the uncalibrated identity model until it's recalibrated under this new
+workflow.
 
 ## Test 1 — Endurance / repeated-repetition test
 

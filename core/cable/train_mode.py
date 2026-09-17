@@ -144,7 +144,8 @@ class TrainMode(BaseMode):
         # against the regen power budget the way ExerciseMode does, so False
         # here means "not applied", same as it would for any other mode that
         # doesn't use the limiter.
-        cable_velocity_m_s = speed_m_s_from_turns_s(CABLE_SIGN * sample.velocity, self.cable_state.r0)
+        cable_velocity_turns_s = CABLE_SIGN * sample.velocity  # + = paying out
+        cable_velocity_m_s = speed_m_s_from_turns_s(cable_velocity_turns_s, self.cable_state.r0)
         extra: Dict[str, Any] = {
             "target_force_n": 0.0,
             "commanded_force_n": 0.0,
@@ -153,7 +154,7 @@ class TrainMode(BaseMode):
             "bus_voltage_v": sample.bus_voltage_v,
             "estimated_power_w": _estimated_power_w(sample),
             "estimated_force_n": torque_to_force(
-                self.cable_state.corrected_torque_nm(sample.torque_est),
+                self.cable_state.corrected_torque_nm(sample.torque_est, cable_velocity_turns_s),
                 r0=self.cable_state.r_eff_at_position(sample.position),
             ),
             "cable_velocity_m_s": cable_velocity_m_s,
@@ -194,7 +195,7 @@ class TrainMode(BaseMode):
                     f"side -- Train safety stop."
                 )
 
-        force_n = min(self.profile.force_at(extra["cable_length_m"]), board_constants.FORCE_MAX_N)
+        force_n = min(self.profile.force_at(extra["cable_length_m"]), self.cable_state.force_max_n)
         # Torque = force * radius at the CURRENT effective spool radius, not
         # the bare r0 -- r_eff grows as cable pays in/out (k or, more
         # accurately, the piecewise growth-calibration model, whichever is
@@ -219,7 +220,7 @@ class TrainMode(BaseMode):
         # is recorded). `extra`/`_commanded_torque_nm` keep reporting the
         # real torque_nm, not the raw command -- that's what's meaningful to
         # a human reading it back.
-        raw_torque_nm = self.cable_state.raw_torque_nm_for_corrected(torque_nm)
+        raw_torque_nm = self.cable_state.raw_torque_nm_for_corrected(torque_nm, cable_velocity_turns_s)
         hardware.set_torque_target(-CABLE_SIGN * raw_torque_nm)
 
         self._target_force_n = force_n

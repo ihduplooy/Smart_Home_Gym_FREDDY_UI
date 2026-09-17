@@ -7,7 +7,7 @@ import {
 } from '@chakra-ui/react'
 import { useTestingTelemetry } from '../../../hooks/useTestingTelemetry'
 import { startControlSession, setControlTarget, stopControlSession } from '../../../api/control'
-import { recordTorqueCalibrationPoint, clearTorqueCalibration } from '../../../api/exercise'
+import { analyzeTorqueCalibrationRun, recordTorqueCalibrationPoint, clearTorqueCalibration } from '../../../api/exercise'
 import {
   turnsDeltaFromLength, createSpoolGeometry, torqueFromForce, rawTorqueNmForCorrected, GRAVITY_M_S2,
 } from '../../../utils/cableGeometry'
@@ -52,6 +52,14 @@ const TestingTab = ({ isActive = true }) => {
 
   const [calibError, setCalibError] = useState(null)
   const [calibBusy, setCalibBusy] = useState(false)
+  // Result of the last analyze_torque_calibration_run call -- { log_path,
+  // up: {...} | null, down: {...} | null }. null until Analyze is clicked.
+  // Read-only preview; nothing is saved until Insert is pressed for a
+  // direction (recordTorqueCalibrationPoint below). insertedDirections
+  // tracks which of this analysis's directions have already been inserted,
+  // so re-clicking Insert is guarded and the button can show it happened.
+  const [analysis, setAnalysis] = useState(null)
+  const [insertedDirections, setInsertedDirections] = useState(() => new Set())
 
   const isHomed = cable?.is_homed ?? false
   const backendErrors = status?.errors ?? []
@@ -162,7 +170,7 @@ const TestingTab = ({ isActive = true }) => {
     }
   }
 
-  const handleRecordPoint = async () => {
+  const handleAnalyzeRun = async () => {
     if (!knownWeightValid) {
       setCalibError('Enter a valid known weight first')
       return
@@ -170,7 +178,30 @@ const TestingTab = ({ isActive = true }) => {
     setCalibError(null)
     setCalibBusy(true)
     try {
-      await recordTorqueCalibrationPoint(knownWeightNumber)
+      const result = await analyzeTorqueCalibrationRun(knownWeightNumber)
+      setAnalysis(result)
+      setInsertedDirections(new Set())
+    } catch (e) {
+      setCalibError(e.message)
+      setAnalysis(null)
+    } finally {
+      setCalibBusy(false)
+    }
+  }
+
+  const handleInsert = async (direction) => {
+    const result = analysis?.[direction]
+    if (!result) return
+    setCalibError(null)
+    setCalibBusy(true)
+    try {
+      await recordTorqueCalibrationPoint({
+        knownWeightKg: result.known_weight_kg,
+        rawTorqueNm: result.raw_torque_nm,
+        rEffM: result.r_eff_m,
+        direction: result.direction,
+      })
+      setInsertedDirections((prev) => new Set(prev).add(direction))
     } catch (e) {
       setCalibError(e.message)
     } finally {
@@ -183,6 +214,8 @@ const TestingTab = ({ isActive = true }) => {
     setCalibBusy(true)
     try {
       await clearTorqueCalibration()
+      setAnalysis(null)
+      setInsertedDirections(new Set())
     } catch (e) {
       setCalibError(e.message)
     } finally {
@@ -433,33 +466,75 @@ const TestingTab = ({ isActive = true }) => {
           <CardBody>
             <VStack align="stretch" spacing={3}>
               <Text fontSize="xs" color="gray.400">
-                Hang the Known Weight above, move it to a held position, then record a point once it's steady --
-                the software pairs the live measured torque with that known weight. Repeat with other masses to
-                improve the fit; see Developer diagnostics below for the model this builds.
+                Hang the Known Weight above and run it through several reps (e.g. Repetitive testing above, or a
+                few manual up/down moves) -- friction makes lifting and lowering read differently, so this fits a
+                separate line for each direction from the steady-state (constant-velocity) part of every rep,
+                not a single static hold. Stop the run, then Analyze last run: it reads back that run's telemetry
+                and shows a candidate point per direction below, for review before inserting either into the
+                saved calibration. Repeat at a few different known weights (e.g. 5/10/15 kg) for a better fit.
               </Text>
               {calibError && (
                 <Alert status="error" variant="left-accent"><AlertIcon /><AlertDescription>{calibError}</AlertDescription></Alert>
               )}
               <HStack>
-                <Button size="sm" colorScheme="odrive" onClick={handleRecordPoint} isLoading={calibBusy} isDisabled={!isHomed || !running}>
-                  Record calibration point
+                <Button size="sm" colorScheme="odrive" onClick={handleAnalyzeRun} isLoading={calibBusy} isDisabled={!isHomed || running}>
+                  Analyze last run
                 </Button>
                 <Button size="sm" variant="outline" colorScheme="red" onClick={handleClearCalibration} isLoading={calibBusy} isDisabled={calibrationPoints.length === 0}>
                   Clear calibration
                 </Button>
               </HStack>
 
+              {analysis && (
+                <VStack align="stretch" spacing={2} fontSize="xs">
+                  <Text color="gray.500" fontFamily="mono" noOfLines={1}>log: {analysis.log_path}</Text>
+                  {['up', 'down'].map((direction) => {
+                    const result = analysis[direction]
+                    const inserted = insertedDirections.has(direction)
+                    return (
+                      <HStack key={direction} justify="space-between" bg="gray.750" px={3} py={2} borderRadius="md">
+                        <VStack align="stretch" spacing={0} fontFamily="mono" color="gray.300">
+                          <Text color="gray.200" fontWeight="bold">
+                            {direction === 'up' ? 'Up (lifting)' : 'Down (lowering)'}
+                          </Text>
+                          {result ? (
+                            <>
+                              <Text>{result.rep_count} rep{result.rep_count === 1 ? '' : 's'} -- raw torque {result.raw_torque_nm.toFixed(4)} Nm (expected {result.expected_torque_nm.toFixed(4)} Nm), r_eff {result.r_eff_m.toFixed(4)} m</Text>
+                              <Text color="gray.500">per-rep: {result.per_rep_raw_torque_nm.map((v) => v.toFixed(3)).join(', ')}</Text>
+                            </>
+                          ) : (
+                            <Text color="gray.500">No qualifying reps found in this direction in the last run.</Text>
+                          )}
+                        </VStack>
+                        <Button
+                          size="sm"
+                          colorScheme={inserted ? 'green' : 'odrive'}
+                          variant={inserted ? 'outline' : 'solid'}
+                          onClick={() => handleInsert(direction)}
+                          isLoading={calibBusy}
+                          isDisabled={!result || inserted}
+                        >
+                          {inserted ? 'Inserted' : 'Insert'}
+                        </Button>
+                      </HStack>
+                    )
+                  })}
+                </VStack>
+              )}
+
               {calibrationPoints.length > 0 && (
                 <VStack align="stretch" spacing={1} fontSize="xs" fontFamily="mono" color="gray.300">
                   <HStack justify="space-between" color="gray.500">
-                    <Text w="80px">weight</Text>
+                    <Text w="70px">weight</Text>
+                    <Text w="55px">dir</Text>
                     <Text w="90px">raw torque</Text>
                     <Text w="90px">r_eff</Text>
                     <Text w="90px">expected</Text>
                   </HStack>
                   {calibrationPoints.map((p, i) => (
                     <HStack key={i} justify="space-between">
-                      <Text w="80px">{p.known_weight_kg.toFixed(2)} kg</Text>
+                      <Text w="70px">{p.known_weight_kg.toFixed(2)} kg</Text>
+                      <Text w="55px">{p.direction}</Text>
                       <Text w="90px">{p.raw_torque_nm.toFixed(4)} Nm</Text>
                       <Text w="90px">{p.r_eff_m.toFixed(4)} m</Text>
                       <Text w="90px">{p.expected_torque_nm.toFixed(4)} Nm</Text>

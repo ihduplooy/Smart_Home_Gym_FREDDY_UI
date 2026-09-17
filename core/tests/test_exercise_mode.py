@@ -997,20 +997,28 @@ def test_commanded_torque_applies_torque_calibration_inverse_correction(tmp_path
     delivered matches the calibrated real-world relationship."""
     _fast_ramp(monkeypatch)
     mode = _homed_and_maxed_mode(tmp_path)
-    mode.cable_state.add_torque_calibration_point(known_weight_kg=5.0, raw_torque_nm=0.9, position_turns=0.0)
-    assert mode.cable_state.torque_calibration.scale != pytest.approx(1.0)  # sanity
+    r_eff = mode.cable_state.r_eff_at_position(0.0)
+    mode.cable_state.add_torque_calibration_point(
+        known_weight_kg=5.0, raw_torque_nm=0.9, r_eff_m=r_eff, direction="up"
+    )
+    assert mode.cable_state.torque_calibration.scale["up"] != pytest.approx(1.0)  # sanity
 
     hw = RecordingHardware()
     _arm(mode, hw)
     _engage(mode, hw, concentric_force_n=50.0, eccentric_force_n=50.0)
+    # velocity<0 (CABLE_SIGN=1) -> cable_velocity_turns_s<0 -> "up" line,
+    # the one just calibrated above. Comfortably below LETGO_VELOCITY_TURNS_S
+    # (0.4) so this doesn't trip the let-go detector into FAULT.
+    velocity = -CABLE_SIGN * 0.1
     t = 0.0
     for _ in range(20):
         t += DT
-        hw.sample = _sample(t, 0.0, 0.0)
+        hw.sample = _sample(t, 0.0, velocity)
         mode.tick(hw, hw.sample)
 
     real_torque_nm = force_to_torque(50.0)
-    expected_raw = mode.cable_state.raw_torque_nm_for_corrected(real_torque_nm)
+    cable_velocity_turns_s = CABLE_SIGN * velocity
+    expected_raw = mode.cable_state.raw_torque_nm_for_corrected(real_torque_nm, cable_velocity_turns_s)
     assert abs(hw.torque_target) == pytest.approx(abs(expected_raw), rel=0.05)
     assert abs(hw.torque_target) != pytest.approx(real_torque_nm, rel=0.05)
 
@@ -1427,16 +1435,23 @@ def test_estimated_force_applies_torque_calibration_correction(tmp_path):
     otherwise a recorded calibration would have no effect on what's
     displayed/logged as the measured force."""
     mode = _homed_and_maxed_mode(tmp_path)
-    mode.cable_state.add_torque_calibration_point(known_weight_kg=5.0, raw_torque_nm=0.9, position_turns=0.0)
-    assert mode.cable_state.torque_calibration.scale != pytest.approx(1.0)  # sanity
+    r_eff = mode.cable_state.r_eff_at_position(0.0)
+    mode.cable_state.add_torque_calibration_point(
+        known_weight_kg=5.0, raw_torque_nm=0.9, r_eff_m=r_eff, direction="up"
+    )
+    assert mode.cable_state.torque_calibration.scale["up"] != pytest.approx(1.0)  # sanity
 
     hw = RecordingHardware()
     _arm(mode, hw)
     raw_torque_est = board_constants.MOTOR_TORQUE_CONSTANT * 1.0
-    hw.sample = _sample(0.0, 0.0, 0.0, current_iq=1.0, torque_est=raw_torque_est)
+    # velocity<0 (CABLE_SIGN=1) -> cable_velocity_turns_s<0 -> "up" line,
+    # the one just calibrated above.
+    velocity = -CABLE_SIGN * 0.5
+    hw.sample = _sample(0.0, 0.0, velocity, current_iq=1.0, torque_est=raw_torque_est)
     extra = mode.tick(hw, hw.sample)
 
-    corrected = mode.cable_state.corrected_torque_nm(raw_torque_est)
+    cable_velocity_turns_s = CABLE_SIGN * velocity
+    corrected = mode.cable_state.corrected_torque_nm(raw_torque_est, cable_velocity_turns_s)
     assert corrected != pytest.approx(raw_torque_est)  # sanity: correction changes something
     expected = corrected / board_constants.SPOOL_RADIUS_M
     assert extra["estimated_force_n"] == pytest.approx(expected)

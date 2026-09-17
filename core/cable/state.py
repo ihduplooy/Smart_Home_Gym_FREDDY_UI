@@ -46,13 +46,28 @@ Force/safety "feel" settings (let-go threshold/debounce, hold duration,
 force ramp rates, isokinetic governor gain/filter, max-extension force
 taper, two-tier position guard) added 24 July 2026, same rationale and same
 mechanism: every one of these was a board_constants placeholder its own
-file header admitted was untested. Deliberately NOT extended to hard
-hardware safety ceilings (FORCE_MAX_N, REGEN_POWER_BUDGET_W,
-MOTOR_CURRENT_LIM, the DC bus regen limits) -- those stay fixed
-board_constants, since they're tied to physical component ratings (the
-brake resistor's wattage, the board's current limit) rather than to feel or
-per-spool calibration, and raising them live could put real hardware at
-risk.
+file header admitted was untested. Deliberately NOT extended to
+MOTOR_CURRENT_LIM or the DC bus regen limits -- those stay fixed
+board_constants, since raising them live could put real hardware at risk
+with no software backstop of their own.
+
+FORCE_MAX_N/REGEN_POWER_BUDGET_W (18 Aug 2026): made live-adjustable too,
+via set_power_limits() below, but NOT with the same bare "any positive
+number" validation the settings above get -- set_power_limits() rejects a
+force_max_n above the structural ceiling _TORQUE_LIMIT_NM (core/hardware/
+odrive_hw.py) implies (MOTOR_CURRENT_LIM * MOTOR_TORQUE_CONSTANT /
+SPOOL_RADIUS_M), the same hardware-derived envelope FORCE_MAX_N's own
+board_constants.py comment already reasons from. This keeps the "can't
+exceed what the motor can structurally deliver" guarantee the old
+fixed-constant approach gave for free, while still letting FORCE_MAX_N be
+lowered (or raised toward that ceiling) from the Configuration tab without
+editing board_constants.py and restarting the backend -- the same
+motivation the homing settings above were added for. REGEN_POWER_BUDGET_W
+has no equivalent hardware-derived ceiling in this codebase (the 30W
+default is a conservative derate of the brake resistor's rated
+dissipation, not a computed structural limit), so it only gets the
+"positive number" check; a value chosen well above the resistor's real
+rating won't be caught here, same live-hardware-risk caveat as always.
 
 This module is still hardware-free/Flask-free (only reads config.
 board_constants and a local JSON file), but it is NOT pure/stateless like
@@ -104,6 +119,8 @@ _PERSISTED_DEFAULTS = {
     "train_home_guard_enforced": lambda: board_constants.TRAIN_HOME_GUARD_ENFORCED_DEFAULT,
     "train_telemetry_buffer_s": lambda: board_constants.TRAIN_TELEMETRY_BUFFER_S,
     "resistance_display_unit_kg": lambda: board_constants.RESISTANCE_DISPLAY_UNIT_KG_DEFAULT,
+    "force_max_n": lambda: board_constants.FORCE_MAX_N,
+    "regen_power_budget_w": lambda: board_constants.REGEN_POWER_BUDGET_W,
 }
 
 
@@ -148,6 +165,8 @@ class CableState:
         self.train_home_guard_enforced = bool(settings["train_home_guard_enforced"])
         self.train_telemetry_buffer_s = settings["train_telemetry_buffer_s"]
         self.resistance_display_unit_kg = bool(settings["resistance_display_unit_kg"])
+        self.force_max_n = settings["force_max_n"]
+        self.regen_power_budget_w = settings["regen_power_budget_w"]
 
         # Experimental multi-point spool-growth calibration (turns_from_home,
         # length_m) pairs -- persisted separately from the float-only sidecar
@@ -209,32 +228,43 @@ class CableState:
         r_eff = self.spool_geometry.r_eff_at_turns_delta(position_turns - self.home_turns)
         return max(r_eff, board_constants.SPOOL_MIN_EFFECTIVE_RADIUS_M)
 
-    def corrected_torque_nm(self, raw_nm: float) -> float:
+    def corrected_torque_nm(self, raw_nm: float, cable_velocity_turns_s: float = 0.0) -> float:
         """Raw (motor-constant-only) torque estimate -> calibrated real
         torque -- the ONE place that decision is made, mirroring
         r_eff_at_position() above. Identity (no-op) until at least one
-        torque-calibration point is recorded."""
-        return self.torque_calibration.corrected_torque_nm(raw_nm)
+        torque-calibration point is recorded in the direction picked by
+        `cable_velocity_turns_s` (CABLE-frame, + = paying out/lowering --
+        see torque_calibration.py's module docstring)."""
+        return self.torque_calibration.corrected_torque_nm(raw_nm, cable_velocity_turns_s)
 
-    def raw_torque_nm_for_corrected(self, corrected_nm: float) -> float:
+    def raw_torque_nm_for_corrected(self, corrected_nm: float, cable_velocity_turns_s: float = 0.0) -> float:
         """Inverse of corrected_torque_nm() -- what raw Nm value to actually
         command so the real, physical torque delivered matches
         `corrected_nm` (the value the rest of the codebase reasons about in
-        force/torque terms). Identity until calibrated."""
-        return self.torque_calibration.raw_torque_nm_for_corrected(corrected_nm)
+        force/torque terms). Identity until calibrated. Same `cable_velocity
+        _turns_s` direction selection as corrected_torque_nm above."""
+        return self.torque_calibration.raw_torque_nm_for_corrected(corrected_nm, cable_velocity_turns_s)
 
-    def add_torque_calibration_point(self, known_weight_kg: float, raw_torque_nm: float, position_turns: float) -> None:
-        """Records one calibration measurement (item 6) -- known_weight_kg
-        is whatever the user is currently holding via a position move,
-        raw_torque_nm is the live torque_est at that same moment. r_eff is
-        derived here (not passed in) so callers never have to duplicate
-        r_eff_at_position()'s own floor/model logic."""
+    def add_torque_calibration_point(
+        self, known_weight_kg: float, raw_torque_nm: float, r_eff_m: float, direction: str
+    ) -> None:
+        """Records one calibration measurement, sourced from the steady-
+        state portion of a real repeated-lift run -- see
+        core/cable/torque_calibration_run.py.extract_calibration_points_from
+        _run(), whose DirectionCalibrationResult.point is what callers
+        (backend/app/exercise_routes.py) pass straight through here.
+        `r_eff_m` and `direction` are taken as given rather than re-derived
+        (unlike the old single-live-snapshot workflow this replaces) because
+        they're already an average over the run's steady-state samples --
+        there's no single live position/velocity for this method to derive
+        them from."""
         if not self.is_homed:
             raise RuntimeError("Cable is not homed -- home before recording a torque calibration point")
         if known_weight_kg < 0:
             raise ValueError(f"known_weight_kg must be non-negative, got {known_weight_kg!r}")
-        r_eff_m = self.r_eff_at_position(position_turns)
-        point = TorqueCalibrationPoint(known_weight_kg=known_weight_kg, raw_torque_nm=raw_torque_nm, r_eff_m=r_eff_m)
+        point = TorqueCalibrationPoint(
+            known_weight_kg=known_weight_kg, raw_torque_nm=raw_torque_nm, r_eff_m=r_eff_m, direction=direction
+        )
         self.torque_calibration_points.append(point)
         self.torque_calibration = TorqueCalibration(self.torque_calibration_points)
         self._save_torque_calibration_points()
@@ -481,6 +511,44 @@ class CableState:
             setattr(self, key, value)
         self._save_settings()
 
+    def set_power_limits(
+        self,
+        force_max_n: Optional[float] = None,
+        regen_power_budget_w: Optional[float] = None,
+    ) -> None:
+        """Live-adjustable hardware safety ceilings (added 18 Aug 2026 -- see
+        module docstring for why this differs from set_force_settings()
+        above). Any subset may be updated at once, omitted ones left as-is,
+        validated together like every other setter here.
+
+        force_max_n is bounded above by the structural ceiling implied by
+        this board's current_lim/torque_constant/spool_radius (mirrors
+        _TORQUE_LIMIT_NM in core/hardware/odrive_hw.py) -- this is the one
+        thing standing between "live-adjustable" and "can be set to a
+        physically nonsensical value the motor can never actually deliver,"
+        so it stays enforced even though the other bound in this method
+        (regen_power_budget_w) doesn't have an equivalent computed limit."""
+        new_force_max_n = force_max_n if force_max_n is not None else self.force_max_n
+        new_regen_budget_w = regen_power_budget_w if regen_power_budget_w is not None else self.regen_power_budget_w
+
+        if new_force_max_n <= 0:
+            raise ValueError(f"force_max_n must be positive, got {new_force_max_n!r}")
+        structural_ceiling_n = (
+            board_constants.MOTOR_CURRENT_LIM * board_constants.MOTOR_TORQUE_CONSTANT / board_constants.SPOOL_RADIUS_M
+        )
+        if new_force_max_n > structural_ceiling_n:
+            raise ValueError(
+                f"force_max_n ({new_force_max_n!r}) exceeds the structural ceiling this board can "
+                f"deliver ({structural_ceiling_n:.1f} N, from MOTOR_CURRENT_LIM * MOTOR_TORQUE_CONSTANT "
+                f"/ SPOOL_RADIUS_M) -- lower the request or raise MOTOR_CURRENT_LIM in board_constants.py."
+            )
+        if new_regen_budget_w <= 0:
+            raise ValueError(f"regen_power_budget_w must be positive, got {new_regen_budget_w!r}")
+
+        self.force_max_n = new_force_max_n
+        self.regen_power_budget_w = new_regen_budget_w
+        self._save_settings()
+
     def set_train_settings(
         self,
         max_extension_enforced: Optional[bool] = None,
@@ -574,18 +642,16 @@ class CableState:
     def _load_torque_calibration_points(self) -> List[TorqueCalibrationPoint]:
         """Own dedicated sidecar, same load-tolerant-of-missing/corrupt-file
         shape as _load_growth_points() above -- a list of calibration
-        points doesn't fit the float-only _PERSISTED_DEFAULTS mechanism."""
+        points doesn't fit the float-only _PERSISTED_DEFAULTS mechanism.
+        Points from before the direction-aware model (21 Aug 2026, see
+        torque_calibration.py's module docstring) have no "direction" key --
+        they were sourced from a static hold, which the new model has no
+        equivalent line for, so they can't be migrated. Skipped individually
+        (not treated as a whole-file corruption) so a sidecar with a mix of
+        old and new-format points still loads whatever's usable."""
         try:
             with open(self._torque_calibration_sidecar_path) as f:
                 data = json.load(f)
-            return [
-                TorqueCalibrationPoint(
-                    known_weight_kg=float(p["known_weight_kg"]),
-                    raw_torque_nm=float(p["raw_torque_nm"]),
-                    r_eff_m=float(p["r_eff_m"]),
-                )
-                for p in data.get("points", [])
-            ]
         except FileNotFoundError:
             return []
         except Exception:
@@ -594,11 +660,36 @@ class CableState:
             )
             return []
 
+        points = []
+        for p in data.get("points", []):
+            try:
+                points.append(
+                    TorqueCalibrationPoint(
+                        known_weight_kg=float(p["known_weight_kg"]),
+                        raw_torque_nm=float(p["raw_torque_nm"]),
+                        r_eff_m=float(p["r_eff_m"]),
+                        direction=p["direction"],
+                    )
+                )
+            except (KeyError, ValueError, TypeError):
+                log.warning(
+                    "Skipping torque calibration point with no/invalid direction (pre-21-Aug-2026 "
+                    "static-hold format, no longer supported) in %s: %r",
+                    self._torque_calibration_sidecar_path,
+                    p,
+                )
+        return points
+
     def _save_torque_calibration_points(self) -> None:
         self._torque_calibration_sidecar_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "points": [
-                {"known_weight_kg": p.known_weight_kg, "raw_torque_nm": p.raw_torque_nm, "r_eff_m": p.r_eff_m}
+                {
+                    "known_weight_kg": p.known_weight_kg,
+                    "raw_torque_nm": p.raw_torque_nm,
+                    "r_eff_m": p.r_eff_m,
+                    "direction": p.direction,
+                }
                 for p in self.torque_calibration_points
             ]
         }

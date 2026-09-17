@@ -227,18 +227,24 @@ def test_tick_commands_torque_through_torque_calibration_correction(tmp_path):
     real, physical torque delivered matches the calibrated real-world
     relationship, not the raw motor-constant estimate."""
     m = _homed_mode(tmp_path)
-    m.cable_state.add_torque_calibration_point(known_weight_kg=5.0, raw_torque_nm=0.9, position_turns=0.0)
-    assert m.cable_state.torque_calibration.scale != pytest.approx(1.0)  # sanity: a real correction exists
+    r_eff = m.cable_state.r_eff_at_position(0.0)
+    m.cable_state.add_torque_calibration_point(
+        known_weight_kg=5.0, raw_torque_nm=0.9, r_eff_m=r_eff, direction="up"
+    )
+    assert m.cable_state.torque_calibration.scale["up"] != pytest.approx(1.0)  # sanity: a real correction exists
 
     hw = RecordingHardware()
     profile = TrainProfile(segments=[TrainSegment(0.0, 1.0, "constant", {"force_n": 40.0})])
     _run(m, hw, profile)
 
-    hw.sample = _sample(t=1 / 50, position=0.2)
+    # velocity<0 (CABLE_SIGN=1) -> cable_velocity_turns_s<0 -> "up" line, the
+    # one just calibrated above.
+    hw.sample = _sample(t=1 / 50, position=0.2, velocity=-0.5)
     extra = m.tick(hw, hw.sample)
 
     real_torque_nm = force_to_torque(extra["target_force_n"], r0=m.cable_state.r0)
-    raw_torque_nm = m.cable_state.raw_torque_nm_for_corrected(real_torque_nm)
+    cable_velocity_turns_s = CABLE_SIGN * hw.sample.velocity
+    raw_torque_nm = m.cable_state.raw_torque_nm_for_corrected(real_torque_nm, cable_velocity_turns_s)
     assert raw_torque_nm != pytest.approx(real_torque_nm)  # sanity: correction actually changes something
     assert hw.torque_target == pytest.approx(-CABLE_SIGN * raw_torque_nm)
     # extra still reports the REAL torque, not the raw command -- that's

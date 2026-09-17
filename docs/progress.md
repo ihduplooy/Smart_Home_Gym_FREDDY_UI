@@ -2789,3 +2789,115 @@ Start/Update button per rep.
 - [ ] **Not yet run on real hardware.** Everything above is mock-verified
       only; the settle/advance behavior this whole feature depends on
       needs a real bench session to confirm.
+
+---
+
+# Direction-aware torque calibration, run-based data collection — 21 August 2026
+
+Prompted by a real bench observation: the raw torque estimate commanded to
+hold a known weight was ~110 Nm while accelerating up, ~105 settling, ~100
+static, then noticeably lower moving down. The old workflow (`items 6 & 7`
+above, 5 August 2026) only ever recorded a single static-hold snapshot —
+right for none of the regimes that actually matter during a rep, since
+friction opposes whichever way the motor is turning (adds going up,
+subtracts going down). User's own proposal: keep the existing rep-based
+Testing tab tests exactly as they are, and derive calibration points from
+that telemetry afterward instead of a manual static hold, at a few known
+weights (5/10/15 kg).
+
+## Item 1 — `TorqueCalibration` becomes direction-aware
+
+- [x] `core/cable/torque_calibration.py`: `TorqueCalibrationPoint` gained a
+      required `direction` field (`"up"`/`"down"`). `TorqueCalibration` now
+      fits TWO lines (one per direction) instead of one, selected at
+      correction time by the CABLE-frame velocity's sign
+      (`corrected_torque_nm`/`raw_torque_nm_for_corrected` both gained a
+      `cable_velocity_turns_s` parameter). Near-zero velocity (isometric
+      holds, calibration holds) falls back to a "static blend": the average
+      of both directions' scale, with offset forced to 0 — Coulomb friction
+      is direction-indeterminate exactly at zero velocity, so applying
+      either direction's signed offset while not moving would be a guess.
+- [x] `describe()` now returns a `directions: {up, down}` breakdown plus
+      the static blend, AND still mirrors flat top-level `scale`/`offset`/
+      `equation`/`points` (= the static blend) for every existing caller
+      that only ever wanted a single no-direction-context conversion
+      (`ControlTab.jsx`, `useControlTelemetry.js`,
+      `useTestingTelemetry.js`, `RepetitiveTesting.jsx`'s torque-limit
+      unit conversion) — none of those needed to change.
+- [x] Every live call site updated to pass its own velocity:
+      `core/control/modes.py`, `core/cable/train_mode.py`,
+      `core/cable/exercise_mode.py` (display/estimate sites use
+      `CABLE_SIGN * sample.velocity`; the three static calibration-hold
+      command sites — max-extension/spool-growth calibration holds — pass
+      no velocity at all, correctly landing on the static blend since
+      they're deliberately not-moving holds).
+
+## Item 2 — New `core/cable/torque_calibration_run.py`
+
+- [x] Pure-math module (same "zero project-specific imports" convention as
+      `geometry.py`/`torque_calibration.py`) that turns one run's ordered
+      telemetry samples into up to two calibration points: splits into
+      contiguous same-direction "rep legs" above a moving-velocity
+      threshold, keeps only each leg's steady-state plateau (samples within
+      90% of that leg's own peak |velocity| — the cruise portion of the
+      trapezoidal move profile, excluding accel/decel transients), averages
+      each leg's own raw torque and r_eff first, then averages those
+      per-rep numbers again across every leg in that direction — so one
+      long/noisy leg can't outweigh a short one.
+
+## Item 3 — Backend: analyze-then-insert, not auto-calibrate
+
+- [x] Matches the user's explicit ask ("the tool doesn't automatically
+      calibrate it, it just provides the repetitions, then we make sure we
+      have the correct data, then we insert it"): new
+      `POST /api/exercise/analyze_torque_calibration_run { known_weight_kg }`
+      reads back the CSV log of the most recently STOPPED run (new
+      `ControlSession._last_log_path`/`status()["last_log_path"]`, since
+      the existing `log_path` goes back to `None` once a session ends) and
+      returns a read-only preview (per direction: point, rep count, every
+      per-rep raw torque value) — nothing is saved. `record_torque_
+      calibration_point` (existing route) now takes explicit
+      `known_weight_kg`/`raw_torque_nm`/`r_eff_m`/`direction` (normally
+      copied straight from one direction's preview) instead of grabbing a
+      live snapshot — the "insert" step.
+- [x] `core/cable/state.py`'s sidecar loader tolerates old-format points
+      (no `direction` key, from the pre-21-Aug static-hold era): skipped
+      individually with a log warning rather than failing the whole file,
+      since they can't be migrated to a model that has no static line
+      anymore.
+
+## Item 4 — Frontend
+
+- [x] `TestingTab.jsx`'s calibration card rewritten for analyze → review →
+      insert (per direction, with an "Inserted" state once committed);
+      `TorqueModelDiagnostics.jsx`'s developer panel now shows both
+      directions' fitted equations/points plus the static blend actually
+      in effect. `api/exercise.js` gained `analyzeTorqueCalibrationRun`;
+      `recordTorqueCalibrationPoint`'s signature changed to the explicit
+      point shape.
+
+## Verified
+
+- [x] Backend: `.venv/bin/python -m pytest core/tests -q` — 428 passed
+      (28 net new: full rewrite of `test_torque_calibration.py` for the
+      per-direction API, new `test_torque_calibration_run.py`, 3 pre-
+      existing call sites in `test_exercise_mode.py`/`test_train_mode.py`
+      updated to the new signatures).
+- [x] Frontend: `npx vitest run` — 79 passed, 2 skipped (unchanged);
+      `npx eslint` — clean.
+- [x] End-to-end route smoke test (Flask test client, in-process, a
+      synthetic CSV shaped like a real trapezoidal "up" rep leg): analyze
+      correctly extracted a plateau-only point with the transient samples
+      excluded from the average, insert correctly persisted it and refit
+      the "up" line, `down` correctly came back `null` (no down-direction
+      samples in the synthetic run).
+- [ ] **Not yet run on real hardware** — the whole point of this change was
+      a real-bench observation, but re-verifying against real reps (not
+      just the synthetic smoke test above) still needs a bench session.
+      **Also**: this rig already had 6 real calibration points on disk
+      (`config/torque_calibration.json`, 5/10/15 kg from earlier bench
+      work) — those are old-format (no `direction`) and will be silently
+      skipped on next backend start per Item 3 above, reverting live
+      torque correction to identity until recollected under the new
+      workflow. Flagging explicitly since it's a real behavior change to
+      already-collected bench data, not just new-code coverage.

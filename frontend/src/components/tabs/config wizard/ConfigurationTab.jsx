@@ -20,11 +20,13 @@ import {
   useToast,
 } from '@chakra-ui/react'
 import { STEPS } from '../../../utils/configSchema'
-import { Zap, Cog, Compass, Gamepad2, Cable, CheckCircle2, Trash2, DownloadCloud, ClipboardList, Save } from 'lucide-react'
+import { Zap, Cog, Compass, Gamepad2, Cable, Gauge, CheckCircle2, Trash2, DownloadCloud, ClipboardList, Save } from 'lucide-react'
 import { useConfigWizard } from '../../../hooks/useConfigWizard'
 import ConfigStep from '../../config-steps/ConfigStep'
+import PowerConfigStep from '../../config-steps/PowerConfigStep'
 import MotorConfigStep from '../../config-steps/MotorConfigStep'
 import ControlConfigStep from '../../config-steps/ControlConfigStep'
+import ForceConfigStep from '../../config-steps/ForceConfigStep'
 import ApplyConfigStep from '../../config-steps/ApplyConfigStep'
 import EraseConfigModal from '../../modals/EraseConfigModal'
 import MotorControlsCard from '../../MotorControlsCard'
@@ -37,6 +39,7 @@ const STEP_ICONS = {
   encoder: Compass,
   control: Gamepad2,
   interface: Cable,
+  force: Gauge,
   apply: CheckCircle2,
 }
 
@@ -87,10 +90,14 @@ const ConfigurationTab = ({ isActive = true }) => {
 
   const renderStep = () => {
     switch (step.id) {
+      case 'power':
+        return <PowerConfigStep wizard={wizard} />
       case 'motor':
         return <MotorConfigStep wizard={wizard} />
       case 'control':
         return <ControlConfigStep wizard={wizard} />
+      case 'force':
+        return <ForceConfigStep wizard={wizard} />
       case 'apply':
         return <ApplyConfigStep wizard={wizard} />
       default:
