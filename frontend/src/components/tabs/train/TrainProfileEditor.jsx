@@ -287,10 +287,10 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
   }
 
   return (
-    <Card bg="gray.800" variant="elevated">
+    <Card bg="paper.bg" variant="outline" borderColor="paper.border" borderRadius="lg">
       <CardHeader>
         <HStack justify="space-between">
-          <Heading size="md" color="white">Resistance profile</Heading>
+          <Heading size="md" color="paper.textPrimary">Resistance profile</Heading>
         </HStack>
       </CardHeader>
       <CardBody>
@@ -303,14 +303,14 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
           )}
 
           <HStack>
-            <Text fontSize="xs" color="gray.400" minW="60px">Name</Text>
+            <Text fontSize="xs" color="paper.textSecondary" minW="60px">Name</Text>
             <Input size="sm" value={name} onChange={(e) => setName(e.target.value)} maxW="240px" />
             <Button size="sm" onClick={handleSaveProfile} isDisabled={!name.trim()}>Save</Button>
             {saveMessage && <Text fontSize="xs" color="green.300">{saveMessage}</Text>}
           </HStack>
 
           <HStack>
-            <Text fontSize="xs" color="gray.400" minW="60px">Saved</Text>
+            <Text fontSize="xs" color="paper.textSecondary" minW="60px">Saved</Text>
             <Select
               size="sm"
               maxW="240px"
@@ -334,9 +334,9 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
 
           <VStack align="stretch" spacing={3}>
             {segments.map((seg, idx) => (
-              <Box key={seg.id} borderWidth="1px" borderColor="gray.700" borderRadius="md" p={3}>
+              <Box key={seg.id} borderWidth="1px" borderColor="paper.border" borderRadius="md" p={3}>
                 <HStack justify="space-between" mb={2}>
-                  <Text fontSize="xs" color="gray.400">Segment {idx + 1}</Text>
+                  <Text fontSize="xs" color="paper.textSecondary">Segment {idx + 1}</Text>
                   <HStack spacing={1}>
                     <Button
                       size="xs"
@@ -359,7 +359,7 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
                 </HStack>
                 <HStack spacing={3} wrap="wrap" align="flex-end">
                   <Box>
-                    <Text fontSize="xs" color="gray.400" mb={1}>Start</Text>
+                    <Text fontSize="xs" color="paper.textSecondary" mb={1}>Start</Text>
                     <InputGroup size="sm" w="110px">
                       <Input
                         type="text"
@@ -372,7 +372,7 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
                     </InputGroup>
                   </Box>
                   <Box>
-                    <Text fontSize="xs" color="gray.400" mb={1}>End</Text>
+                    <Text fontSize="xs" color="paper.textSecondary" mb={1}>End</Text>
                     <InputGroup size="sm" w="110px">
                       <Input
                         type="text"
@@ -385,7 +385,7 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
                     </InputGroup>
                   </Box>
                   <Box>
-                    <Text fontSize="xs" color="gray.400" mb={1}>Shape</Text>
+                    <Text fontSize="xs" color="paper.textSecondary" mb={1}>Shape</Text>
                     <Select
                       size="sm"
                       w="120px"
@@ -397,7 +397,7 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
                   </Box>
                   {paramFields(seg.shape, resistanceUnitKg).map((f) => (
                     <Box key={f.key}>
-                      <Text fontSize="xs" color="gray.400" mb={1}>{f.label}</Text>
+                      <Text fontSize="xs" color="paper.textSecondary" mb={1}>{f.label}</Text>
                       <InputGroup size="sm" w="110px">
                         <Input
                           type="text"
@@ -420,25 +420,25 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
           </Button>
 
           <Box>
-            <Text fontSize="xs" color="gray.400" mb={1}>Live preview (draft, not yet applied)</Text>
-            <Box h="160px" bg="gray.900" borderRadius="md" p={2}>
+            <Text fontSize="xs" color="paper.textSecondary" mb={1}>Live preview (draft, not yet applied)</Text>
+            <Box h="160px" bg="paper.bg" borderRadius="md" p={2}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartPoints} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E4E4E7" />
                   <XAxis
                     dataKey="position_m"
                     type="number"
                     domain={domain}
-                    stroke="#9CA3AF"
-                    tick={{ fill: '#9CA3AF', fontSize: 10 }}
+                    stroke="#71717A"
+                    tick={{ fill: '#71717A', fontSize: 10 }}
                     tickFormatter={(v) => `${v.toFixed(2)}`}
                   />
-                  <YAxis stroke="#9CA3AF" tick={{ fill: '#9CA3AF', fontSize: 10 }} domain={[0, 'auto']} width={40} />
+                  <YAxis stroke="#71717A" tick={{ fill: '#71717A', fontSize: 10 }} domain={[0, 'auto']} width={40} />
                   <RechartsTooltip
-                    contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #374151', borderRadius: '6px', color: '#F9FAFB', fontSize: '11px' }}
+                    contentStyle={{ backgroundColor: '#FFFFFF', border: '1px solid #E4E4E7', borderRadius: '6px', color: '#18181B', fontSize: '11px' }}
                     formatter={(v) => [`${Number(v).toFixed(2)} ${resistanceUnitKg ? 'kg' : 'N'}`, 'force']}
                   />
-                  <Line type="linear" dataKey="force_n" stroke="#F6E05E" strokeWidth={2} dot={false} isAnimationActive={false} />
+                  <Line type="linear" dataKey="force_n" stroke="#eda100" strokeWidth={2} dot={false} isAnimationActive={false} />
                 </LineChart>
               </ResponsiveContainer>
             </Box>
@@ -450,7 +450,7 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
                 Start Train session
               </Button>
             ) : (
-              <Button size="sm" colorScheme="odrive" onClick={handleApply} isDisabled={busy}>
+              <Button size="sm" colorScheme="accent" onClick={handleApply} isDisabled={busy}>
                 Apply profile
               </Button>
             )}

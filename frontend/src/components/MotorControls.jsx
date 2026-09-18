@@ -32,7 +32,7 @@ const ActionButton = ({ label, caption, tip, compact = false, ...props }) => {
 
 /** A small uppercase section heading above a group of buttons. */
 const SectionLabel = ({ children }) => (
-  <Text fontSize="2xs" fontWeight="bold" letterSpacing="wider" textTransform="uppercase" color="gray.500">
+  <Text fontSize="2xs" fontWeight="bold" letterSpacing="wider" textTransform="uppercase" color="paper.textSecondary">
     {children}
   </Text>
 )
@@ -107,7 +107,7 @@ const MotorControls = ({ currentState, hasErrors = false, variant = 'basic', com
             label="Full Calibration"
             caption="Motor + Encoder"
             tip={hasErrors ? 'Clear errors first' : 'Full motor + encoder calibration'}
-            colorScheme="blue"
+            colorScheme="accent"
             compact={compact}
             onClick={() => startCal('full')}
             isDisabled={calDisabled}
@@ -118,7 +118,7 @@ const MotorControls = ({ currentState, hasErrors = false, variant = 'basic', com
                 label="Motor"
                 caption="Resistance & Inductance"
                 tip="Measure motor resistance & inductance"
-                colorScheme="blue"
+                colorScheme="accent"
                 variant="outline"
                 compact={compact}
                 onClick={() => startCal('motor')}

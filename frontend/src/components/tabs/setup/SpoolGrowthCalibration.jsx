@@ -75,10 +75,15 @@ const SpoolGrowthCalibration = ({ status }) => {
   const currentLength = control?.extra?.cable_length_m
 
   return (
-    <Box borderTop="1px solid" borderColor="gray.700" pt={3}>
+    <Box borderTop="1px solid" borderColor="paper.border" pt={3}>
       <HStack justify="space-between" mb={2}>
-        <Text fontSize="sm" fontWeight="semibold" color="gray.200">Spool growth calibration (experimental)</Text>
-        <Badge colorScheme={savedPoints.length > 0 ? 'green' : 'gray'} variant="outline">
+        <HStack spacing={2}>
+          <Text fontSize="sm" fontWeight="semibold" color="paper.textPrimary">Spool growth calibration</Text>
+          <Badge colorScheme="tag" variant="subtle" borderRadius="full" fontFamily="mono" textTransform="uppercase" letterSpacing="wide" fontSize="2xs">
+            Experimental
+          </Badge>
+        </HStack>
+        <Badge colorScheme={savedPoints.length > 0 ? 'green' : 'gray'} variant="outline" borderRadius="full">
           {savedPoints.length > 0 ? `${savedPoints.length} point${savedPoints.length === 1 ? '' : 's'} saved` : 'not calibrated'}
         </Badge>
       </HStack>
@@ -89,7 +94,7 @@ const SpoolGrowthCalibration = ({ status }) => {
 
       {!inProgress && (
         <>
-          <Text fontSize="xs" color="gray.400" mb={2}>
+          <Text fontSize="xs" color="paper.textSecondary" mb={2}>
             Measure the actual cable length at several reel-out positions and record each one here; the
             recorded points are fit into a piecewise model of how the effective spool radius grows with
             rotations, rather than assuming a single constant rate. Uses the spool radius (r0) set above as
@@ -98,7 +103,8 @@ const SpoolGrowthCalibration = ({ status }) => {
           </Text>
           <Button
             size="sm"
-            colorScheme="odrive"
+            colorScheme="accent"
+            borderRadius="full"
             onClick={() => run(startSpoolGrowthCalibration)}
             isDisabled={!setupSessionRunning || busy || !isHomed || anotherModeRunning || (action != null && action !== 'idle')}
             isLoading={busy}
@@ -108,16 +114,16 @@ const SpoolGrowthCalibration = ({ status }) => {
 
           {savedPoints.length > 0 && (
             <Box mt={3}>
-              <Text fontSize="xs" color="gray.400" mb={1}>Saved calibration points:</Text>
+              <Text fontSize="xs" fontFamily="mono" textTransform="uppercase" letterSpacing="wide" color="paper.textSecondary" mb={1}>Saved calibration points:</Text>
               <VStack align="stretch" spacing={1} mb={2}>
                 {savedPoints.map((p, i) => (
-                  <HStack key={i} justify="space-between" fontSize="xs" color="gray.300" fontFamily="mono">
+                  <HStack key={i} justify="space-between" fontSize="xs" color="paper.textPrimary" fontFamily="mono">
                     <Text>{p.turns_from_home.toFixed(3)} turns</Text>
                     <Text>{p.length_m.toFixed(4)} m</Text>
                   </HStack>
                 ))}
               </VStack>
-              <Button size="xs" variant="outline" colorScheme="red" onClick={() => run(clearGrowthCalibration)} isLoading={busy}>
+              <Button size="xs" variant="outline" colorScheme="red" borderRadius="full" onClick={() => run(clearGrowthCalibration)} isLoading={busy}>
                 Clear saved growth calibration
               </Button>
             </Box>
@@ -127,26 +133,26 @@ const SpoolGrowthCalibration = ({ status }) => {
 
       {inProgress && (
         <VStack align="stretch" spacing={3}>
-          <HStack justify="space-between" fontSize="xs" color="gray.400" fontFamily="mono">
+          <HStack justify="space-between" fontSize="xs" color="paper.textSecondary" fontFamily="mono">
             <Text>position: {currentTurns != null ? `${currentTurns.toFixed(3)} turns` : '—'}</Text>
             <Text>model length: {currentLength != null ? `${currentLength.toFixed(4)} m` : '—'}</Text>
           </HStack>
 
           <HStack spacing={3} align="flex-end">
             <Box>
-              <Text fontSize="xs" color="gray.400" mb={1}>Measured length</Text>
+              <Text fontSize="xs" fontFamily="mono" textTransform="uppercase" letterSpacing="wide" color="paper.textSecondary" mb={1}>Measured length</Text>
               <InputGroup size="sm" w="130px">
-                <Input type="text" inputMode="decimal" fontFamily="mono" value={lengthText} onChange={(e) => setLengthText(e.target.value)} />
-                <InputRightAddon px={2} fontSize="xs">m</InputRightAddon>
+                <Input type="text" inputMode="decimal" fontFamily="mono" color="paper.textPrimary" borderColor="paper.border" value={lengthText} onChange={(e) => setLengthText(e.target.value)} />
+                <InputRightAddon px={2} fontSize="xs" borderColor="paper.border">m</InputRightAddon>
               </InputGroup>
             </Box>
-            <Button size="sm" onClick={handleRecord} isLoading={busy}>Record point</Button>
+            <Button size="sm" colorScheme="accent" borderRadius="full" onClick={handleRecord} isLoading={busy}>Record point</Button>
           </HStack>
 
           {pendingPoints.length > 0 && (
             <VStack align="stretch" spacing={1}>
               {pendingPoints.map((p, i) => (
-                <HStack key={i} justify="space-between" fontSize="xs" color="gray.300" fontFamily="mono">
+                <HStack key={i} justify="space-between" fontSize="xs" color="paper.textPrimary" fontFamily="mono">
                   <Text>{p.turns_from_home.toFixed(3)} turns</Text>
                   <Text>{p.length_m.toFixed(4)} m</Text>
                   <IconButton
@@ -154,6 +160,7 @@ const SpoolGrowthCalibration = ({ status }) => {
                     icon={<CloseIcon boxSize={2} />}
                     size="xs"
                     variant="ghost"
+                    borderRadius="full"
                     onClick={() => run(removeGrowthPoint, i)}
                     isDisabled={busy}
                   />
@@ -163,13 +170,13 @@ const SpoolGrowthCalibration = ({ status }) => {
           )}
 
           <HStack spacing={3}>
-            <Button size="sm" variant="outline" onClick={() => run(clearGrowthPoints)} isDisabled={busy || pendingPoints.length === 0}>
+            <Button size="sm" variant="outline" borderRadius="full" onClick={() => run(clearGrowthPoints)} isDisabled={busy || pendingPoints.length === 0}>
               Clear all
             </Button>
-            <Button size="sm" colorScheme="red" variant="outline" onClick={() => run(cancelSpoolGrowthCalibration)} isDisabled={busy}>
+            <Button size="sm" colorScheme="red" variant="outline" borderRadius="full" onClick={() => run(cancelSpoolGrowthCalibration)} isDisabled={busy}>
               Discard
             </Button>
-            <Button size="sm" colorScheme="green" onClick={() => run(saveGrowthCalibration)} isDisabled={busy || pendingPoints.length === 0}>
+            <Button size="sm" colorScheme="green" borderRadius="full" onClick={() => run(saveGrowthCalibration)} isDisabled={busy || pendingPoints.length === 0}>
               Save & finish
             </Button>
           </HStack>

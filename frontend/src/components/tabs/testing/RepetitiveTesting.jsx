@@ -289,11 +289,11 @@ const RepetitiveTesting = ({ status, cable, running, anotherModeRunning, isHomed
         {moves.map((move, index) => {
           const evaluation = moveEvaluations[index]
           return (
-            <HStack key={index} spacing={4} wrap="wrap" bg="gray.900" p={2} borderRadius="md">
-              <Text fontSize="xs" color="gray.400" w="50px">Move {index + 1}</Text>
+            <HStack key={index} spacing={4} wrap="wrap" bg="paper.bg" p={2} borderRadius="md">
+              <Text fontSize="xs" color="paper.textSecondary" w="50px">Move {index + 1}</Text>
 
               <Box>
-                <Text fontSize="xs" color="gray.400" mb={1}>Move Distance</Text>
+                <Text fontSize="xs" color="paper.textSecondary" mb={1}>Move Distance</Text>
                 <HStack spacing={1}>
                   <InputGroup size="sm" w="110px">
                     <Input
@@ -311,7 +311,7 @@ const RepetitiveTesting = ({ status, cable, running, anotherModeRunning, isHomed
                     <option value="turns">turns</option>
                   </Select>
                 </HStack>
-                <Text fontSize="0.65rem" color="gray.500" mt={0.5}>
+                <Text fontSize="0.65rem" color="paper.textSecondary" mt={0.5}>
                   relative to current position
                   {move.unit === 'm' && (
                     evaluation.distanceTurnsEstimate != null
@@ -322,7 +322,7 @@ const RepetitiveTesting = ({ status, cable, running, anotherModeRunning, isHomed
               </Box>
 
               <Box>
-                <Text fontSize="xs" color="gray.400" mb={1}>Move Velocity</Text>
+                <Text fontSize="xs" color="paper.textSecondary" mb={1}>Move Velocity</Text>
                 <InputGroup size="sm" w="140px">
                   <Input
                     type="text" inputMode="decimal" fontFamily="mono"
@@ -335,7 +335,7 @@ const RepetitiveTesting = ({ status, cable, running, anotherModeRunning, isHomed
               </Box>
 
               <Box>
-                <Text fontSize="xs" color="gray.400" mb={1}>Torque Limit</Text>
+                <Text fontSize="xs" color="paper.textSecondary" mb={1}>Torque Limit</Text>
                 <HStack spacing={1}>
                   <InputGroup size="sm" w="110px">
                     <Input
@@ -355,7 +355,7 @@ const RepetitiveTesting = ({ status, cable, running, anotherModeRunning, isHomed
                   </Select>
                 </HStack>
                 {move.torqueLimitText !== '' && move.torqueLimitUnit !== 'Nm' && (
-                  <Text fontSize="0.65rem" color="gray.500" mt={0.5}>
+                  <Text fontSize="0.65rem" color="paper.textSecondary" mt={0.5}>
                     {evaluation.torqueLimitNm != null ? `≈ ${evaluation.torqueLimitNm.toFixed(4)} Nm` : 'loading cable calibration…'}
                   </Text>
                 )}
@@ -381,7 +381,7 @@ const RepetitiveTesting = ({ status, cable, running, anotherModeRunning, isHomed
 
       <HStack spacing={4} wrap="wrap" align="flex-end">
         <Box>
-          <Text fontSize="xs" color="gray.400" mb={1}>Repetitions</Text>
+          <Text fontSize="xs" color="paper.textSecondary" mb={1}>Repetitions</Text>
           <InputGroup size="sm" w="100px">
             <Input
               type="text" inputMode="numeric" fontFamily="mono"
@@ -393,7 +393,7 @@ const RepetitiveTesting = ({ status, cable, running, anotherModeRunning, isHomed
         </Box>
 
         <Box>
-          <Text fontSize="xs" color="gray.400" mb={1}>Settle tolerance</Text>
+          <Text fontSize="xs" color="paper.textSecondary" mb={1}>Settle tolerance</Text>
           <InputGroup size="sm" w="120px">
             <Input
               type="text" inputMode="decimal" fontFamily="mono"
@@ -403,7 +403,7 @@ const RepetitiveTesting = ({ status, cable, running, anotherModeRunning, isHomed
             />
             <InputRightAddon px={2} fontSize="xs">turns</InputRightAddon>
           </InputGroup>
-          <Text fontSize="0.65rem" color="gray.500" mt={0.5}>
+          <Text fontSize="0.65rem" color="paper.textSecondary" mt={0.5}>
             how close counts as "arrived" — looser advances sooner
           </Text>
         </Box>
@@ -437,7 +437,7 @@ const RepetitiveTesting = ({ status, cable, running, anotherModeRunning, isHomed
               {runPhase === 'paused' ? 'Paused' : 'Running'}
             </Badge>
           )}
-          <Text fontSize="sm" color="gray.300" fontFamily="mono">
+          <Text fontSize="sm" color="paper.textPrimary" fontFamily="mono">
             {runPhase === 'idle' ? 'Not running' : `Repetition ${currentRep} / ${repsNumber} — Move ${currentMoveIndex + 1} / ${moves.length}`}
           </Text>
         </HStack>
@@ -451,24 +451,24 @@ const RepetitiveTesting = ({ status, cable, running, anotherModeRunning, isHomed
 
       <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4}>
         <Stat>
-          <StatLabel color="gray.300">Position</StatLabel>
-          <StatNumber color="odrive.300" fontSize="xl">{latestSample?.position_m != null ? latestSample.position_m.toFixed(4) : '—'}</StatNumber>
-          <Text fontSize="xs" color="gray.400">m, from home</Text>
+          <StatLabel color="paper.textPrimary">Position</StatLabel>
+          <StatNumber color="accent.600" fontSize="xl">{latestSample?.position_m != null ? latestSample.position_m.toFixed(4) : '—'}</StatNumber>
+          <Text fontSize="xs" color="paper.textSecondary">m, from home</Text>
         </Stat>
         <Stat>
-          <StatLabel color="gray.300">Measured torque</StatLabel>
-          <StatNumber color="odrive.300" fontSize="xl">{latestSample?.corrected_torque_nm != null ? Math.abs(latestSample.corrected_torque_nm).toFixed(3) : '—'}</StatNumber>
-          <Text fontSize="xs" color="gray.400">Nm, calibrated</Text>
+          <StatLabel color="paper.textPrimary">Measured torque</StatLabel>
+          <StatNumber color="accent.600" fontSize="xl">{latestSample?.corrected_torque_nm != null ? Math.abs(latestSample.corrected_torque_nm).toFixed(3) : '—'}</StatNumber>
+          <Text fontSize="xs" color="paper.textSecondary">Nm, calibrated</Text>
         </Stat>
         <Stat>
-          <StatLabel color="gray.300">Phase current</StatLabel>
-          <StatNumber color="odrive.300" fontSize="xl">{status?.latest_sample?.current_iq != null ? status.latest_sample.current_iq.toFixed(3) : '—'}</StatNumber>
-          <Text fontSize="xs" color="gray.400">A (Iq_measured)</Text>
+          <StatLabel color="paper.textPrimary">Phase current</StatLabel>
+          <StatNumber color="accent.600" fontSize="xl">{status?.latest_sample?.current_iq != null ? status.latest_sample.current_iq.toFixed(3) : '—'}</StatNumber>
+          <Text fontSize="xs" color="paper.textSecondary">A (Iq_measured)</Text>
         </Stat>
         <Stat>
-          <StatLabel color="gray.300">Measured force</StatLabel>
-          <StatNumber color="odrive.300" fontSize="xl">{latestSample?.force_est_n != null ? Math.abs(latestSample.force_est_n).toFixed(2) : '—'}</StatNumber>
-          <Text fontSize="xs" color="gray.400">N</Text>
+          <StatLabel color="paper.textPrimary">Measured force</StatLabel>
+          <StatNumber color="accent.600" fontSize="xl">{latestSample?.force_est_n != null ? Math.abs(latestSample.force_est_n).toFixed(2) : '—'}</StatNumber>
+          <Text fontSize="xs" color="paper.textSecondary">N</Text>
         </Stat>
       </SimpleGrid>
     </VStack>

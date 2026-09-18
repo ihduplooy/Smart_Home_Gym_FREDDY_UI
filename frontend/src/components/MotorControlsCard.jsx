@@ -25,10 +25,10 @@ const MotorControlsCard = ({ isActive = true, compact = false }) => {
   const stateColor = state === 8 ? 'green' : state === 1 ? 'blue' : state >= 2 && state <= 7 ? 'yellow' : 'gray'
 
   return (
-    <Card bg="gray.800" variant="outline" borderColor="gray.700">
+    <Card bg="paper.bg" variant="outline" borderColor="paper.border">
       <CardBody p={compact ? 3 : undefined}>
         <HStack justify="space-between" mb={compact ? 2 : 3}>
-          <Heading size="sm" color="odrive.300">Motor Controls</Heading>
+          <Heading size="sm" color="accent.600">Motor Controls</Heading>
           <Badge colorScheme={stateColor}>{getAxisStateName(state)}</Badge>
         </HStack>
         <MotorControls currentState={typeof state === 'number' ? state : null} hasErrors={hasErrors} variant="full" compact={compact} />

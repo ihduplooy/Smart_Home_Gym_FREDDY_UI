@@ -30,19 +30,19 @@ const ConfirmationModal = ({
 }) => (
   <Modal isOpen={isOpen} onClose={onClose} isCentered>
     <ModalOverlay />
-    <ModalContent bg="gray.800">
-      <ModalHeader color="odrive.300">{title}</ModalHeader>
+    <ModalContent bg="paper.bg">
+      <ModalHeader color="accent.600">{title}</ModalHeader>
       <ModalCloseButton />
       <ModalBody>
         <VStack align="stretch" spacing={3}>
-          <Text color="gray.300" fontSize="sm">{description}</Text>
-          <Box bg="gray.900" p={3} borderRadius="md">
-            <HStack justify="space-between"><Text fontSize="sm" color="gray.400">Target:</Text>
+          <Text color="paper.textPrimary" fontSize="sm">{description}</Text>
+          <Box bg="paper.bg" p={3} borderRadius="md">
+            <HStack justify="space-between"><Text fontSize="sm" color="paper.textSecondary">Target:</Text>
               <Text fontSize="sm">Axis 0</Text></HStack>
-            <HStack justify="space-between"><Text fontSize="sm" color="gray.400">Commands:</Text>
+            <HStack justify="space-between"><Text fontSize="sm" color="paper.textSecondary">Commands:</Text>
               <Text fontSize="sm">{commandCount}</Text></HStack>
             {customCommandCount > 0 && (
-              <HStack justify="space-between"><Text fontSize="sm" color="gray.400">Custom commands:</Text>
+              <HStack justify="space-between"><Text fontSize="sm" color="paper.textSecondary">Custom commands:</Text>
                 <Text fontSize="sm">{customCommandCount}</Text></HStack>
             )}
           </Box>
@@ -50,7 +50,7 @@ const ConfirmationModal = ({
       </ModalBody>
       <ModalFooter>
         <Button variant="ghost" mr={3} onClick={onClose}>Cancel</Button>
-        <Button colorScheme="blue" onClick={onConfirm} isLoading={isLoading} loadingText="Processing…">
+        <Button colorScheme="accent" onClick={onConfirm} isLoading={isLoading} loadingText="Processing…">
           {confirmText}
         </Button>
       </ModalFooter>

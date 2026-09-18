@@ -3361,3 +3361,130 @@ the fast-transient case a hard yank specifically stresses. This directly
 informs open item #2 (brake-resistor thermal verification, v1.9 §6) and is
 written up for hands-on use in
 `docs/testing_tab_experiment_guide.md`.
+
+## UI redesign sub-phase 1 (Setup tab prototype) — styling mechanism (Step 0)
+
+Per the handoff doc's Step 0, confirmed before making any visual change: the frontend
+styles through **Chakra UI** (`@chakra-ui/react` + `@emotion/*`), not Tailwind, CSS
+modules, or styled-components — there is no `tailwind.config.js` or any `.module.css`
+anywhere in `frontend/`. There **is** a shared theme file: `main.jsx` calls
+`extendTheme({...})` (fonts Inter/JetBrains Mono, a `gray` scale, a teal-ish `odrive`
+color scheme used as the app-wide accent via `Button`'s `defaultProps.colorScheme`,
+custom `radii.md`/`radii.lg`, and `config: { initialColorMode: 'dark', useSystemColorMode:
+false }` with a dark global body background). Individual components then layer
+per-instance Chakra style props on top (`bg="gray.800"`, `color="gray.400"`,
+`colorScheme="odrive"`, `fontFamily="mono"` for numeric values, etc.) rather than
+consuming named semantic tokens — so today's styling is theme-for-palette/fonts,
+per-component-props for everything else.
+
+This matters for scoping sub-phase 1 to the Setup tab only: the whole app is forced into
+dark mode globally (`initialColorMode: 'dark'`), and Chakra's `colorScheme` props (Badge,
+Alert, Switch, Button, Card `variant="elevated"`'s shadow) render differently depending on
+the active color-mode context. Rather than hand-recoloring every dark-mode-specific prop
+in the four Setup files, the Setup tab's root is wrapped in Chakra's `<LightMode>`
+(exported by `@chakra-ui/react`, confirmed present in `node_modules`) — this locks the
+color-mode context to light for that subtree only, so existing `colorScheme` usages
+(green/red/orange/gray status badges and alerts) automatically render their light-mode
+variants without any other tab's color mode changing. The four new flat-white tokens
+(bg/text-primary/text-secondary/border) and the new `accent` (blue) / `tag` (amber) color
+scales from §3 of the handoff doc are added as new top-level keys in `main.jsx`'s
+`extendTheme` colors — additive only, no existing key (`gray`, `odrive`, `radii.md/lg`)
+is modified, so no other tab's appearance changes. Card elevation switches from
+`variant="elevated"` (box-shadow) to `variant="outline"` (1px border, no shadow) per the
+"no drop shadows" rule in §3. Rounded-full is applied as an explicit `borderRadius="full"`
+per Button/IconButton/Badge instance in the four Setup files rather than as a global
+`Button` theme override, again to keep the change scoped to this one tab.
+
+## UI redesign full roll-out — chart color palette and theme scoping
+
+Once the Setup tab's look was approved and the same tokens were rolled out app-wide, two
+choices from sub-phase 1 got revisited now that scope changed from "one tab" to "the whole
+app":
+
+**Theme scoping**: sub-phase 1 deliberately avoided touching `main.jsx`'s global theme
+(`initialColorMode: 'dark'`) and instead wrapped just the Setup tab in Chakra's
+`<LightMode>`, specifically so the rest of the still-dark app was unaffected. With the
+roll-out now covering every tab, that per-tab scoping mechanism no longer serves a
+purpose — flipping `initialColorMode` to `'light'` in the theme itself (plus the global
+`body` styles and `Button`'s default `colorScheme`) is the correct fix at this scope, and
+the `<LightMode>` wrapper was removed from `SetupTab.jsx` as redundant.
+
+**Chart colors needed the `dataviz` skill, not a mechanical remap**: the existing dark-
+theme telemetry charts (`TelemetryTimeSeriesChart.jsx`, shared by Control/Train/Testing/
+Inspector) used pastel line colors (`#63B3ED` blue, `#68D391` green, `#F6E05E` yellow,
+etc.) chosen for contrast against a dark background — several of these are close to
+unreadable on white (e.g. the yellow is ~2:1 contrast). Rather than guessing replacement
+hues, loaded the `dataviz` skill and used its validated reference categorical palette
+(`references/palette.md`), substituting slot 1 with this app's own brand blue (`#2563eb`)
+and validating the resulting 7-hue set with `scripts/validate_palette.js --mode light
+--surface "#FFFFFF"` — all CVD/lightness/chroma gates passed; 3 of the 7 hues (aqua,
+yellow, magenta) land below 3:1 contrast on white, which the skill calls out as requiring
+"relief" (visible labels or a table view) rather than a hue swap — already satisfied here
+since every chart always renders an on-screen `Legend`.
+
+Per-chart color assignment is **not** a single fixed physical-quantity → color mapping
+held across the whole app (e.g. "velocity is always hue X everywhere"). Several charts
+render calibrated-vs-raw or measured-vs-setpoint pairs on **separate, non-shared Y axes**
+(no `axisKey` linking them) rather than one axis with a dashed overlay — for those,
+sharing one hue (the "target_position shares its axis-owner's hue, dashed" convention)
+would have made two distinct axes look identical. Colors are instead assigned per chart,
+in that chart's own fixed line order, so a chart's own N simultaneously-visible lines are
+each guaranteed a distinct, validated hue — which is what the CVD-safety rule actually
+requires (distinct color per entity *within a chart*, never reassigned by which lines are
+toggled on/off), without chasing an unachievable global one-hue-per-signal mapping across
+~9 distinct telemetry quantities spread across differently-shaped per-tab chart configs.
+
+Separately: `AxisRangeControl.jsx` (the small "Auto | min–max" control next to each chart
+line's checkbox) colored its own label *text* with the line's raw series color — directly
+called out by the dataviz skill's own non-negotiables ("text wears text tokens, never the
+series color"), and a real bug once several series' colors dropped below 3:1 on white.
+Fixed by keeping the label in neutral ink and adding a small colored swatch dot next to it
+instead, so color still carries the identity without the label itself losing legibility.
+
+Also found **two stylesheets with real (not orphaned) dark backgrounds** that no amount of
+Chakra prop remapping would have touched, since they're plain CSS painting behind Chakra's
+own elements: `styles/DeviceList.css`'s `.device-list` (dark gradient sidebar background)
+and `styles/InspectorTab.css`'s `.inspector-tab` (dark gradient). Both fixed. By contrast,
+`App.css` and `styles/ConfigurationTab.css` turned out to be **entirely dead** — verified
+by grepping actual `className` usage in the corresponding JSX before touching anything;
+`ConfigurationTab.css` isn't even imported anywhere. Left both alone since editing unused
+CSS has zero visual effect and isn't part of this pass.
+
+## UI redesign full roll-out — low-contrast bug: stale `chakra-ui-color-mode` in localStorage
+
+Flagged directly from a screenshot after the full roll-out: several **un-overridden**
+Chakra defaults (an outline button's text, e.g. "Restart Freddy" / "Reset") were rendering
+visibly pale/washed out — e.g. `orange.200` (`#FBD38D`, a pale peach) instead of the
+expected `orange.600` (`#C05621`, a solid burnt orange) an outline button should use in
+light mode. Everywhere a color was set via an explicit literal prop (e.g. this session's
+own `color="accent.600"`/`color="paper.textPrimary"` additions) looked correct; only the
+spots still relying on Chakra's own internal light/dark computation looked wrong — which
+narrowed it down fast.
+
+Root cause: `main.jsx`'s `config: { initialColorMode: 'light' }` only picks the color mode
+Chakra starts with on a **fresh** browser profile. `ChakraProvider`'s `ColorModeProvider`
+persists the resolved mode to `localStorage` (`chakra-ui-color-mode`) and prefers that
+cached value over `initialColorMode` on every later load — and this exact browser profile
+had already run the app under the old `initialColorMode: 'dark'` (both this session's own
+`ODRIVE_MOCK=1` dev-server testing, and presumably real prior usage), so the cached value
+was still `dark`. Every Chakra component whose variant styling calls `mode(lightValue,
+darkValue)` internally (outline/ghost button text and borders, Badge's default `subtle`/
+`outline` variants, Alert, etc.) was silently still resolving its **dark** branch, even
+though the theme's own colors, fonts, and every explicitly-set prop were correctly light —
+that split (some things right, some things wrong, no error, no obvious pattern from the
+code alone) is what made this a real bug rather than an obviously-incomplete pass; it
+would not have been caught by grepping for leftover `gray.*`/`odrive.*` tokens, since none
+of the affected styles are literal props in this codebase — they come from Chakra's own
+component theme internals.
+
+Fixed by wrapping the whole app in Chakra's `<LightMode>` (`main.jsx`) — this app has
+dropped dark mode entirely as part of the redesign, so forcing every `mode(light, dark)`
+call to its light branch unconditionally, regardless of what's cached from before, is the
+correct fix (not a workaround) — nobody needs to manually clear `localStorage` on their
+own machine or browser profile for the app to render correctly. Separately, while looking
+at this: bumped every Chakra component's default disabled-state `opacity: 0.4` (baked into
+Button/Input/Select/Checkbox/Switch's own theme, `_disabled`) to `0.6` — a 0.4-opacity
+control blends acceptably into a dark background but reads as nearly invisible on white —
+and re-implemented the Button `outline` variant's `gray` colorScheme case, whose default
+border (`gray.200`) was too close to the white background for this design's "structure
+from the 1px border" principle to actually hold once genuinely in light mode.

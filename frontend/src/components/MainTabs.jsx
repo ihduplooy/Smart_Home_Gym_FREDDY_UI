@@ -29,17 +29,17 @@ const TabLoadingFallback = () => (
     display="flex"
     alignItems="center"
     justifyContent="center"
-    bg="gray.900"
+    bg="paper.bg"
   >
     <VStack spacing={3}>
       <Spinner
         size="lg"
-        color="odrive.300"
+        color="accent.600"
         thickness="3px"
         speed="0.8s"
       />
       <Text
-        color="gray.400"
+        color="paper.textSecondary"
         fontSize="sm"
         fontWeight="medium"
       >
@@ -128,12 +128,12 @@ const MainTabs = () => {
   }
 
   return (
-    <Box flex="1" bg="gray.900" overflow="hidden">
+    <Box flex="1" bg="paper.bg" overflow="hidden">
       <Tabs
         index={activeTab}
         onChange={setActiveTab}
         variant="enclosed"
-        colorScheme="odrive"
+        colorScheme="accent"
         h="100%"
         display="flex"
         flexDirection="column"
@@ -144,20 +144,20 @@ const MainTabs = () => {
         // high-frequency telemetry subscribers are gated by `isActive` so hidden
         // tabs cost nothing.
       >
-        <HStack bg="gray.800" borderBottom="1px solid" borderColor="gray.600" pr={4} justify="space-between">
+        <HStack bg="paper.bg" borderBottom="1px solid" borderColor="paper.border" pr={4} justify="space-between">
           <TabList border="none" px={6}>
             {TAB_CONFIG.map((tabConfig) => (
               <Tab
                 key={tabConfig.id}
-                bg="gray.700"
-                color="gray.300"
+                bg="paper.bg"
+                color="paper.textPrimary"
                 borderRadius="md"
-                _hover={{ bg: 'gray.800' }}
+                _hover={{ bg: 'paper.bg' }}
                 _selected={{
-                  bg: 'gray.900',
-                  color: 'odrive.300',
+                  bg: 'paper.bg',
+                  color: 'accent.600',
                   borderBottom: '3px solid',
-                  borderBottomColor: 'odrive.300',
+                  borderBottomColor: 'accent.600',
                   borderBottomLeftRadius: '0px',
                   borderBottomRightRadius: '0px',
                 }}
@@ -169,7 +169,7 @@ const MainTabs = () => {
         </HStack>
 
         <Suspense fallback={<TabLoadingFallback />}>
-          <TabPanels flex="1" minH="0" bg="gray.900">
+          <TabPanels flex="1" minH="0" bg="paper.bg">
             {TAB_CONFIG.map((tabConfig, index) => (
               <TabPanel
                 key={tabConfig.id}

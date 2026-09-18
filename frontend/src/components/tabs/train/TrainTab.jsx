@@ -14,9 +14,9 @@ import TrainResetModal from '../../modals/TrainResetModal'
 // Line config for the shared TelemetryTimeSeriesChart (components/shared/) --
 // same 3 quantities/keys useTrainTelemetry.js's samples already carry.
 const TRAIN_CHART_LINES = [
-  { key: 'position_m', label: 'Position (actual)', color: '#63B3ED', unit: 'm', defaultOn: true, side: 'left' },
-  { key: 'velocity_m_s', label: 'Velocity (actual)', color: '#68D391', unit: 'm/s', defaultOn: false, side: 'right' },
-  { key: 'torque_est_nm', label: 'Torque (actual)', color: '#F6AD55', unit: 'Nm', defaultOn: false, side: 'right' },
+  { key: 'position_m', label: 'Position (actual)', color: '#2563eb', unit: 'm', defaultOn: true, side: 'left' },
+  { key: 'velocity_m_s', label: 'Velocity (actual)', color: '#1baf7a', unit: 'm/s', defaultOn: false, side: 'right' },
+  { key: 'torque_est_nm', label: 'Torque (actual)', color: '#eb6834', unit: 'Nm', defaultOn: false, side: 'right' },
 ]
 
 const TrainTab = ({ isActive = true }) => {
@@ -176,10 +176,10 @@ const TrainTab = ({ isActive = true }) => {
           </Alert>
         )}
 
-        <Card bg="gray.800" variant="elevated">
+        <Card bg="paper.bg" variant="outline" borderColor="paper.border" borderRadius="lg">
           <CardHeader>
             <HStack justify="space-between">
-              <Heading size="md" color="white">Train</Heading>
+              <Heading size="md" color="paper.textPrimary">Train</Heading>
               <HStack>
                 {trainSessionRunning && <Badge colorScheme="green" variant="solid">Running</Badge>}
                 <Badge colorScheme={isHomed ? 'green' : 'gray'} variant="outline">{isHomed ? 'homed' : 'not homed'}</Badge>
@@ -207,32 +207,32 @@ const TrainTab = ({ isActive = true }) => {
               </HStack>
               <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4}>
                 <Stat>
-                  <StatLabel color="gray.300">Cable position</StatLabel>
-                  <StatNumber color="odrive.300" fontSize="xl">
+                  <StatLabel color="paper.textPrimary">Cable position</StatLabel>
+                  <StatNumber color="accent.600" fontSize="xl">
                     {control?.extra?.cable_length_m != null ? control.extra.cable_length_m.toFixed(3) : '—'}
                   </StatNumber>
-                  <Text fontSize="xs" color="gray.400">m, from home</Text>
+                  <Text fontSize="xs" color="paper.textSecondary">m, from home</Text>
                 </Stat>
                 <Stat>
-                  <StatLabel color="gray.300">Target force</StatLabel>
-                  <StatNumber color="odrive.300" fontSize="xl">
+                  <StatLabel color="paper.textPrimary">Target force</StatLabel>
+                  <StatNumber color="accent.600" fontSize="xl">
                     {control?.extra?.target_force_n != null ? control.extra.target_force_n.toFixed(1) : '—'}
                   </StatNumber>
-                  <Text fontSize="xs" color="gray.400">N</Text>
+                  <Text fontSize="xs" color="paper.textSecondary">N</Text>
                 </Stat>
                 <Stat>
-                  <StatLabel color="gray.300">Commanded torque</StatLabel>
-                  <StatNumber color="odrive.300" fontSize="xl">
+                  <StatLabel color="paper.textPrimary">Commanded torque</StatLabel>
+                  <StatNumber color="accent.600" fontSize="xl">
                     {control?.extra?.commanded_torque_nm != null ? control.extra.commanded_torque_nm.toFixed(3) : '—'}
                   </StatNumber>
-                  <Text fontSize="xs" color="gray.400">Nm</Text>
+                  <Text fontSize="xs" color="paper.textSecondary">Nm</Text>
                 </Stat>
                 <Stat>
-                  <StatLabel color="gray.300">Max extension</StatLabel>
-                  <StatNumber color="odrive.300" fontSize="xl">
+                  <StatLabel color="paper.textPrimary">Max extension</StatLabel>
+                  <StatNumber color="accent.600" fontSize="xl">
                     {cable?.has_max && cable?.max_extension_length_m != null ? cable.max_extension_length_m.toFixed(3) : '—'}
                   </StatNumber>
-                  <Text fontSize="xs" color="gray.400">{cable?.has_max ? 'm, from home' : 'not calibrated'}</Text>
+                  <Text fontSize="xs" color="paper.textSecondary">{cable?.has_max ? 'm, from home' : 'not calibrated'}</Text>
                 </Stat>
               </SimpleGrid>
             </VStack>

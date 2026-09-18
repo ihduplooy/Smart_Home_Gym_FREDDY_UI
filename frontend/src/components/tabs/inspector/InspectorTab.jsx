@@ -14,7 +14,7 @@ import '../../../styles/InspectorTab.css'
 // feature to rebuild, not a partial patch of what's left here.
 const InspectorTab = ({ isConnected, isActive = true }) => {
   return (
-    <Box className="inspector-tab" h="100%" display="flex" flexDirection="column" bg="gray.900">
+    <Box className="inspector-tab" h="100%" display="flex" flexDirection="column" bg="paper.bg">
       <Box flex="1" minH="0" p={4} overflow="auto">
         {!isConnected && (
           <Alert status="info" variant="left-accent" mb={3} borderRadius="md">

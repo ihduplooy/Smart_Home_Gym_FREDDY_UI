@@ -78,7 +78,7 @@ function RestartFreddyButton() {
       </Button>
       <AlertDialog isOpen={isOpen} leastDestructiveRef={cancelRef} onClose={onClose} isCentered>
         <AlertDialogOverlay>
-          <AlertDialogContent bg="gray.800">
+          <AlertDialogContent bg="paper.bg">
             <AlertDialogHeader color="orange.300">Restart Freddy?</AlertDialogHeader>
             <AlertDialogBody>
               Stops the motor, forgets the device connection, clears home/max
@@ -152,7 +152,7 @@ function QuitFreddyButton() {
       </Button>
       <AlertDialog isOpen={isOpen} leastDestructiveRef={cancelRef} onClose={onClose} isCentered>
         <AlertDialogOverlay>
-          <AlertDialogContent bg="gray.800">
+          <AlertDialogContent bg="paper.bg">
             <AlertDialogHeader color="red.300">Quit Freddy?</AlertDialogHeader>
             <AlertDialogBody>
               Idles the motor, then stops the backend AND the frontend dev
@@ -174,14 +174,14 @@ function QuitFreddyButton() {
 
 function App() {
   return (
-    <Box bg="gray.900" minH="100vh" color="white">
+    <Box bg="paper.bg" minH="100vh" color="paper.textPrimary">
       <TelemetryManager />
       <Flex h="100vh">
         {/* Left Sidebar */}
-        <Box w="320px" bg="gray.800" borderRight="1px solid" borderColor="gray.600">
+        <Box w="320px" bg="paper.bg" borderRight="1px solid" borderColor="paper.border">
           <VStack spacing={3} align="stretch" h="100%" p={4}>
             <HStack justify="space-between" align="center">
-              <Heading size="md" color="odrive.300">Smart Gym Control</Heading>
+              <Heading size="md" color="accent.600">Smart Gym Control</Heading>
               <RestartFreddyButton />
             </HStack>
             <Box flex="1" minH={0} overflowY="auto">

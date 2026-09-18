@@ -1,4 +1,4 @@
-import { HStack, Text, Input, Checkbox } from '@chakra-ui/react'
+import { Box, HStack, Text, Input, Checkbox } from '@chakra-ui/react'
 
 // Small reusable per-axis "Auto | min–max" control. Originally built for the
 // Train tab's telemetry/position charts (25 July 2026, requested so
@@ -18,14 +18,17 @@ import { HStack, Text, Input, Checkbox } from '@chakra-ui/react'
 const AxisRangeControl = ({ label, color, range, onChange }) => {
   return (
     <HStack spacing={2}>
-      <Text fontSize="xs" color={color} minW="70px">{label}</Text>
+      <HStack spacing={1.5} minW="70px">
+        <Box w="8px" h="8px" borderRadius="full" bg={color} flexShrink={0} />
+        <Text fontSize="xs" color="paper.textSecondary">{label}</Text>
+      </HStack>
       <Checkbox
         size="sm"
         isChecked={range.auto}
         onChange={() => onChange({ ...range, auto: !range.auto })}
-        colorScheme="odrive"
+        colorScheme="accent"
       >
-        <Text fontSize="xs" color="gray.400">Auto</Text>
+        <Text fontSize="xs" color="paper.textSecondary">Auto</Text>
       </Checkbox>
       {!range.auto && (
         <>
@@ -37,7 +40,7 @@ const AxisRangeControl = ({ label, color, range, onChange }) => {
             value={range.min}
             onChange={(e) => onChange({ ...range, min: e.target.value })}
           />
-          <Text fontSize="xs" color="gray.500">–</Text>
+          <Text fontSize="xs" color="paper.textSecondary">–</Text>
           <Input
             size="xs"
             w="64px"

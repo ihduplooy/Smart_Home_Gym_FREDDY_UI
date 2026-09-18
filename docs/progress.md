@@ -2901,3 +2901,127 @@ weights (5/10/15 kg).
       torque correction to identity until recollected under the new
       workflow. Flagging explicitly since it's a real behavior change to
       already-collected bench data, not just new-code coverage.
+
+## UI redesign sub-phase 1 — Setup tab styling prototype
+
+Per `Phase 1/freddy_v2_ui_redesign_subphase1_setup_tab_styling.md`. Scope: a pure
+styling pass on the Setup tab only (`SetupTab.jsx`, `TrainSettingsSection.jsx`,
+`SpoolGrowthCalibration.jsx`, `SpoolModelDiagnostics.jsx`) — no component
+restructuring, no new functionality, no changes to any other tab.
+
+- [x] Step 0 (styling mechanism): confirmed Chakra UI (not Tailwind/CSS modules/
+      styled-components), with a shared `extendTheme` in `main.jsx` — see
+      docs/decisions.md for the full write-up, including the app-wide
+      `initialColorMode: 'dark'` finding and why the Setup tab is wrapped in
+      Chakra's `<LightMode>` instead of touching the global theme.
+- [x] Added the token set from the handoff doc's §3 as new, additive keys in
+      `main.jsx`'s `extendTheme` colors (`accent` = blue Tailwind-blue-600-based
+      scale, `tag` = amber scale reserved for feature-flag-style badges, `paper`
+      = the four flat bg/text-primary/text-secondary/border values). No existing
+      key (`gray`, `odrive`, `radii.md/lg`) was modified.
+- [x] Applied the tokens across the four Setup files: `Card` switched from
+      `variant="elevated"` (shadow) to `variant="outline"` (1px border, no
+      shadow); every dark-mode gray/`odrive`/`white` prop remapped to the new
+      `paper`/`accent` tokens; `Button`/`IconButton`/`Badge` instances got
+      `borderRadius="full"`; short field labels and guard-toggle names got the
+      monospace/uppercase/letter-spacing micro-label treatment (existing
+      numeric-data monospace usage, e.g. calibration point tables and the
+      Developer diagnostics panel, was left as-is — already matched the
+      "spec-sheet" look before this pass). The "(experimental)" text next to
+      Spool growth calibration became an actual `Badge` using the new `tag`
+      token — the one place a feature-flag-style badge fit naturally.
+- [x] `npx eslint` — clean. `npm run build` (`vite build`) — clean (only the
+      pre-existing chunk-size/dynamic-import warnings, unrelated to this
+      change).
+- [x] Ran the app against the mock backend (`ODRIVE_MOCK=1`) and drove it with
+      a from-scratch Chrome DevTools Protocol script (no `chromium-cli` or
+      Playwright available in this environment) to confirm visually and
+      functionally: Setup tab renders the flat white/near-black/thin-border/
+      monospace-micro-label/rounded-full look from §3, while every other tab
+      (sidebar, tab bar) is unaffected and stays on the app's existing dark
+      theme. Exercised Start setup session → Home (reached "REELING IN…" state
+      correctly) → Abort → Stop setup session on the mock backend; guard
+      toggles and the resistance-unit toggle round-tripped their Chakra
+      `Switch` state as before. No functional regression observed.
+- [x] Look/feel checkpoint (§5's last acceptance criterion): user reviewed the
+      Setup tab directly against the running dev server and approved it ("ok
+      looks good now apply throughout freddy") — the §6 checkpoint gate is
+      cleared; see the roll-out section below for what followed.
+
+## UI redesign — full roll-out to the rest of Freddy
+
+Per the checkpoint approval above, the same flat white/spec-sheet token set was
+rolled out to every remaining tab and shared component (Configuration, Control,
+Train, Testing, Inspector, Command Console, the sidebar/`DeviceList`, and the
+top-level `App.jsx`/`MainTabs.jsx` chrome) — not just styling props this time,
+but the theme's own defaults, since scoping per-tab (the Setup-only `<LightMode>`
+wrapper from sub-phase 1) no longer made sense once every tab needed it.
+
+- [x] Flipped `main.jsx`'s `extendTheme` itself: `initialColorMode` dark → light,
+      global `body` bg/color → the `paper` tokens, `Button`'s `defaultProps.
+      colorScheme` `odrive` → `accent`. Removed the now-redundant `<LightMode>`
+      wrapper and explicit token duplication from `SetupTab.jsx` (the global
+      theme covers it now).
+- [x] Added `Button`/`Badge` `baseStyle: { borderRadius: 'full' }` to the theme
+      instead of hand-adding `borderRadius="full"` to every one of the ~30
+      files with a `Button`/`Badge`/`IconButton` — confirmed safe against
+      `TelemetryTimeSeriesChart.jsx`'s one `ButtonGroup isAttached` (segmented
+      range-selector): Chakra's own `attachedStyles` zero out the shared inner
+      edges via a group-level CSS rule regardless of each Button's own
+      `border-radius`, so the segmented control still reads as one merged
+      control, not a row of separate pills (checked against Chakra's actual
+      `button-group.mjs` source, not assumed).
+- [x] Mechanically remapped every `gray.*`/`white`/`odrive.*` Chakra prop
+      (attribute-qualified sed: `bg="gray.800"` differently from `color="gray.
+      800"` differently from `borderColor="gray.800"`, so background vs text vs
+      border always landed on the right `paper` token) across every remaining
+      tab and shared component, then hand-fixed the handful of dynamic/
+      ternary color expressions (`{connected ? 'odrive.700' : 'gray.700'}`-
+      style) sed can't safely touch. Every `Card variant="elevated"` (shadow)
+      switched to `variant="outline"` + `paper.border` (no shadow), matching
+      the Setup tab's "structure from the border" rule.
+- [x] **Charts** (recharts, in `TelemetryTimeSeriesChart.jsx` — shared by
+      Control/Train/Testing/Inspector — plus `TrainPositionChart.jsx` and
+      `TrainProfileEditor.jsx`'s preview graph): loaded the `dataviz` skill
+      before touching any chart color, since the old dark-theme pastels
+      (`#63B3ED`, `#68D391`, `#F6E05E`, ...) have poor contrast on white and
+      needed a real light-mode-safe categorical palette, not a guess. Ran
+      `scripts/validate_palette.js` against our brand blue substituted into
+      the reference palette's slot 1 plus its next six hues, on a `#FFFFFF`
+      surface — passed CVD/contrast gates (one WARN on 3 low-contrast hues,
+      mitigated by the charts' own always-on `Legend`, per the skill's relief
+      rule). Assigned per-chart (not globally per physical quantity, since the
+      same telemetry key needs a genuinely distinct color from whatever else
+      shares its chart, not a fixed color regardless of context): e.g.
+      Testing's 7-line chart uses all 7 validated hues; Control/Train's
+      smaller charts reuse the same 7-color set in their own fixed order.
+      Also fixed a real accessibility bug the skill's own non-negotiables
+      caught: `AxisRangeControl.jsx` colored its label *text* with the raw
+      series hex (several of which are sub-3:1 on white) — changed to a
+      neutral-ink label plus a small color swatch dot, so identity now comes
+      from the swatch, not low-contrast colored text.
+- [x] Found and fixed genuinely **active** (not just orphaned) dark-theme CSS
+      that Chakra prop changes alone wouldn't touch: `styles/DeviceList.css`'s
+      `.device-list` had a real dark gradient background and `.device-card`
+      had dark borders/shadow; `styles/InspectorTab.css`'s `.inspector-tab`
+      had its own dark gradient. Fixed both (checked `className` usage in the
+      actual JSX first — `App.css` and `styles/ConfigurationTab.css`, by
+      contrast, are entirely orphaned: `ConfigurationTab.css` isn't imported
+      anywhere at all — left untouched since editing dead CSS changes nothing
+      and isn't part of this pass).
+- [x] `npx eslint .` — clean (one pre-existing, unrelated warning in
+      `AxisTelemetryCharts.jsx`, not introduced by this change).
+      `npm run build` — clean (same pre-existing chunk-size warning as
+      sub-phase 1).
+- [x] Ran the app against the mock backend again after the full roll-out;
+      dev servers left running (`:5050` backend, `:3000` Vite) for the user to
+      review directly, per their preference to grab their own screenshots
+      rather than have them captured programmatically.
+- [x] User's first-look screenshot (Configuration tab) surfaced a real
+      contrast bug — see docs/decisions.md ("stale `chakra-ui-color-mode` in
+      localStorage") for the root cause and fix (`<LightMode>` wrap in
+      `main.jsx`, plus disabled-opacity and gray-outline-border theme
+      overrides). Re-verified `eslint`/`build` clean after the fix.
+- [x] **User approved the result** ("yes this is very nice now") after
+      reviewing the fix live in the browser — the full-app UI redesign
+      roll-out is complete and signed off.

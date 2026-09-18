@@ -50,15 +50,17 @@ const UNIT_BY_MODE = { velocity: 'turns/s', torque: 'Nm' }
 // stay visually distinct; only present (non-null) while Position mode is
 // running, same as it was via MiniChart's old secondaryKey mechanism.
 const CONTROL_CHART_LINES = [
-  { key: 'position', label: 'Position (actual)', color: '#63B3ED', unit: 'turns', defaultOn: true, side: 'left' },
-  { key: 'target_position', label: 'Target position', color: '#F6E05E', unit: 'turns', defaultOn: true, side: 'left', axisKey: 'position', dashed: true, lineType: 'stepAfter' },
-  { key: 'velocity', label: 'Velocity (actual)', color: '#68D391', unit: 'turns/s', defaultOn: false, side: 'right' },
+  { key: 'position', label: 'Position (actual)', color: '#2563eb', unit: 'turns', defaultOn: true, side: 'left' },
+  { key: 'target_position', label: 'Target position', color: '#2563eb', unit: 'turns', defaultOn: true, side: 'left', axisKey: 'position', dashed: true, lineType: 'stepAfter' },
+  { key: 'velocity', label: 'Velocity (actual)', color: '#1baf7a', unit: 'turns/s', defaultOn: false, side: 'right' },
   // Calibrated by default (item 1: "calibration becomes the single source
   // of truth") -- raw torque_est (motor-constant-only estimate) kept
   // available as an off-by-default secondary line, same precedent as
-  // TestingTab.jsx's CHART_LINES.
-  { key: 'torque_est_corrected', label: 'Torque (calibrated)', color: '#F6AD55', unit: 'Nm', defaultOn: false, side: 'right' },
-  { key: 'torque_est', label: 'Torque (raw estimate)', color: '#ED8936', unit: 'Nm', defaultOn: false, side: 'right' },
+  // TestingTab.jsx's CHART_LINES. Each gets its own axis (no axisKey
+  // pairing, unlike target_position above), so they need genuinely
+  // distinct hues rather than a shared-hue-plus-dash pair.
+  { key: 'torque_est_corrected', label: 'Torque (calibrated)', color: '#eb6834', unit: 'Nm', defaultOn: false, side: 'right' },
+  { key: 'torque_est', label: 'Torque (raw estimate)', color: '#eda100', unit: 'Nm', defaultOn: false, side: 'right' },
 ]
 
 // Modes this tab's own UI understands (its Select only ever offers these
@@ -328,10 +330,10 @@ const ControlTab = ({ isActive = true }) => {
         )}
 
         {/* Mode / target / run controls */}
-        <Card bg="gray.800" variant="elevated">
+        <Card bg="paper.bg" variant="outline" borderColor="paper.border" borderRadius="lg">
           <CardHeader>
             <HStack justify="space-between">
-              <Heading size="md" color="white">Control</Heading>
+              <Heading size="md" color="paper.textPrimary">Control</Heading>
               <Badge colorScheme={connected ? 'green' : 'gray'} variant="outline">
                 {connected ? 'connected' : 'disconnected'}
               </Badge>
@@ -341,7 +343,7 @@ const ControlTab = ({ isActive = true }) => {
             <VStack align="stretch" spacing={4}>
               <HStack spacing={4} wrap="wrap">
                 <Box>
-                  <Text fontSize="xs" color="gray.400" mb={1}>Mode</Text>
+                  <Text fontSize="xs" color="paper.textSecondary" mb={1}>Mode</Text>
                   <Select
                     size="sm"
                     w="140px"
@@ -358,7 +360,7 @@ const ControlTab = ({ isActive = true }) => {
                 {mode === 'position' ? (
                   <>
                     <Box>
-                      <Text fontSize="xs" color="gray.400" mb={1}>Move Distance</Text>
+                      <Text fontSize="xs" color="paper.textSecondary" mb={1}>Move Distance</Text>
                       <HStack spacing={1}>
                         <InputGroup size="sm" w="110px">
                           <Input
@@ -374,7 +376,7 @@ const ControlTab = ({ isActive = true }) => {
                           <option value="m">m (cable)</option>
                         </Select>
                       </HStack>
-                      <Text fontSize="0.65rem" color="gray.500" mt={0.5}>
+                      <Text fontSize="0.65rem" color="paper.textSecondary" mt={0.5}>
                         relative to current position
                         {posUnit === 'm' && (
                           posPositionTurnsEstimate != null
@@ -384,7 +386,7 @@ const ControlTab = ({ isActive = true }) => {
                       </Text>
                     </Box>
                     <Box>
-                      <Text fontSize="xs" color="gray.400" mb={1}>Move Velocity</Text>
+                      <Text fontSize="xs" color="paper.textSecondary" mb={1}>Move Velocity</Text>
                       <InputGroup size="sm" w="150px">
                         <Input
                           type="text"
@@ -397,7 +399,7 @@ const ControlTab = ({ isActive = true }) => {
                       </InputGroup>
                     </Box>
                     <Box>
-                      <Text fontSize="xs" color="gray.400" mb={1}>Accel / Decel</Text>
+                      <Text fontSize="xs" color="paper.textSecondary" mb={1}>Accel / Decel</Text>
                       <InputGroup size="sm" w="150px">
                         <Input
                           type="text"
@@ -410,7 +412,7 @@ const ControlTab = ({ isActive = true }) => {
                       </InputGroup>
                     </Box>
                     <Box>
-                      <Text fontSize="xs" color="gray.400" mb={1}>Torque Limit (optional)</Text>
+                      <Text fontSize="xs" color="paper.textSecondary" mb={1}>Torque Limit (optional)</Text>
                       <InputGroup size="sm" w="160px">
                         <Input
                           type="text"
@@ -422,12 +424,12 @@ const ControlTab = ({ isActive = true }) => {
                         />
                         <InputRightAddon px={2} fontSize="xs">Nm</InputRightAddon>
                       </InputGroup>
-                      <Text fontSize="0.65rem" color="gray.500" mt={0.5}>calibrated (real) Nm</Text>
+                      <Text fontSize="0.65rem" color="paper.textSecondary" mt={0.5}>calibrated (real) Nm</Text>
                     </Box>
                   </>
                 ) : (
                   <Box>
-                    <Text fontSize="xs" color="gray.400" mb={1}>Target{mode === 'torque' ? ' (calibrated Nm)' : ''}</Text>
+                    <Text fontSize="xs" color="paper.textSecondary" mb={1}>Target{mode === 'torque' ? ' (calibrated Nm)' : ''}</Text>
                     <InputGroup size="sm" w="180px">
                       <Input
                         type="text"
@@ -444,7 +446,7 @@ const ControlTab = ({ isActive = true }) => {
                 <VStack align="stretch" spacing={1} justify="flex-end">
                   <Text fontSize="xs" color="transparent" userSelect="none">.</Text>
                   {running ? (
-                    <Button size="sm" colorScheme="odrive" onClick={handleRetarget} isDisabled={!targetValid}>
+                    <Button size="sm" colorScheme="accent" onClick={handleRetarget} isDisabled={!targetValid}>
                       {mode === 'position' ? 'Move again' : 'Set target'}
                     </Button>
                   ) : (
@@ -471,30 +473,30 @@ const ControlTab = ({ isActive = true }) => {
 
               <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4}>
                 <Stat>
-                  <StatLabel color="gray.300">Position</StatLabel>
-                  <StatNumber color="odrive.300" fontSize="xl">{(latest?.position ?? 0).toFixed(3)}</StatNumber>
-                  <Text fontSize="xs" color="gray.400">turns</Text>
+                  <StatLabel color="paper.textPrimary">Position</StatLabel>
+                  <StatNumber color="accent.600" fontSize="xl">{(latest?.position ?? 0).toFixed(3)}</StatNumber>
+                  <Text fontSize="xs" color="paper.textSecondary">turns</Text>
                 </Stat>
                 <Stat>
-                  <StatLabel color="gray.300">Velocity</StatLabel>
-                  <StatNumber color="odrive.300" fontSize="xl">{(latest?.velocity ?? 0).toFixed(3)}</StatNumber>
-                  <Text fontSize="xs" color="gray.400">turns/s</Text>
+                  <StatLabel color="paper.textPrimary">Velocity</StatLabel>
+                  <StatNumber color="accent.600" fontSize="xl">{(latest?.velocity ?? 0).toFixed(3)}</StatNumber>
+                  <Text fontSize="xs" color="paper.textSecondary">turns/s</Text>
                 </Stat>
                 <Stat>
-                  <StatLabel color="gray.300">Torque (calibrated est.)</StatLabel>
-                  <StatNumber color="odrive.300" fontSize="xl">{(latest?.torque_est_corrected ?? 0).toFixed(3)}</StatNumber>
-                  <Text fontSize="xs" color="gray.400">Nm — sign is direction, not resistance magnitude</Text>
+                  <StatLabel color="paper.textPrimary">Torque (calibrated est.)</StatLabel>
+                  <StatNumber color="accent.600" fontSize="xl">{(latest?.torque_est_corrected ?? 0).toFixed(3)}</StatNumber>
+                  <Text fontSize="xs" color="paper.textSecondary">Nm — sign is direction, not resistance magnitude</Text>
                 </Stat>
                 <Stat>
-                  <StatLabel color="gray.300">Current (Iq)</StatLabel>
-                  <StatNumber color="odrive.300" fontSize="xl">{(latest?.current_iq ?? 0).toFixed(3)}</StatNumber>
-                  <Text fontSize="xs" color="gray.400">A</Text>
+                  <StatLabel color="paper.textPrimary">Current (Iq)</StatLabel>
+                  <StatNumber color="accent.600" fontSize="xl">{(latest?.current_iq ?? 0).toFixed(3)}</StatNumber>
+                  <Text fontSize="xs" color="paper.textSecondary">A</Text>
                 </Stat>
               </SimpleGrid>
 
               <HStack justify="space-between">
-                <Text fontSize="xs" color="gray.400">
-                  CSV log: {logFilename ? <Text as="span" fontFamily="mono" color="gray.300">{logFilename}</Text> : '—'}
+                <Text fontSize="xs" color="paper.textSecondary">
+                  CSV log: {logFilename ? <Text as="span" fontFamily="mono" color="paper.textPrimary">{logFilename}</Text> : '—'}
                 </Text>
               </HStack>
             </VStack>
@@ -502,10 +504,10 @@ const ControlTab = ({ isActive = true }) => {
         </Card>
 
         {/* Controller gains — live tuning, straight to axis0.controller.config */}
-        <Card bg="gray.800" variant="elevated">
+        <Card bg="paper.bg" variant="outline" borderColor="paper.border" borderRadius="lg">
           <CardHeader>
             <HStack justify="space-between">
-              <Heading size="md" color="white">Controller Gains</Heading>
+              <Heading size="md" color="paper.textPrimary">Controller Gains</Heading>
               {!isConnected && <Badge colorScheme="gray" variant="outline">no device</Badge>}
             </HStack>
           </CardHeader>
@@ -519,13 +521,13 @@ const ControlTab = ({ isActive = true }) => {
               )}
 
               {!isConnected ? (
-                <Text fontSize="sm" color="gray.400">Connect a device to adjust controller gains.</Text>
+                <Text fontSize="sm" color="paper.textSecondary">Connect a device to adjust controller gains.</Text>
               ) : (
                 GAIN_FIELDS.map((f) => (
                   <Box key={f.key}>
                     <HStack justify="space-between" mb={1}>
-                      <Text fontSize="sm" color="gray.300">{f.label}</Text>
-                      <Text fontSize="sm" fontFamily="mono" color="odrive.300">
+                      <Text fontSize="sm" color="paper.textPrimary">{f.label}</Text>
+                      <Text fontSize="sm" fontFamily="mono" color="accent.600">
                         {gains[f.key] !== undefined ? gains[f.key].toFixed(f.decimals) : '—'} {f.unit}
                       </Text>
                     </HStack>
@@ -537,9 +539,9 @@ const ControlTab = ({ isActive = true }) => {
                       isDisabled={!gainsLoaded}
                       onChange={(v) => handleGainChange(f.key, v)}
                       onChangeEnd={(v) => handleGainCommit(f.key, v, f.decimals)}
-                      colorScheme="odrive"
+                      colorScheme="accent"
                     >
-                      <SliderTrack bg="gray.600"><SliderFilledTrack /></SliderTrack>
+                      <SliderTrack bg="paper.bg"><SliderFilledTrack /></SliderTrack>
                       <SliderThumb boxSize={4} />
                     </Slider>
                   </Box>
@@ -550,7 +552,7 @@ const ControlTab = ({ isActive = true }) => {
                 {gainsSaved && <Text fontSize="xs" color="green.300">Saved to NVM</Text>}
                 <Button
                   size="sm"
-                  colorScheme="odrive"
+                  colorScheme="accent"
                   variant="outline"
                   isDisabled={!isConnected || !gainsLoaded || running}
                   isLoading={gainsSaving}
@@ -559,7 +561,7 @@ const ControlTab = ({ isActive = true }) => {
                   Save to NVM
                 </Button>
               </HStack>
-              <Text fontSize="0.65rem" color="gray.500">
+              <Text fontSize="0.65rem" color="paper.textSecondary">
                 Slider changes take effect immediately on the live device. "Save to NVM" persists
                 them across reboots — it briefly reboots the board, so it's disabled while a
                 session is running.

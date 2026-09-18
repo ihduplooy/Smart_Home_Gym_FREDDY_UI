@@ -80,14 +80,14 @@ const ParameterField = ({ field, fwLine, value, known, edited, onChange, onRefre
         <HStack spacing={1}>
           <Text fontSize="sm" noOfLines={1}>{field.label}</Text>
           {field.tooltip && (
-            <Tooltip label={tooltipContent} hasArrow placement="top" bg="gray.700" color="white" maxW="360px">
-              <Icon as={InfoOutlineIcon} color="gray.500" boxSize={3} />
+            <Tooltip label={tooltipContent} hasArrow placement="top" bg="paper.bg" color="paper.textPrimary" maxW="360px">
+              <Icon as={InfoOutlineIcon} color="paper.textSecondary" boxSize={3} />
             </Tooltip>
           )}
           {edited && <Badge colorScheme="teal" fontSize="0.55rem">edited</Badge>}
           {!known && !edited && <Badge colorScheme="yellow" fontSize="0.55rem">unknown</Badge>}
         </HStack>
-        <Text fontSize="0.65rem" color="gray.500" fontFamily="mono" noOfLines={1}>{path}</Text>
+        <Text fontSize="0.65rem" color="paper.textSecondary" fontFamily="mono" noOfLines={1}>{path}</Text>
       </VStack>
       <Box>{control}</Box>
     </HStack>

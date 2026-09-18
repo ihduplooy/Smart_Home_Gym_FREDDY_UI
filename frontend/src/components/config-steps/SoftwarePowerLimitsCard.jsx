@@ -35,12 +35,12 @@ const Row = ({ label, path, tooltip, unit, value, onChange }) => (
       <HStack spacing={1}>
         <Text fontSize="sm" noOfLines={1}>{label}</Text>
         {tooltip && (
-          <Tooltip label={tooltip} hasArrow placement="top" bg="gray.700" color="white" maxW="360px">
-            <Icon as={InfoOutlineIcon} color="gray.500" boxSize={3} />
+          <Tooltip label={tooltip} hasArrow placement="top" bg="paper.bg" color="paper.textPrimary" maxW="360px">
+            <Icon as={InfoOutlineIcon} color="paper.textSecondary" boxSize={3} />
           </Tooltip>
         )}
       </HStack>
-      <Text fontSize="0.65rem" color="gray.500" fontFamily="mono" noOfLines={1}>{path}</Text>
+      <Text fontSize="0.65rem" color="paper.textSecondary" fontFamily="mono" noOfLines={1}>{path}</Text>
     </VStack>
     <Box>
       <ParameterInput value={value} onChange={onChange} unit={unit} step={1} decimals={1} min={0} />
@@ -94,12 +94,12 @@ const SoftwarePowerLimitsCard = () => {
   }
 
   return (
-    <Card bg="gray.800" variant="outline" borderColor="gray.700" mt={4}>
+    <Card bg="paper.bg" variant="outline" borderColor="paper.border" mt={4}>
       <CardBody>
         <HStack justify="space-between" align="start" mb={3}>
           <VStack align="start" spacing={0}>
-            <Heading size="sm" color="odrive.300">Software Power Limits</Heading>
-            <Text fontSize="xs" color="gray.500">
+            <Heading size="sm" color="accent.600">Software Power Limits</Heading>
+            <Text fontSize="xs" color="paper.textSecondary">
               App-level safety ceilings, not ODrive device registers -- saves immediately, independent of
               Apply &amp; Save above.
             </Text>
@@ -112,7 +112,7 @@ const SoftwarePowerLimitsCard = () => {
               onClick={handleSave}
               isLoading={busy}
               isDisabled={!dirty}
-              colorScheme="odrive"
+              colorScheme="accent"
             />
           </Tooltip>
         </HStack>

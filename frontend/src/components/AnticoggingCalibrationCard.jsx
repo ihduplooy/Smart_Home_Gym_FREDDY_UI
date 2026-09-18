@@ -131,10 +131,10 @@ const AnticoggingCalibrationCard = ({ isActive = true }) => {
   }
 
   return (
-    <Card bg="gray.800" variant="outline" borderColor="gray.700">
+    <Card bg="paper.bg" variant="outline" borderColor="paper.border">
       <CardHeader>
         <HStack justify="space-between">
-          <Heading size="sm" color="odrive.300">Anti-cogging Calibration</Heading>
+          <Heading size="sm" color="accent.600">Anti-cogging Calibration</Heading>
           <HStack>
             <Badge colorScheme={STATE_COLORS[state] ?? 'gray'} variant="solid">{state}</Badge>
             <Badge colorScheme={status?.pre_calibrated ? 'green' : 'gray'} variant="outline">
@@ -150,7 +150,7 @@ const AnticoggingCalibrationCard = ({ isActive = true }) => {
       </CardHeader>
       <CardBody>
         <VStack align="stretch" spacing={4}>
-          <Text fontSize="xs" color="gray.400">
+          <Text fontSize="xs" color="paper.textSecondary">
             Runs ODrive's built-in cogging-torque compensation calibration: the motor spins slowly through
             ~1 turn under temporarily stiffened gains while ODrive builds a correction map, then the map is
             saved and the board reboots to load it. Requires the axis's motor and encoder to already be
@@ -177,7 +177,7 @@ const AnticoggingCalibrationCard = ({ isActive = true }) => {
 
           <HStack spacing={3} wrap="wrap" align="flex-end">
             <Box>
-              <Text fontSize="xs" color="gray.400" mb={1}>pos_gain multiplier</Text>
+              <Text fontSize="xs" color="paper.textSecondary" mb={1}>pos_gain multiplier</Text>
               <InputGroup size="sm" w="110px">
                 <Input
                   type="text" inputMode="decimal" fontFamily="mono"
@@ -188,7 +188,7 @@ const AnticoggingCalibrationCard = ({ isActive = true }) => {
               </InputGroup>
             </Box>
             <Box>
-              <Text fontSize="xs" color="gray.400" mb={1}>vel_integrator_gain multiplier</Text>
+              <Text fontSize="xs" color="paper.textSecondary" mb={1}>vel_integrator_gain multiplier</Text>
               <InputGroup size="sm" w="110px">
                 <Input
                   type="text" inputMode="decimal" fontFamily="mono"
@@ -199,7 +199,7 @@ const AnticoggingCalibrationCard = ({ isActive = true }) => {
               </InputGroup>
             </Box>
             <Box>
-              <Text fontSize="xs" color="gray.400" mb={1}>calib_pos_threshold</Text>
+              <Text fontSize="xs" color="paper.textSecondary" mb={1}>calib_pos_threshold</Text>
               <InputGroup size="sm" w="110px">
                 <Input
                   type="text" inputMode="decimal" fontFamily="mono"
@@ -209,7 +209,7 @@ const AnticoggingCalibrationCard = ({ isActive = true }) => {
               </InputGroup>
             </Box>
             <Box>
-              <Text fontSize="xs" color="gray.400" mb={1}>calib_vel_threshold</Text>
+              <Text fontSize="xs" color="paper.textSecondary" mb={1}>calib_vel_threshold</Text>
               <InputGroup size="sm" w="110px">
                 <Input
                   type="text" inputMode="decimal" fontFamily="mono"
@@ -220,7 +220,7 @@ const AnticoggingCalibrationCard = ({ isActive = true }) => {
             </Box>
           </HStack>
           {defaults && (
-            <Text fontSize="xs" color="gray.500">
+            <Text fontSize="xs" color="paper.textSecondary">
               Defaults: {defaults.pos_gain_multiplier_default}x / {defaults.vel_integrator_gain_multiplier_default}x
               gain multipliers, calib_pos_threshold={defaults.calib_pos_threshold_default}, calib_vel_threshold=
               {defaults.calib_vel_threshold_default} (config/board_constants.py — unmeasured placeholders, verify
@@ -261,19 +261,19 @@ const AnticoggingCalibrationCard = ({ isActive = true }) => {
             <Text fontSize="xs" color="orange.300">Aborted — gains restored, nothing was saved.</Text>
           )}
 
-          <FormControl display="flex" alignItems="center" pt={2} borderTop="1px solid" borderColor="gray.700">
-            <FormLabel htmlFor="anticogging-enabled" mb="0" fontSize="sm" color="gray.200">
+          <FormControl display="flex" alignItems="center" pt={2} borderTop="1px solid" borderColor="paper.border">
+            <FormLabel htmlFor="anticogging-enabled" mb="0" fontSize="sm" color="paper.textPrimary">
               Apply saved anti-cogging map (anticogging_enabled)
             </FormLabel>
             <Switch
               id="anticogging-enabled"
-              colorScheme="odrive"
+              colorScheme="accent"
               isChecked={Boolean(status?.anticogging_enabled)}
               onChange={handleToggleEnabled}
               isDisabled={enabledBusy || status?.anticogging_enabled == null}
             />
           </FormControl>
-          <Text fontSize="xs" color="gray.500">
+          <Text fontSize="xs" color="paper.textSecondary">
             Turning this off does not erase the saved map — useful for isolating whether the map itself is
             causing bad behavior, independent of everything else.
           </Text>
@@ -282,7 +282,7 @@ const AnticoggingCalibrationCard = ({ isActive = true }) => {
 
       <AlertDialog isOpen={isOpen} leastDestructiveRef={cancelRef} onClose={onClose} isCentered>
         <AlertDialogOverlay>
-          <AlertDialogContent bg="gray.800">
+          <AlertDialogContent bg="paper.bg">
             <AlertDialogHeader color="orange.300">Run anti-cogging calibration?</AlertDialogHeader>
             <AlertDialogBody>
               The motor will energize, gains will be temporarily raised well above their normal tuned values, and

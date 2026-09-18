@@ -106,22 +106,22 @@ const ApplyConfigStep = ({ wizard }) => {
   return (
     <Box h="100%" p={3} overflow="auto">
       <VStack spacing={4} align="stretch" maxW="1200px" mx="auto">
-        <Card bg="gray.800" variant="elevated">
+        <Card bg="paper.bg" variant="outline" borderColor="paper.border" borderRadius="lg">
           <CardHeader py={2}>
-            <Heading size="md" color="white" textAlign="center">Configuration Management</Heading>
+            <Heading size="md" color="paper.textPrimary" textAlign="center">Configuration Management</Heading>
           </CardHeader>
           <CardBody py={3}>
             {nothingToDo ? (
               <Box py={16} textAlign="center">
-                <Text color="gray.100" fontSize="2xl" fontWeight="bold">
+                <Text color="paper.textPrimary" fontSize="2xl" fontWeight="bold">
                   Nothing was changed, so no commands were generated.
                 </Text>
-                <Text color="gray.500" mt={2}>
+                <Text color="paper.textSecondary" mt={2}>
                   Edit parameters in the wizard steps, or turn off “Only changed parameters” to write the full configuration.
                 </Text>
                 <HStack justify="center" mt={4}>
-                  <FormLabel htmlFor="only-changed" mb="0" color="gray.300" fontSize="sm">Only changed parameters</FormLabel>
-                  <Checkbox id="only-changed" isChecked={onlyChanged} onChange={(e) => setOnlyChanged(e.target.checked)} colorScheme="blue" />
+                  <FormLabel htmlFor="only-changed" mb="0" color="paper.textPrimary" fontSize="sm">Only changed parameters</FormLabel>
+                  <Checkbox id="only-changed" isChecked={onlyChanged} onChange={(e) => setOnlyChanged(e.target.checked)} colorScheme="accent" />
                 </HStack>
               </Box>
             ) : (
@@ -142,25 +142,25 @@ const ApplyConfigStep = ({ wizard }) => {
                 )}
                 {/* Toggles */}
                 <HStack spacing={2} flexWrap="wrap">
-                  <FormLabel htmlFor="only-changed" mb="0" color="gray.300" fontSize="sm" mr={0}>Only changed parameters</FormLabel>
-                  <Checkbox id="only-changed" isChecked={onlyChanged} onChange={(e) => setOnlyChanged(e.target.checked)} colorScheme="blue" />
-                  <Tooltip label="Generate commands only for parameters you've modified."><Icon as={InfoIcon} color="gray.400" boxSize={3} /></Tooltip>
+                  <FormLabel htmlFor="only-changed" mb="0" color="paper.textPrimary" fontSize="sm" mr={0}>Only changed parameters</FormLabel>
+                  <Checkbox id="only-changed" isChecked={onlyChanged} onChange={(e) => setOnlyChanged(e.target.checked)} colorScheme="accent" />
+                  <Tooltip label="Generate commands only for parameters you've modified."><Icon as={InfoIcon} color="paper.textSecondary" boxSize={3} /></Tooltip>
 
-                  <FormLabel htmlFor="enable-editing" mb="0" color="gray.300" fontSize="sm" mr={0} ml={4}>Enable Editing</FormLabel>
-                  <Checkbox id="enable-editing" isChecked={enableEditing} onChange={(e) => setEnableEditing(e.target.checked)} colorScheme="blue" />
-                  <Tooltip label="Edit, disable or add commands before applying."><Icon as={InfoIcon} color="gray.400" boxSize={3} /></Tooltip>
+                  <FormLabel htmlFor="enable-editing" mb="0" color="paper.textPrimary" fontSize="sm" mr={0} ml={4}>Enable Editing</FormLabel>
+                  <Checkbox id="enable-editing" isChecked={enableEditing} onChange={(e) => setEnableEditing(e.target.checked)} colorScheme="accent" />
+                  <Tooltip label="Edit, disable or add commands before applying."><Icon as={InfoIcon} color="paper.textSecondary" boxSize={3} /></Tooltip>
                 </HStack>
 
                 <HStack justify="space-between">
                   <VStack align="start" spacing={0}>
-                    <Text fontWeight="bold" color="white" fontSize="lg">Configuration Commands</Text>
-                    <Text color="gray.400" fontSize="sm">
+                    <Text fontWeight="bold" color="paper.textPrimary" fontSize="lg">Configuration Commands</Text>
+                    <Text color="paper.textSecondary" fontSize="sm">
                       {finalCommands.length} command(s) for Axis 0
                     </Text>
                   </VStack>
                 </HStack>
 
-                <Box bg="gray.900" p={4} borderRadius="md" maxH="500px" overflowY="auto" border="1px solid" borderColor="gray.600">
+                <Box bg="paper.bg" p={4} borderRadius="md" maxH="500px" overflowY="auto" border="1px solid" borderColor="paper.border">
                   <CommandList
                     commands={baseCommands}
                     customCommands={customCommands}
@@ -180,7 +180,7 @@ const ApplyConfigStep = ({ wizard }) => {
 
                 <VStack spacing={2} w="100%" maxW="400px" mx="auto">
                   <Button
-                    colorScheme="blue"
+                    colorScheme="accent"
                     size="lg"
                     w="100%"
                     h="56px"

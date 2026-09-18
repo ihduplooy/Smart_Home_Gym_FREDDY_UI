@@ -44,7 +44,7 @@ const SetupTab = ({ isActive = true }) => {
   }, [isActive])
 
   return (
-    <Box p={4} h="100%" maxW="1400px" mx="auto" overflow="auto">
+    <Box p={4} h="100%" maxW="1400px" mx="auto" overflow="auto" bg="paper.bg">
       <VStack spacing={4} align="stretch">
         <TrainSettingsSection status={status} />
       </VStack>

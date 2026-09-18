@@ -81,12 +81,12 @@ const CommandConsoleTab = () => {
   const copyCommand = (text) => navigator.clipboard?.writeText(text)
 
   return (
-    <Box h="100%" display="flex" flexDirection="column" bg="gray.900">
+    <Box h="100%" display="flex" flexDirection="column" bg="paper.bg">
       {/* Header */}
-      <HStack px={4} py={3} bg="gray.800" borderBottom="1px solid" borderColor="gray.600" justify="space-between">
+      <HStack px={4} py={3} bg="paper.bg" borderBottom="1px solid" borderColor="paper.border" justify="space-between">
         <HStack>
-          <Terminal size={18} color="#4fd1c7" />
-          <Text fontWeight="bold" color="white">Command Console</Text>
+          <Terminal size={18} color="#2563eb" />
+          <Text fontWeight="bold" color="paper.textPrimary">Command Console</Text>
         </HStack>
         <HStack>
           {isConnected ? (
@@ -103,47 +103,47 @@ const CommandConsoleTab = () => {
       )}
 
       {/* Quick Commands */}
-      <Box p={4} bg="gray.700" borderBottom="1px solid" borderColor="gray.600">
+      <Box p={4} bg="paper.bg" borderBottom="1px solid" borderColor="paper.border">
         <HStack justify="space-between" mb={3}>
-          <Text fontWeight="semibold" color="white" fontSize="sm">Quick Commands</Text>
-          <Badge colorScheme="blue" variant="solid" fontSize="xs">Axis {selectedAxis}</Badge>
+          <Text fontWeight="semibold" color="paper.textPrimary" fontSize="sm">Quick Commands</Text>
+          <Badge colorScheme="accent" variant="solid" fontSize="xs">Axis {selectedAxis}</Badge>
         </HStack>
         <SimpleGrid columns={{ base: 1, md: 3 }} spacing={3}>
           <FormControl>
-            <FormLabel color="gray.300" fontSize="xs" mb={1}>Category</FormLabel>
+            <FormLabel color="paper.textPrimary" fontSize="xs" mb={1}>Category</FormLabel>
             <Select value={categoryIdx} onChange={(e) => { setCategoryIdx(e.target.value); setCommandIdx('') }}
-              bg="gray.600" borderColor="gray.500" size="sm" placeholder="Select category">
+              bg="paper.bg" borderColor="paper.border" size="sm" placeholder="Select category">
               {COMMAND_LIBRARY.map((c, i) => (
                 <option key={c.category} value={i}>{c.category.toUpperCase()}</option>
               ))}
             </Select>
           </FormControl>
           <FormControl>
-            <FormLabel color="gray.300" fontSize="xs" mb={1}>Command</FormLabel>
+            <FormLabel color="paper.textPrimary" fontSize="xs" mb={1}>Command</FormLabel>
             <Select value={commandIdx} onChange={(e) => setCommandIdx(e.target.value)}
-              bg="gray.600" borderColor="gray.500" size="sm" placeholder="Select command" isDisabled={!category}>
+              bg="paper.bg" borderColor="paper.border" size="sm" placeholder="Select command" isDisabled={!category}>
               {category?.commands.map((c, i) => (
                 <option key={c.label} value={i}>{c.label} — {withAxis(c.command, selectedAxis)}</option>
               ))}
             </Select>
           </FormControl>
           <VStack align="stretch" spacing={1}>
-            <Text color="gray.300" fontSize="xs" mb={1}>Action</Text>
-            <Button colorScheme="blue" size="sm" onClick={insertQuick} isDisabled={!quickCommand} leftIcon={<Copy size={14} />}>
+            <Text color="paper.textPrimary" fontSize="xs" mb={1}>Action</Text>
+            <Button colorScheme="accent" size="sm" onClick={insertQuick} isDisabled={!quickCommand} leftIcon={<Copy size={14} />}>
               Insert
             </Button>
           </VStack>
         </SimpleGrid>
         {quickCommand && (
-          <Box mt={3} p={3} bg="gray.600" borderRadius="md">
-            <Text fontSize="xs" color="gray.200" mb={2}>{quickCommand.description}</Text>
-            <Code fontSize="xs" colorScheme="blue" p={2} borderRadius="md">{withAxis(quickCommand.command, selectedAxis)}</Code>
+          <Box mt={3} p={3} bg="paper.bg" borderRadius="md">
+            <Text fontSize="xs" color="paper.textPrimary" mb={2}>{quickCommand.description}</Text>
+            <Code fontSize="xs" colorScheme="accent" p={2} borderRadius="md">{withAxis(quickCommand.command, selectedAxis)}</Code>
           </Box>
         )}
       </Box>
 
       {/* Command input */}
-      <Box p={4} bg="gray.700" borderBottom="1px solid" borderColor="gray.600">
+      <Box p={4} bg="paper.bg" borderBottom="1px solid" borderColor="paper.border">
         <HStack>
           <Input
             fontFamily="mono"
@@ -152,40 +152,40 @@ const CommandConsoleTab = () => {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && run()}
             isDisabled={busy}
-            bg="gray.800"
+            bg="paper.bg"
           />
-          <Button onClick={run} isLoading={busy} colorScheme="blue" leftIcon={<Send size={16} />} isDisabled={!serial}>Send</Button>
+          <Button onClick={run} isLoading={busy} colorScheme="accent" leftIcon={<Send size={16} />} isDisabled={!serial}>Send</Button>
         </HStack>
       </Box>
 
       {/* History */}
       <Box flex="1" overflow="hidden" display="flex" flexDirection="column" p={4}>
         <HStack justify="space-between" mb={2}>
-          <HStack><Clock size={16} color="#a0aec0" /><Text fontSize="sm" color="gray.300">History ({history.length})</Text></HStack>
+          <HStack><Clock size={16} color="#71717a" /><Text fontSize="sm" color="paper.textPrimary">History ({history.length})</Text></HStack>
           <Tooltip label="Clear history">
             <IconButton aria-label="Clear history" size="xs" variant="ghost" icon={<Trash2 size={16} />} onClick={() => setHistory([])} />
           </Tooltip>
         </HStack>
-        <Box ref={scrollRef} flex="1" overflowY="auto" bg="gray.900" borderRadius="md" border="1px solid" borderColor="gray.700" p={3}>
+        <Box ref={scrollRef} flex="1" overflowY="auto" bg="paper.bg" borderRadius="md" border="1px solid" borderColor="paper.border" p={3}>
           {history.length === 0 ? (
-            <Text color="gray.600" fontSize="sm">No commands executed yet</Text>
+            <Text color="paper.textSecondary" fontSize="sm">No commands executed yet</Text>
           ) : (
             <VStack align="stretch" spacing={2}>
               {history.map((e, i) => (
-                <Box key={i} bg="gray.800" borderRadius="md" p={2}>
+                <Box key={i} bg="paper.bg" borderRadius="md" p={2}>
                   <HStack justify="space-between">
                     <HStack spacing={2}>
-                      {e.success ? <CheckCircle size={14} color="#68d391" /> : <AlertCircle size={14} color="#fc8181" />}
-                      <Code fontSize="sm" bg="transparent" color="odrive.300">{e.command}</Code>
+                      {e.success ? <CheckCircle size={14} color="#16a34a" /> : <AlertCircle size={14} color="#dc2626" />}
+                      <Code fontSize="sm" bg="transparent" color="accent.600">{e.command}</Code>
                     </HStack>
                     <HStack spacing={1}>
-                      <Text fontSize="2xs" color="gray.500">{e.timestamp}</Text>
+                      <Text fontSize="2xs" color="paper.textSecondary">{e.timestamp}</Text>
                       <Tooltip label="Copy command">
                         <IconButton aria-label="Copy" size="2xs" variant="ghost" icon={<Copy size={12} />} onClick={() => copyCommand(e.command)} />
                       </Tooltip>
                     </HStack>
                   </HStack>
-                  <Text fontSize="xs" color={e.success ? 'gray.300' : 'red.300'} fontFamily="mono" pl={6} whiteSpace="pre-wrap">{e.result}</Text>
+                  <Text fontSize="xs" color={e.success ? 'paper.textPrimary' : 'red.600'} fontFamily="mono" pl={6} whiteSpace="pre-wrap">{e.result}</Text>
                 </Box>
               ))}
             </VStack>

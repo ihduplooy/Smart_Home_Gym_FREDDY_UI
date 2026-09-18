@@ -15,13 +15,13 @@ import { FIXED_AXIS_TELEMETRY_PATHS } from './fixedAxisTelemetry'
 const BUFFER_S = 10
 const RANGE_OPTIONS_SECONDS = [1, 2.5, 5, 10]
 
-const COLOR_MEASURED = '#63B3ED'
-const COLOR_SETPOINT = '#F6AD55'
-const COLOR_IQ = '#68D391'
-const COLOR_TORQUE = '#B794F6'
-const COLOR_ID = '#FC8181'
-const COLOR_IBUS = '#4FD1C7'
-const COLOR_VBUS = '#FBD38D'
+const COLOR_MEASURED = '#2563eb'
+const COLOR_SETPOINT = '#2563eb'
+const COLOR_IQ = '#eb6834'
+const COLOR_TORQUE = '#1baf7a'
+const COLOR_ID = '#eda100'
+const COLOR_IBUS = '#e87ba4'
+const COLOR_VBUS = '#008300'
 
 const FROZEN_SAMPLES = Object.freeze({})
 
@@ -235,15 +235,15 @@ const AxisTelemetryCharts = ({ isActive = true }) => {
 
   return (
     <VStack align="stretch" spacing={4}>
-      <Box bg="gray.800" border="1px solid" borderColor="gray.700" borderRadius="md" p={3}>
-        <Text fontSize="xs" color="gray.400" mb={2}>
+      <Box bg="paper.bg" border="1px solid" borderColor="paper.border" borderRadius="md" p={3}>
+        <Text fontSize="xs" color="paper.textSecondary" mb={2}>
           Axis0 telemetry -- toggle graphs on/off. Each one adds a live property read on the device, so leave off whatever you aren't looking at right now.
         </Text>
         <Wrap spacing={4}>
           {graphs.map((g) => (
             <WrapItem key={g.id}>
-              <Checkbox size="sm" colorScheme="odrive" isChecked={Boolean(enabled[g.id])} onChange={() => toggleGraph(g.id)}>
-                <Text fontSize="sm" color="gray.200">{g.label}</Text>
+              <Checkbox size="sm" colorScheme="accent" isChecked={Boolean(enabled[g.id])} onChange={() => toggleGraph(g.id)}>
+                <Text fontSize="sm" color="paper.textPrimary">{g.label}</Text>
               </Checkbox>
             </WrapItem>
           ))}

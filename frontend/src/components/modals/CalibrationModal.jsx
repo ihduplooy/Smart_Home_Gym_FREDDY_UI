@@ -54,25 +54,25 @@ const CalibrationModal = ({ isOpen, onClose, calibration, title = 'Calibration' 
   return (
     <Modal isOpen={isOpen} onClose={handleClose} closeOnOverlayClick={!isCalibrating} isCentered size="md">
       <ModalOverlay />
-      <ModalContent bg="gray.800">
-        <ModalHeader color="odrive.300">
+      <ModalContent bg="paper.bg">
+        <ModalHeader color="accent.600">
           {finished ? (result.ok ? 'Calibration Complete' : 'Calibration Finished with Issues') : `${title} in Progress`}
         </ModalHeader>
         <ModalBody>
           <VStack spacing={4} py={2} align="stretch">
             <VStack spacing={3}>
               {isCalibrating ? (
-                <CircularProgress isIndeterminate color="odrive.300" size="80px" />
+                <CircularProgress isIndeterminate color="accent.600" size="80px" />
               ) : result?.ok ? (
-                <CheckCircle2 size={56} color="#48BB78" />
+                <CheckCircle2 size={56} color="#16a34a" />
               ) : (
-                <AlertTriangle size={56} color="#ED8936" />
+                <AlertTriangle size={56} color="#ea580c" />
               )}
 
               {isCalibrating && (
                 <HStack>
                   <Spinner size="sm" />
-                  <Text color="gray.300">{phase || 'Working…'}</Text>
+                  <Text color="paper.textPrimary">{phase || 'Working…'}</Text>
                 </HStack>
               )}
             </VStack>
@@ -91,7 +91,7 @@ const CalibrationModal = ({ isOpen, onClose, calibration, title = 'Calibration' 
             {finished && result.ok && resultFields.length > 0 && (
               <Box>
                 <Divider mb={3} />
-                <Text fontWeight="semibold" color="white" mb={2}>Measured Values</Text>
+                <Text fontWeight="semibold" color="paper.textPrimary" mb={2}>Measured Values</Text>
                 <VStack align="stretch" spacing={2}>
                   {resultFields.map((f) => (
                     <HStack key={f.path} justify="space-between">
@@ -105,7 +105,7 @@ const CalibrationModal = ({ isOpen, onClose, calibration, title = 'Calibration' 
                     </HStack>
                   ))}
                 </VStack>
-                <Text fontSize="xs" color="gray.500" mt={2}>
+                <Text fontSize="xs" color="paper.textSecondary" mt={2}>
                   Saving stores these values, sets <b>pre_calibrated</b> so the axis skips this calibration on
                   startup, and writes to non-volatile memory.
                 </Text>

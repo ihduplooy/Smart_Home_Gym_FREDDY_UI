@@ -26,7 +26,7 @@ const AdvancedSettingsSection = ({ groups = [], fwLine, fieldState, onChange, on
         size="sm"
         leftIcon={isOpen ? <ChevronDownIcon /> : <ChevronRightIcon />}
         onClick={onToggle}
-        color="odrive.300"
+        color="accent.600"
       >
         {isOpen ? 'Hide' : 'Show'} Advanced ({count} parameters)
       </Button>

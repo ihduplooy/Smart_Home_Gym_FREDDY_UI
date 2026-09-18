@@ -28,7 +28,7 @@ const ErrorTroubleshootingModal = ({ isOpen, onClose, error, guide }) => {
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="xl" isCentered scrollBehavior="inside">
       <ModalOverlay />
-      <ModalContent bg="gray.800">
+      <ModalContent bg="paper.bg">
         <ModalHeader color="red.300">
           <Badge colorScheme="red" mr={2}>{error.flag}</Badge>
           {guide?.title || error.description}
@@ -37,7 +37,7 @@ const ErrorTroubleshootingModal = ({ isOpen, onClose, error, guide }) => {
         <ModalBody>
           {guide ? (
             <VStack align="stretch" spacing={4}>
-              <Text color="gray.300">{guide.description}</Text>
+              <Text color="paper.textPrimary">{guide.description}</Text>
 
               <Box>
                 <Text fontWeight="semibold" color="orange.300" mb={1}>Possible Causes</Text>
@@ -68,8 +68,8 @@ const ErrorTroubleshootingModal = ({ isOpen, onClose, error, guide }) => {
             </VStack>
           ) : (
             <VStack align="stretch" spacing={2}>
-              <Text color="gray.300">{error.description}</Text>
-              <Text fontSize="sm" color="gray.500">
+              <Text color="paper.textPrimary">{error.description}</Text>
+              <Text fontSize="sm" color="paper.textSecondary">
                 <InfoIcon mr={1} />No detailed guide for this error. Clear errors and check wiring/configuration.
               </Text>
             </VStack>

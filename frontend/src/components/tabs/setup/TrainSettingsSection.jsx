@@ -231,18 +231,18 @@ const TrainSettingsSection = ({ status }) => {
 
   return (
     <Box>
-      <Button variant="ghost" size="sm" leftIcon={isOpen ? <ChevronDownIcon /> : <ChevronRightIcon />} onClick={onToggle} color="odrive.300">
+      <Button variant="ghost" size="sm" borderRadius="full" leftIcon={isOpen ? <ChevronDownIcon /> : <ChevronRightIcon />} onClick={onToggle} color="accent.600">
         {isOpen ? 'Hide' : 'Show'} Settings / Startup
       </Button>
       <Collapse in={isOpen} animateOpacity>
-        <Card bg="gray.800" variant="elevated" mt={2}>
+        <Card bg="paper.bg" variant="outline" borderColor="paper.border" borderRadius="lg" mt={2}>
           <CardHeader>
             <HStack justify="space-between">
-              <Heading size="md" color="white">Settings / Startup</Heading>
+              <Heading size="md" color="paper.textPrimary">Settings / Startup</Heading>
               <HStack>
-                <Badge colorScheme={isHomed ? 'green' : 'gray'} variant="outline">{isHomed ? 'homed' : 'not homed'}</Badge>
+                <Badge colorScheme={isHomed ? 'green' : 'gray'} variant="outline" borderRadius="full">{isHomed ? 'homed' : 'not homed'}</Badge>
                 {setupSessionRunning && (
-                  <Button size="sm" colorScheme="red" onClick={() => run(stopExercise)} isDisabled={setupBusy}>
+                  <Button size="sm" colorScheme="red" borderRadius="full" onClick={() => run(stopExercise)} isDisabled={setupBusy}>
                     Stop setup session
                   </Button>
                 )}
@@ -265,7 +265,7 @@ const TrainSettingsSection = ({ status }) => {
                 </Alert>
               )}
               {!setupSessionRunning && (
-                <Text fontSize="xs" color="gray.500">
+                <Text fontSize="xs" color="paper.textSecondary">
                   Start a setup session to home, calibrate, or adjust homing settings below.
                 </Text>
               )}
@@ -275,18 +275,18 @@ const TrainSettingsSection = ({ status }) => {
                   hardware action. */}
               <Box>
                 <FormControl display="flex" alignItems="center">
-                  <FormLabel htmlFor="resistance-unit-kg" mb="0" fontSize="sm" color="gray.200">
+                  <FormLabel htmlFor="resistance-unit-kg" mb="0" fontSize="xs" fontFamily="mono" textTransform="uppercase" letterSpacing="wide" color="paper.textSecondary">
                     Display resistance in kilograms (instead of Newtons)
                   </FormLabel>
                   <Switch
                     id="resistance-unit-kg"
-                    colorScheme="odrive"
+                    colorScheme="accent"
                     isChecked={Boolean(cable?.resistance_display_unit_kg)}
                     onChange={handleToggleResistanceUnit}
                     isDisabled={resistanceUnitBusy}
                   />
                 </FormControl>
-                <Text fontSize="xs" color="gray.500" mt={1}>
+                <Text fontSize="xs" color="paper.textSecondary" mt={1}>
                   Applies to the Train tab's resistance profile builder (and anywhere else resistance is shown to
                   you, not to a developer). Internally, everything is still stored and calculated in Newtons --
                   this only changes which unit you enter/read values in.
@@ -294,33 +294,33 @@ const TrainSettingsSection = ({ status }) => {
               </Box>
 
               {/* Homing -- same routes/state machine ExerciseTab.jsx uses */}
-              <Box borderTop="1px solid" borderColor="gray.700" pt={3}>
+              <Box borderTop="1px solid" borderColor="paper.border" pt={3}>
                 <HStack justify="space-between" mb={2}>
-                  <Text fontSize="sm" fontWeight="semibold" color="gray.200">Homing</Text>
+                  <Text fontSize="sm" fontWeight="semibold" color="paper.textPrimary">Homing</Text>
                   {setupSessionRunning && (
-                    <Badge colorScheme={action === 'homing' ? 'orange' : isHomed ? 'green' : 'gray'} variant="solid">
+                    <Badge colorScheme={action === 'homing' ? 'orange' : isHomed ? 'green' : 'gray'} variant="solid" borderRadius="full">
                       {action === 'homing' ? (HOMING_STATE_LABEL[homingState] ?? 'Homing…') : isHomed ? 'Homed' : 'Not homed'}
                     </Badge>
                   )}
                 </HStack>
                 <HStack spacing={3} wrap="wrap" mb={3}>
                   {!setupSessionRunning ? (
-                    <Button size="sm" colorScheme="odrive" onClick={() => run(startExerciseSession)} isDisabled={setupBusy || anotherModeRunning}>
+                    <Button size="sm" colorScheme="accent" borderRadius="full" onClick={() => run(startExerciseSession)} isDisabled={setupBusy || anotherModeRunning}>
                       Start setup session
                     </Button>
                   ) : (
                     <>
-                      <Button size="sm" colorScheme="odrive" onClick={() => run(homeExercise)} isDisabled={setupBusy || action === 'homing'}>Home</Button>
-                      <Button size="sm" variant="outline" onClick={() => run(goHomeExercise)} isDisabled={setupBusy || action === 'homing' || !isHomed}>
+                      <Button size="sm" colorScheme="accent" borderRadius="full" onClick={() => run(homeExercise)} isDisabled={setupBusy || action === 'homing'}>Home</Button>
+                      <Button size="sm" variant="outline" borderRadius="full" onClick={() => run(goHomeExercise)} isDisabled={setupBusy || action === 'homing' || !isHomed}>
                         Go Home
                       </Button>
-                      <Button size="sm" colorScheme="red" variant="outline" onClick={() => run(abortHoming)} isDisabled={setupBusy || action !== 'homing'}>Abort</Button>
+                      <Button size="sm" colorScheme="red" variant="outline" borderRadius="full" onClick={() => run(abortHoming)} isDisabled={setupBusy || action !== 'homing'}>Abort</Button>
                     </>
                   )}
                 </HStack>
-                <Text fontSize="xs" color="gray.500" mb={3}>
-                  <Text as="span" fontWeight="semibold" color="gray.400">Home</Text> reels in and sets that
-                  point as the new zero. <Text as="span" fontWeight="semibold" color="gray.400">Go Home</Text> reels
+                <Text fontSize="xs" color="paper.textSecondary" mb={3}>
+                  <Text as="span" fontWeight="semibold" color="paper.textSecondary">Home</Text> reels in and sets that
+                  point as the new zero. <Text as="span" fontWeight="semibold" color="paper.textSecondary">Go Home</Text> reels
                   in the same controlled way but leaves the existing home reference untouched -- use it to return
                   the carriage safely without recalibrating.
                 </Text>
@@ -328,47 +328,47 @@ const TrainSettingsSection = ({ status }) => {
                 {homingSettingsError && (
                   <Alert status="error" variant="left-accent" mb={2}><AlertIcon /><AlertDescription>{homingSettingsError}</AlertDescription></Alert>
                 )}
-                <Text fontSize="xs" color="gray.400" mb={2}>
+                <Text fontSize="xs" color="paper.textSecondary" mb={2}>
                   Homing settings — live-adjustable, persisted, take effect on the next Home.
                 </Text>
                 <HStack spacing={3} align="flex-end">
                   <Box>
-                    <Text fontSize="xs" color="gray.400" mb={1}>Homing velocity</Text>
+                    <Text fontSize="xs" fontFamily="mono" textTransform="uppercase" letterSpacing="wide" color="paper.textSecondary" mb={1}>Homing velocity</Text>
                     <InputGroup size="sm" w="130px">
-                      <Input type="text" inputMode="decimal" fontFamily="mono" value={homingVelocityText} onChange={(e) => setHomingVelocityText(e.target.value)} />
-                      <InputRightAddon px={2} fontSize="xs">t/s</InputRightAddon>
+                      <Input type="text" inputMode="decimal" fontFamily="mono" color="paper.textPrimary" borderColor="paper.border" value={homingVelocityText} onChange={(e) => setHomingVelocityText(e.target.value)} />
+                      <InputRightAddon px={2} fontSize="xs" borderColor="paper.border">t/s</InputRightAddon>
                     </InputGroup>
                   </Box>
                   <Box>
-                    <Text fontSize="xs" color="gray.400" mb={1}>Current threshold</Text>
+                    <Text fontSize="xs" fontFamily="mono" textTransform="uppercase" letterSpacing="wide" color="paper.textSecondary" mb={1}>Current threshold</Text>
                     <InputGroup size="sm" w="130px">
-                      <Input type="text" inputMode="decimal" fontFamily="mono" value={homingThresholdText} onChange={(e) => setHomingThresholdText(e.target.value)} />
-                      <InputRightAddon px={2} fontSize="xs">A</InputRightAddon>
+                      <Input type="text" inputMode="decimal" fontFamily="mono" color="paper.textPrimary" borderColor="paper.border" value={homingThresholdText} onChange={(e) => setHomingThresholdText(e.target.value)} />
+                      <InputRightAddon px={2} fontSize="xs" borderColor="paper.border">A</InputRightAddon>
                     </InputGroup>
                   </Box>
-                  <Button size="sm" onClick={handleUpdateHomingSettings} isLoading={homingSettingsBusy}>Update</Button>
+                  <Button size="sm" colorScheme="accent" borderRadius="full" onClick={handleUpdateHomingSettings} isLoading={homingSettingsBusy}>Update</Button>
                 </HStack>
               </Box>
 
               {/* Max-extension calibration + enforcement toggle, grouped together */}
-              <Box borderTop="1px solid" borderColor="gray.700" pt={3}>
+              <Box borderTop="1px solid" borderColor="paper.border" pt={3}>
                 <HStack justify="space-between" mb={2}>
-                  <Text fontSize="sm" fontWeight="semibold" color="gray.200">Max-extension calibration</Text>
-                  <Badge colorScheme={hasMax ? 'green' : 'gray'} variant="outline">{hasMax ? 'calibrated' : 'not set'}</Badge>
+                  <Text fontSize="sm" fontWeight="semibold" color="paper.textPrimary">Max-extension calibration</Text>
+                  <Badge colorScheme={hasMax ? 'green' : 'gray'} variant="outline" borderRadius="full">{hasMax ? 'calibrated' : 'not set'}</Badge>
                 </HStack>
                 <HStack spacing={3} wrap="wrap" mb={3}>
-                  <Button size="sm" colorScheme="odrive" onClick={() => run(startMaxCalibration)} isDisabled={!setupSessionRunning || setupBusy || !isHomed || action === 'max_calibrating'}>
+                  <Button size="sm" colorScheme="accent" borderRadius="full" onClick={() => run(startMaxCalibration)} isDisabled={!setupSessionRunning || setupBusy || !isHomed || action === 'max_calibrating'}>
                     Start
                   </Button>
-                  <Button size="sm" colorScheme="green" onClick={() => run(confirmMax)} isDisabled={!setupSessionRunning || setupBusy || action !== 'max_calibrating'}>
+                  <Button size="sm" colorScheme="green" borderRadius="full" onClick={() => run(confirmMax)} isDisabled={!setupSessionRunning || setupBusy || action !== 'max_calibrating'}>
                     Confirm
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => run(cancelMaxCalibration)} isDisabled={!setupSessionRunning || setupBusy || action !== 'max_calibrating'}>
+                  <Button size="sm" variant="outline" borderRadius="full" onClick={() => run(cancelMaxCalibration)} isDisabled={!setupSessionRunning || setupBusy || action !== 'max_calibrating'}>
                     Cancel
                   </Button>
                 </HStack>
 
-                <Text fontSize="xs" color="gray.400" mb={1}>
+                <Text fontSize="xs" color="paper.textSecondary" mb={1}>
                   Or enter the max extension directly, if it's already known (measured by hand, or set
                   previously on the same rig) -- no physical pull required.
                 </Text>
@@ -377,44 +377,44 @@ const TrainSettingsSection = ({ status }) => {
                 )}
                 <HStack spacing={3} align="flex-end" mb={3}>
                   <InputGroup size="sm" w="130px">
-                    <Input type="text" inputMode="decimal" fontFamily="mono" value={maxLengthText} onChange={(e) => setMaxLengthText(e.target.value)} />
-                    <InputRightAddon px={2} fontSize="xs">m</InputRightAddon>
+                    <Input type="text" inputMode="decimal" fontFamily="mono" color="paper.textPrimary" borderColor="paper.border" value={maxLengthText} onChange={(e) => setMaxLengthText(e.target.value)} />
+                    <InputRightAddon px={2} fontSize="xs" borderColor="paper.border">m</InputRightAddon>
                   </InputGroup>
-                  <Button size="sm" onClick={handleSetMaxExtensionManual} isLoading={maxLengthBusy} isDisabled={!isHomed}>
+                  <Button size="sm" colorScheme="accent" borderRadius="full" onClick={handleSetMaxExtensionManual} isLoading={maxLengthBusy} isDisabled={!isHomed}>
                     Set directly
                   </Button>
                 </HStack>
 
                 <FormControl display="flex" alignItems="center">
-                  <FormLabel htmlFor="train-enforce-home" mb="0" fontSize="sm" color="gray.200">
+                  <FormLabel htmlFor="train-enforce-home" mb="0" fontSize="xs" fontFamily="mono" textTransform="uppercase" letterSpacing="wide" color="paper.textSecondary">
                     Enforce home-side guard
                   </FormLabel>
                   <Switch
                     id="train-enforce-home"
-                    colorScheme="odrive"
+                    colorScheme="accent"
                     isChecked={Boolean(cable?.train_home_guard_enforced)}
                     onChange={handleToggleHomeEnforced}
                     isDisabled={homeEnforcedBusy}
                   />
                 </FormControl>
-                <Text fontSize="xs" color="gray.500" mt={1} mb={3}>
+                <Text fontSize="xs" color="paper.textSecondary" mt={1} mb={3}>
                   When on, hard-stops any session (Train, or Go Home/Homing/manual moves right here) if the cable
                   goes past the home end of the calibrated range. Independent of the max-extension toggle below.
                 </Text>
 
                 <FormControl display="flex" alignItems="center">
-                  <FormLabel htmlFor="train-enforce-max" mb="0" fontSize="sm" color="gray.200">
+                  <FormLabel htmlFor="train-enforce-max" mb="0" fontSize="xs" fontFamily="mono" textTransform="uppercase" letterSpacing="wide" color="paper.textSecondary">
                     Enforce max-extension guard
                   </FormLabel>
                   <Switch
                     id="train-enforce-max"
-                    colorScheme="odrive"
+                    colorScheme="accent"
                     isChecked={Boolean(cable?.train_max_extension_enforced)}
                     onChange={handleToggleEnforced}
                     isDisabled={enforcedBusy}
                   />
                 </FormControl>
-                <Text fontSize="xs" color="gray.500" mt={1}>
+                <Text fontSize="xs" color="paper.textSecondary" mt={1}>
                   When on, hard-stops any session (Train, or Go Home/Homing/manual moves right here) if the cable
                   goes past the max end of the calibrated range. Disabling either toggle turns this guard off
                   entirely for Go Home/Homing/manual moves (not per-side); Train still enforces each side
@@ -428,20 +428,20 @@ const TrainSettingsSection = ({ status }) => {
                   below supersedes it). k/calibrate_k still exist server-side
                   as the fallback model and for SpoolModelDiagnostics'
                   visibility -- nothing to migrate, this is UI-only. */}
-              <Box borderTop="1px solid" borderColor="gray.700" pt={3}>
-                <Text fontSize="sm" fontWeight="semibold" color="gray.200" mb={2}>Spool calibration</Text>
+              <Box borderTop="1px solid" borderColor="paper.border" pt={3}>
+                <Text fontSize="sm" fontWeight="semibold" color="paper.textPrimary" mb={2}>Spool calibration</Text>
 
-                <Text fontSize="xs" color="gray.400" mb={1}>Spool radius (r0)</Text>
+                <Text fontSize="xs" fontFamily="mono" textTransform="uppercase" letterSpacing="wide" color="paper.textSecondary" mb={1}>Spool radius (r0)</Text>
                 {r0Error && (
                   <Alert status="error" variant="left-accent" mb={2}><AlertIcon /><AlertDescription>{r0Error}</AlertDescription></Alert>
                 )}
                 <HStack spacing={3} align="flex-end">
                   <InputGroup size="sm" w="130px">
-                    <Input type="text" inputMode="decimal" fontFamily="mono" value={r0Text} onChange={(e) => setR0Text(e.target.value)} />
-                    <InputRightAddon px={2} fontSize="xs">m</InputRightAddon>
+                    <Input type="text" inputMode="decimal" fontFamily="mono" color="paper.textPrimary" borderColor="paper.border" value={r0Text} onChange={(e) => setR0Text(e.target.value)} />
+                    <InputRightAddon px={2} fontSize="xs" borderColor="paper.border">m</InputRightAddon>
                   </InputGroup>
-                  <Button size="sm" onClick={handleUpdateR0} isLoading={r0Busy}>Update</Button>
-                  <Text fontSize="xs" color="gray.400">
+                  <Button size="sm" colorScheme="accent" borderRadius="full" onClick={handleUpdateR0} isLoading={r0Busy}>Update</Button>
+                  <Text fontSize="xs" color="paper.textSecondary">
                     Bare spool radius, before any cable/webbing wrap builds up. Affects every force/velocity conversion.
                   </Text>
                 </HStack>
@@ -450,17 +450,17 @@ const TrainSettingsSection = ({ status }) => {
               <SpoolGrowthCalibration status={status} />
 
               {/* Graph telemetry buffer duration */}
-              <Box borderTop="1px solid" borderColor="gray.700" pt={3}>
-                <Text fontSize="sm" fontWeight="semibold" color="gray.200" mb={2}>Graph history buffer</Text>
+              <Box borderTop="1px solid" borderColor="paper.border" pt={3}>
+                <Text fontSize="sm" fontWeight="semibold" color="paper.textPrimary" mb={2}>Graph history buffer</Text>
                 {bufferError && (
                   <Alert status="error" variant="left-accent" mb={2}><AlertIcon /><AlertDescription>{bufferError}</AlertDescription></Alert>
                 )}
                 <HStack spacing={3} align="flex-end">
                   <InputGroup size="sm" w="130px">
-                    <Input type="text" inputMode="decimal" fontFamily="mono" value={bufferText} onChange={(e) => setBufferText(e.target.value)} />
-                    <InputRightAddon px={2} fontSize="xs">s</InputRightAddon>
+                    <Input type="text" inputMode="decimal" fontFamily="mono" color="paper.textPrimary" borderColor="paper.border" value={bufferText} onChange={(e) => setBufferText(e.target.value)} />
+                    <InputRightAddon px={2} fontSize="xs" borderColor="paper.border">s</InputRightAddon>
                   </InputGroup>
-                  <Button size="sm" onClick={handleUpdateBuffer} isLoading={bufferBusy}>Update</Button>
+                  <Button size="sm" colorScheme="accent" borderRadius="full" onClick={handleUpdateBuffer} isLoading={bufferBusy}>Update</Button>
                 </HStack>
               </Box>
 

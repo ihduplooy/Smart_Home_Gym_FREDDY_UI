@@ -41,7 +41,7 @@ const TrainResetModal = ({ isOpen, onClose, onReset }) => {
   return (
     <Modal isOpen={isOpen} onClose={onClose} isCentered>
       <ModalOverlay />
-      <ModalContent bg="gray.800" borderTop="3px solid" borderColor="orange.500">
+      <ModalContent bg="paper.bg" borderTop="3px solid" borderColor="orange.500">
         <ModalHeader color="orange.300">Reset Train tab</ModalHeader>
         <ModalCloseButton />
         <ModalBody>
@@ -57,16 +57,16 @@ const TrainResetModal = ({ isOpen, onClose, onReset }) => {
               </Box>
             </Alert>
             <Box>
-              <Text fontSize="sm" color="gray.300" mb={1}>This will clear:</Text>
-              <List fontSize="sm" color="gray.400" spacing={0.5} pl={2}>
+              <Text fontSize="sm" color="paper.textPrimary" mb={1}>This will clear:</Text>
+              <List fontSize="sm" color="paper.textSecondary" spacing={0.5} pl={2}>
                 <ListItem>• Homing reference and marked max-extension</ListItem>
                 <ListItem>• Any unsaved spool-growth calibration points</ListItem>
                 <ListItem>• The draft resistance profile and any planned/actual chart data</ListItem>
               </List>
             </Box>
             <Box>
-              <Text fontSize="sm" color="gray.300" mb={1}>This will NOT touch:</Text>
-              <List fontSize="sm" color="gray.400" spacing={0.5} pl={2}>
+              <Text fontSize="sm" color="paper.textPrimary" mb={1}>This will NOT touch:</Text>
+              <List fontSize="sm" color="paper.textSecondary" spacing={0.5} pl={2}>
                 <ListItem>• Spool radius (r0), wrap-growth (k), or saved growth calibration</ListItem>
                 <ListItem>• Homing/force settings or the guard-enforcement toggles</ListItem>
                 <ListItem>• Saved named resistance profiles</ListItem>

@@ -63,7 +63,7 @@ const CommandList = ({
               size="sm"
               value={editingCommand}
               onChange={(e) => setEditingCommand(e.target.value)}
-              bg="gray.800"
+              bg="paper.bg"
               borderColor="blue.400"
               fontFamily="mono"
               fontSize="sm"
@@ -94,12 +94,12 @@ const CommandList = ({
         {enableEditing && !isEditing && (
           <HStack spacing={1}>
             <Tooltip label="Edit command">
-              <IconButton size="xs" variant="ghost" icon={<EditIcon />} color="gray.400" aria-label="Edit"
+              <IconButton size="xs" variant="ghost" icon={<EditIcon />} color="paper.textSecondary" aria-label="Edit"
                 onClick={() => startEditing(index, displayCommand)} />
             </Tooltip>
             {isCustom && (
               <Tooltip label="Reset to original">
-                <IconButton size="xs" variant="ghost" icon={<DeleteIcon />} color="gray.400" aria-label="Reset"
+                <IconButton size="xs" variant="ghost" icon={<DeleteIcon />} color="paper.textSecondary" aria-label="Reset"
                   onClick={() => onCustomCommandChange(index, null)} />
               </Tooltip>
             )}
@@ -116,12 +116,12 @@ const CommandList = ({
   return (
     <VStack spacing={2} align="stretch">
       {enableEditing && (
-        <Button size="sm" variant="outline" colorScheme="blue" onClick={onAddCustomCommand} leftIcon={<EditIcon />} mb={2}>
+        <Button size="sm" variant="outline" colorScheme="accent" onClick={onAddCustomCommand} leftIcon={<EditIcon />} mb={2}>
           Add Custom Command
         </Button>
       )}
       {commands.length === 0 && customExtraKeys.length === 0 && (
-        <Code bg="transparent" color="gray.500">No commands.</Code>
+        <Code bg="transparent" color="paper.textSecondary">No commands.</Code>
       )}
       {commands.map((command, index) => renderRow(index, command))}
       {customExtraKeys.map((index) => renderRow(index, ''))}

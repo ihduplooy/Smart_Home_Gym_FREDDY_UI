@@ -50,17 +50,17 @@ const TrainPositionChart = ({ plannedPoints, actualPoints, positionRangeM }) => 
   )
 
   return (
-    <Card bg="gray.800" variant="elevated">
+    <Card bg="paper.bg" variant="outline" borderColor="paper.border" borderRadius="lg">
       <CardHeader pb={2}>
         <VStack align="stretch" spacing={2}>
           <Box>
-            <Heading size="sm" color="white">Force vs. cable position</Heading>
-            <Text fontSize="xs" color="gray.400">Planned profile curve vs. what's actually being commanded live</Text>
+            <Heading size="sm" color="paper.textPrimary">Force vs. cable position</Heading>
+            <Text fontSize="xs" color="paper.textSecondary">Planned profile curve vs. what's actually being commanded live</Text>
           </Box>
           <HStack spacing={6} wrap="wrap">
-            <AxisRangeControl label="Planned (N)" color="#F6E05E" range={plannedRange} onChange={setPlannedRange} />
-            <Checkbox size="sm" colorScheme="odrive" isChecked={plannedInverted} onChange={() => setPlannedInverted((v) => !v)}>
-              <Text fontSize="xs" color="gray.400">Invert Y</Text>
+            <AxisRangeControl label="Planned (N)" color="#eda100" range={plannedRange} onChange={setPlannedRange} />
+            <Checkbox size="sm" colorScheme="accent" isChecked={plannedInverted} onChange={() => setPlannedInverted((v) => !v)}>
+              <Text fontSize="xs" color="paper.textSecondary">Invert Y</Text>
             </Checkbox>
             <InputGroup size="xs" w="90px">
               <InputLeftAddon px={2} fontSize="xs">×</InputLeftAddon>
@@ -68,9 +68,9 @@ const TrainPositionChart = ({ plannedPoints, actualPoints, positionRangeM }) => 
             </InputGroup>
           </HStack>
           <HStack spacing={6} wrap="wrap">
-            <AxisRangeControl label="Actual (N)" color="#68D391" range={actualRange} onChange={setActualRange} />
-            <Checkbox size="sm" colorScheme="odrive" isChecked={actualInverted} onChange={() => setActualInverted((v) => !v)}>
-              <Text fontSize="xs" color="gray.400">Invert Y</Text>
+            <AxisRangeControl label="Actual (N)" color="#eda100" range={actualRange} onChange={setActualRange} />
+            <Checkbox size="sm" colorScheme="accent" isChecked={actualInverted} onChange={() => setActualInverted((v) => !v)}>
+              <Text fontSize="xs" color="paper.textSecondary">Invert Y</Text>
             </Checkbox>
             <InputGroup size="xs" w="90px">
               <InputLeftAddon px={2} fontSize="xs">×</InputLeftAddon>
@@ -83,16 +83,16 @@ const TrainPositionChart = ({ plannedPoints, actualPoints, positionRangeM }) => 
         <Box h="380px">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart margin={{ top: 4, right: 16, left: 0, bottom: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E4E4E7" />
               <XAxis
                 dataKey="position_m"
                 type="number"
                 domain={domain}
-                stroke="#9CA3AF"
-                tick={{ fill: '#9CA3AF', fontSize: 10 }}
+                stroke="#71717A"
+                tick={{ fill: '#71717A', fontSize: 10 }}
                 tickFormatter={(v) => `${v.toFixed(2)}m`}
                 allowDuplicatedCategory={false}
-                label={{ value: 'Cable position (m)', position: 'insideBottom', offset: -8, fill: '#9CA3AF', fontSize: 11 }}
+                label={{ value: 'Cable position (m)', position: 'insideBottom', offset: -8, fill: '#71717A', fontSize: 11 }}
               />
               <YAxis
                 yAxisId="planned"
@@ -100,10 +100,10 @@ const TrainPositionChart = ({ plannedPoints, actualPoints, positionRangeM }) => 
                 orientation="left"
                 reversed={plannedInverted}
                 domain={domainFromRange(plannedRange)}
-                stroke="#F6E05E"
-                tick={{ fill: '#F6E05E', fontSize: 10 }}
+                stroke="#eda100"
+                tick={{ fill: '#eda100', fontSize: 10 }}
                 width={56}
-                label={{ value: 'Planned force (N)', angle: -90, position: 'insideLeft', fill: '#F6E05E', fontSize: 11 }}
+                label={{ value: 'Planned force (N)', angle: -90, position: 'insideLeft', fill: '#eda100', fontSize: 11 }}
               />
               <YAxis
                 yAxisId="actual"
@@ -111,13 +111,13 @@ const TrainPositionChart = ({ plannedPoints, actualPoints, positionRangeM }) => 
                 orientation="right"
                 reversed={actualInverted}
                 domain={domainFromRange(actualRange)}
-                stroke="#68D391"
-                tick={{ fill: '#68D391', fontSize: 10 }}
+                stroke="#eda100"
+                tick={{ fill: '#eda100', fontSize: 10 }}
                 width={56}
-                label={{ value: 'Actual force (N)', angle: -90, position: 'insideRight', fill: '#68D391', fontSize: 11 }}
+                label={{ value: 'Actual force (N)', angle: -90, position: 'insideRight', fill: '#eda100', fontSize: 11 }}
               />
               <RechartsTooltip
-                contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #374151', borderRadius: '6px', color: '#F9FAFB', fontSize: '11px' }}
+                contentStyle={{ backgroundColor: '#FFFFFF', border: '1px solid #E4E4E7', borderRadius: '6px', color: '#18181B', fontSize: '11px' }}
                 labelFormatter={(v) => `pos: ${Number(v).toFixed(3)}m`}
                 formatter={(v, name) => [v == null ? '—' : `${Number(v).toFixed(2)} N`, name]}
               />
@@ -128,7 +128,7 @@ const TrainPositionChart = ({ plannedPoints, actualPoints, positionRangeM }) => 
                 type="linear"
                 dataKey="force_n"
                 name="Planned"
-                stroke="#F6E05E"
+                stroke="#eda100"
                 strokeWidth={2}
                 strokeDasharray="5 3"
                 dot={false}
@@ -140,7 +140,7 @@ const TrainPositionChart = ({ plannedPoints, actualPoints, positionRangeM }) => 
                 type="linear"
                 dataKey="force_n"
                 name="Actual (live)"
-                stroke="#68D391"
+                stroke="#eda100"
                 strokeWidth={1.5}
                 dot={false}
                 connectNulls={false}

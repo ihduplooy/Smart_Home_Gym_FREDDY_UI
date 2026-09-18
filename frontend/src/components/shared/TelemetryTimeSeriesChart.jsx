@@ -119,15 +119,15 @@ const TelemetryTimeSeriesChart = ({
   const rightCount = { current: 0 }
 
   return (
-    <Card bg="gray.800" variant="elevated">
+    <Card bg="paper.bg" variant="outline" borderColor="paper.border" borderRadius="lg">
       <CardHeader pb={2}>
         <VStack align="stretch" spacing={2}>
           <HStack justify="space-between">
             <HStack spacing={2}>
-              <Heading size="sm" color="white">{title}</Heading>
-              {paused && <Badge colorScheme="yellow" variant="solid">Frozen</Badge>}
+              <Heading size="sm" color="paper.textPrimary">{title}</Heading>
+              {paused && <Badge colorScheme="yellow" variant="solid" borderRadius="full">Frozen</Badge>}
             </HStack>
-            <Button size="xs" variant="outline" onClick={togglePause} isDisabled={!series || series.length === 0}>
+            <Button size="xs" variant="outline" borderRadius="full" onClick={togglePause} isDisabled={!series || series.length === 0}>
               {paused ? 'Resume' : 'Pause'}
             </Button>
           </HStack>
@@ -139,11 +139,11 @@ const TelemetryTimeSeriesChart = ({
                   <Checkbox
                     isChecked={enabledLines[l.key]}
                     onChange={() => toggleLine(l.key)}
-                    colorScheme="odrive"
+                    colorScheme="accent"
                     size="sm"
                     minW="180px"
                   >
-                    <Text fontSize="xs" color="gray.300">{l.label} <Text as="span" color="gray.500">({l.unit})</Text></Text>
+                    <Text fontSize="xs" color="paper.textPrimary">{l.label} <Text as="span" color="paper.textSecondary">({l.unit})</Text></Text>
                   </Checkbox>
                   {enabledLines[l.key] && isAxisOwner && (
                     <>
@@ -157,15 +157,15 @@ const TelemetryTimeSeriesChart = ({
                         size="sm"
                         isChecked={invertedLines[l.key]}
                         onChange={() => toggleInvert(l.key)}
-                        colorScheme="odrive"
+                        colorScheme="accent"
                       >
-                        <Text fontSize="xs" color="gray.400">Invert Y</Text>
+                        <Text fontSize="xs" color="paper.textSecondary">Invert Y</Text>
                       </Checkbox>
                     </>
                   )}
                   {enabledLines[l.key] && (
                     <HStack spacing={1}>
-                      <Text fontSize="xs" color="gray.400">Smooth</Text>
+                      <Text fontSize="xs" color="paper.textSecondary">Smooth</Text>
                       <Select
                         size="xs"
                         w="60px"
@@ -187,7 +187,7 @@ const TelemetryTimeSeriesChart = ({
               <Button
                 key={opt.key}
                 onClick={() => setRangeSeconds(opt.seconds)}
-                colorScheme={rangeSeconds === opt.seconds ? 'odrive' : 'gray'}
+                colorScheme={rangeSeconds === opt.seconds ? 'accent' : 'gray'}
                 variant={rangeSeconds === opt.seconds ? 'solid' : 'outline'}
               >
                 {opt.key}
@@ -200,16 +200,16 @@ const TelemetryTimeSeriesChart = ({
         <Box h={height}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={smoothedData} margin={{ top: 4, right: marginRight, left: 0, bottom: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E4E4E7" />
               <XAxis
                 dataKey="t"
                 type="number"
                 domain={['dataMin', 'dataMax']}
-                stroke="#9CA3AF"
-                tick={{ fill: '#9CA3AF', fontSize: 10 }}
+                stroke="#71717A"
+                tick={{ fill: '#71717A', fontSize: 10 }}
                 tickFormatter={(v) => `${v.toFixed(1)}s`}
                 minTickGap={24}
-                label={{ value: 'Time (s)', position: 'insideBottom', offset: -8, fill: '#9CA3AF', fontSize: 11 }}
+                label={{ value: 'Time (s)', position: 'insideBottom', offset: -8, fill: '#71717A', fontSize: 11 }}
               />
               {activeAxes.map((l) => {
                 const offset = l.side === 'right' ? rightCount.current++ * 56 : 0
@@ -229,7 +229,7 @@ const TelemetryTimeSeriesChart = ({
                 )
               })}
               <RechartsTooltip
-                contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #374151', borderRadius: '6px', color: '#F9FAFB', fontSize: '11px' }}
+                contentStyle={{ backgroundColor: '#FFFFFF', border: '1px solid #E4E4E7', borderRadius: '6px', color: '#18181B', fontSize: '11px' }}
                 labelFormatter={(v) => `t: ${Number(v).toFixed(2)}s`}
                 formatter={(v, name) => [v == null ? '—' : Number(v).toFixed(4), name]}
               />

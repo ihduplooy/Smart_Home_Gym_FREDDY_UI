@@ -79,8 +79,8 @@ const ConfigurationTab = ({ isActive = true }) => {
 
   if (!wizard.isConnected) {
     return (
-      <Box p={6} bg="gray.900" h="100%">
-        <Alert status="warning" bg="orange.900" borderColor="orange.500">
+      <Box p={6} bg="paper.bg" h="100%">
+        <Alert status="warning">
           <AlertIcon />
           Connect to an ODrive device to access configuration settings.
         </Alert>
@@ -106,12 +106,12 @@ const ConfigurationTab = ({ isActive = true }) => {
   }
 
   return (
-    <Flex direction="column" flex="1" minH="0" overflow="hidden" bg="gray.900">
+    <Flex direction="column" flex="1" minH="0" overflow="hidden" bg="paper.bg">
       <Tabs
         index={subTabIndex}
         onChange={setSubTabIndex}
         variant="enclosed"
-        colorScheme="odrive"
+        colorScheme="accent"
         display="flex"
         flexDirection="column"
         flex="1"
@@ -119,7 +119,7 @@ const ConfigurationTab = ({ isActive = true }) => {
         isLazy
         lazyBehavior="keepMounted"
       >
-        <TabList bg="gray.800" borderBottom="1px solid" borderColor="gray.600" px={4}>
+        <TabList bg="paper.bg" borderBottom="1px solid" borderColor="paper.border" px={4}>
           <Tab>Configuration</Tab>
           <Tab>Motor Controls</Tab>
           <Tab>Command Console</Tab>
@@ -128,7 +128,7 @@ const ConfigurationTab = ({ isActive = true }) => {
           <TabPanel p={0} flex="1" minH="0" display="flex" flexDirection="column" overflow="hidden">
             <Flex direction="column" flex="1" minH="0" overflow="hidden">
               {/* Header: step indicators, progress, navigation, action buttons */}
-              <Box bg="gray.800" borderBottom="1px solid" borderColor="gray.600" p={4}>
+              <Box bg="paper.bg" borderBottom="1px solid" borderColor="paper.border" p={4}>
                 <VStack spacing={4}>
                   {/* Step indicator buttons */}
                   <HStack spacing={2} justify="center" w="100%" overflowX="auto">
@@ -137,7 +137,8 @@ const ConfigurationTab = ({ isActive = true }) => {
                         key={s.id}
                         size="sm"
                         variant={i === stepIndex ? 'solid' : 'outline'}
-                        colorScheme={i === stepIndex ? 'odrive' : 'gray'}
+                        colorScheme={i === stepIndex ? 'accent' : 'gray'}
+                        borderRadius="full"
                         onClick={() => setStepIndex(i)}
                         minW="60px"
                         h="50px"
@@ -153,8 +154,8 @@ const ConfigurationTab = ({ isActive = true }) => {
                   {/* Pull progress */}
                   {wizard.loading && (
                     <VStack spacing={2} w="100%" maxW="400px">
-                      <HStack spacing={2}><Spinner size="sm" color="blue.400" /><Text color="blue.400" fontSize="sm">Loading configuration from ODrive…</Text></HStack>
-                      <Progress isIndeterminate colorScheme="blue" size="sm" borderRadius="md" w="100%" />
+                      <HStack spacing={2}><Spinner size="sm" color="accent.600" /><Text color="accent.600" fontSize="sm">Loading configuration from ODrive…</Text></HStack>
+                      <Progress isIndeterminate colorScheme="accent" size="sm" borderRadius="md" w="100%" />
                     </VStack>
                   )}
 
@@ -162,12 +163,12 @@ const ConfigurationTab = ({ isActive = true }) => {
                   <HStack spacing={2} justify="center" w="100%" maxW="800px">
                     {STEPS.map((s, i) => (
                       <VStack key={s.id} spacing={1} minW="60px" flex="1">
-                        <Box w="100%" h="4px" bg="gray.600" borderRadius="md" overflow="hidden">
+                        <Box w="100%" h="4px" bg="paper.border" borderRadius="md" overflow="hidden">
                           <Box w="100%" h="100%" transition="all 0.3s ease"
-                            bg={i < stepIndex ? 'green.400' : i === stepIndex ? 'odrive.400' : 'gray.600'} />
+                            bg={i < stepIndex ? 'green.500' : i === stepIndex ? 'accent.600' : 'paper.border'} />
                         </Box>
                         <Text fontSize="2xs" textAlign="center" fontWeight={i === stepIndex ? 'bold' : 'normal'}
-                          color={i < stepIndex ? 'green.300' : i === stepIndex ? 'odrive.300' : 'gray.500'}>
+                          color={i < stepIndex ? 'green.600' : i === stepIndex ? 'accent.600' : 'paper.textSecondary'}>
                           {s.label}
                         </Text>
                       </VStack>
@@ -176,11 +177,11 @@ const ConfigurationTab = ({ isActive = true }) => {
 
                   {/* Navigation */}
                   <HStack justify="center" align="center" w="100%" spacing={6}>
-                    <Button onClick={() => setStepIndex((i) => Math.max(0, i - 1))} isDisabled={stepIndex === 0} variant="outline" colorScheme="gray" size="sm" minW="80px">
+                    <Button onClick={() => setStepIndex((i) => Math.max(0, i - 1))} isDisabled={stepIndex === 0} variant="outline" colorScheme="gray" borderRadius="full" size="sm" minW="80px">
                       Previous
                     </Button>
-                    <Text fontSize="lg" color="white" fontWeight="bold">Step {stepIndex + 1}: {step.label}</Text>
-                    <Button onClick={() => setStepIndex((i) => Math.min(STEPS.length - 1, i + 1))} isDisabled={stepIndex === STEPS.length - 1} variant="outline" colorScheme="gray" size="sm" minW="80px">
+                    <Text fontSize="lg" color="paper.textPrimary" fontWeight="bold">Step {stepIndex + 1}: {step.label}</Text>
+                    <Button onClick={() => setStepIndex((i) => Math.min(STEPS.length - 1, i + 1))} isDisabled={stepIndex === STEPS.length - 1} variant="outline" colorScheme="gray" borderRadius="full" size="sm" minW="80px">
                       Next
                     </Button>
                   </HStack>
@@ -188,18 +189,18 @@ const ConfigurationTab = ({ isActive = true }) => {
                   {/* Action buttons (hidden on the Apply step, which has its own apply button) */}
                   {!isApplyStep && (
                     <HStack spacing={3} justify="center" flexWrap="wrap">
-                      <Button colorScheme="red" variant="outline" size="md" onClick={onEraseOpen} isDisabled={!wizard.isConnected} leftIcon={<Trash2 size={16} />}>
+                      <Button colorScheme="red" variant="outline" borderRadius="full" size="md" onClick={onEraseOpen} isDisabled={!wizard.isConnected} leftIcon={<Trash2 size={16} />}>
                         Erase Config
                       </Button>
-                      <Button colorScheme="green" variant="outline" size="md" onClick={wizard.pullConfig} isDisabled={!wizard.isConnected} isLoading={wizard.loading} loadingText="Pulling…" leftIcon={!wizard.loading ? <DownloadCloud size={16} /> : undefined}>
+                      <Button colorScheme="green" variant="outline" borderRadius="full" size="md" onClick={wizard.pullConfig} isDisabled={!wizard.isConnected} isLoading={wizard.loading} loadingText="Pulling…" leftIcon={!wizard.loading ? <DownloadCloud size={16} /> : undefined}>
                         Pull Current Config
                       </Button>
-                      <Button colorScheme="blue" variant="outline" size="md" onClick={() => setStepIndex(STEPS.length - 1)} isDisabled={!wizard.isConnected} leftIcon={<ClipboardList size={16} />}>
+                      <Button colorScheme="accent" variant="outline" borderRadius="full" size="md" onClick={() => setStepIndex(STEPS.length - 1)} isDisabled={!wizard.isConnected} leftIcon={<ClipboardList size={16} />}>
                         Review in Apply
                       </Button>
-                      <Button colorScheme="blue" size="md" onClick={handleApplySave} isDisabled={!wizard.isConnected || wizard.changes.length === 0} isLoading={applying} loadingText="Applying…" leftIcon={<Save size={16} />}>
+                      <Button colorScheme="accent" borderRadius="full" size="md" onClick={handleApplySave} isDisabled={!wizard.isConnected || wizard.changes.length === 0} isLoading={applying} loadingText="Applying…" leftIcon={<Save size={16} />}>
                         Apply &amp; Save
-                        {wizard.changes.length > 0 && <Badge ml={2} colorScheme="teal">{wizard.changes.length}</Badge>}
+                        {wizard.changes.length > 0 && <Badge ml={2} colorScheme="whiteAlpha" borderRadius="full">{wizard.changes.length}</Badge>}
                       </Button>
                     </HStack>
                   )}

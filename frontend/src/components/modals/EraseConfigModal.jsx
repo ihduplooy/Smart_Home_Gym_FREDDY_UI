@@ -59,7 +59,7 @@ const EraseConfigModal = ({ isOpen, onClose }) => {
   return (
     <Modal isOpen={isOpen} onClose={onClose} isCentered>
       <ModalOverlay />
-      <ModalContent bg="gray.800" borderTop="3px solid" borderColor="red.500">
+      <ModalContent bg="paper.bg" borderTop="3px solid" borderColor="red.500">
         <ModalHeader color="red.300">Erase ODrive Configuration</ModalHeader>
         <ModalCloseButton />
         <ModalBody>
@@ -71,7 +71,7 @@ const EraseConfigModal = ({ isOpen, onClose }) => {
                 <Text fontSize="sm">This resets ALL ODrive settings to factory defaults and reboots the device.</Text>
               </Box>
             </Alert>
-            <Text fontSize="sm" color="gray.400">
+            <Text fontSize="sm" color="paper.textSecondary">
               It is strongly advised to save your current configuration as a preset before erasing — you can do this in the Presets tab.
             </Text>
             <Checkbox isChecked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} colorScheme="red">

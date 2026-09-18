@@ -43,7 +43,7 @@ const StatusBadge = memo(({ connected }) => (
 StatusBadge.displayName = 'StatusBadge'
 
 const DeviceCard = memo(({ device, connected, connecting, onConnect, onDisconnect }) => (
-  <Card w="100%" className="device-card" bg={connected ? 'odrive.700' : 'gray.700'} variant="elevated">
+  <Card w="100%" className="device-card" bg={connected ? 'accent.50' : 'paper.bg'} variant="outline" borderColor={connected ? 'accent.200' : 'paper.border'} borderRadius="lg">
     <CardBody p={2}>
       <VStack align="stretch" spacing={1}>
         <HStack justify="space-between" align="center">
@@ -57,7 +57,7 @@ const DeviceCard = memo(({ device, connected, connecting, onConnect, onDisconnec
             <Button size="xs" colorScheme="green" onClick={() => onConnect(device)} isLoading={connecting} loadingText="Connecting">Connect</Button>
           )}
         </HStack>
-        <Text fontSize="xs" color="gray.300" fontFamily="mono" noOfLines={1}>
+        <Text fontSize="xs" color="paper.textPrimary" fontFamily="mono" noOfLines={1}>
           SR: {device.serial_number || 'Unknown'}
         </Text>
       </VStack>
@@ -70,7 +70,7 @@ const ErrorRow = memo(({ label, code, kind, onClick }) => {
   if (!code) {
     return (
       <HStack justify="space-between">
-        <Text fontSize="sm" color="gray.300">{label}:</Text>
+        <Text fontSize="sm" color="paper.textPrimary">{label}:</Text>
         <Text fontSize="sm" fontWeight="bold" color="green.300">OK</Text>
       </HStack>
     )
@@ -80,7 +80,7 @@ const ErrorRow = memo(({ label, code, kind, onClick }) => {
   return (
     <VStack spacing={1} align="stretch">
       <HStack justify="space-between">
-        <Text fontSize="sm" color="gray.300">{label}:</Text>
+        <Text fontSize="sm" color="paper.textPrimary">{label}:</Text>
         <HStack>
           <Badge
             colorScheme={colorScheme}
@@ -398,14 +398,14 @@ const DeviceList = () => {
     <Box className="device-list">
       <VStack spacing={4} align="stretch">
         <HStack justify="space-between">
-          <Text fontSize="lg" fontWeight="bold" color="odrive.300">ODrive Device</Text>
+          <Text fontSize="lg" fontWeight="bold" color="accent.600">ODrive Device</Text>
           <HStack spacing={2}>
             <Tooltip label="Forget the cached connection and start fresh, without restarting the backend. If that doesn't help, use Restart Freddy (top of sidebar) instead.">
               <Button size="sm" variant="outline" onClick={handleResetInterface} isLoading={resetBusy} loadingText="Resetting">
                 Reset
               </Button>
             </Tooltip>
-            <Button size="sm" colorScheme="odrive" onClick={() => dispatch(fetchDevices())} isLoading={isLoading} loadingText="Scanning">
+            <Button size="sm" colorScheme="accent" onClick={() => dispatch(fetchDevices())} isLoading={isLoading} loadingText="Scanning">
               Scan
             </Button>
           </HStack>
@@ -445,44 +445,44 @@ const DeviceList = () => {
               >
                 EMERGENCY STOP
               </Button>
-              <Text fontSize="xs" color="gray.500" textAlign="center" mt={-2} mb={3}>
+              <Text fontSize="xs" color="paper.textSecondary" textAlign="center" mt={-2} mb={3}>
                 or press Space anywhere
               </Text>
-              <Text fontSize="md" fontWeight="bold" mb={2} color="white">Device Status</Text>
+              <Text fontSize="md" fontWeight="bold" mb={2} color="paper.textPrimary">Device Status</Text>
               <VStack spacing={2} align="stretch">
                 <HStack justify="space-between">
-                  <Text fontSize="sm" color="gray.300">Vbus Voltage:</Text>
+                  <Text fontSize="sm" color="paper.textPrimary">Vbus Voltage:</Text>
                   <Text fontSize="sm" fontWeight="bold">{live.vbus_voltage.toFixed(1)} V</Text>
                 </HStack>
                 <Box>
                   <HStack justify="space-between">
-                    <Text fontSize="sm" color="gray.300">Axis 0 State:</Text>
+                    <Text fontSize="sm" color="paper.textPrimary">Axis 0 State:</Text>
                     <Badge colorScheme={axisColor(live.axis_state)}>{getAxisStateName(live.axis_state)}</Badge>
                   </HStack>
-                  <Text fontSize="xs" color="gray.500" textAlign="right">{getAxisStateDescription(live.axis_state)}</Text>
+                  <Text fontSize="xs" color="paper.textSecondary" textAlign="right">{getAxisStateDescription(live.axis_state)}</Text>
                 </Box>
                 <Box>
-                  <Text fontSize="sm" color="gray.300" mb={1}>Current:</Text>
+                  <Text fontSize="sm" color="paper.textPrimary" mb={1}>Current:</Text>
                   <HStack justify="space-between">
                     <VStack spacing={0} align="start">
-                      <Text fontSize="2xs" color="gray.500">Motor</Text>
+                      <Text fontSize="2xs" color="paper.textSecondary">Motor</Text>
                       <Text fontSize="sm" fontWeight="bold">{live.motor_current.toFixed(2)} A</Text>
                     </VStack>
                     <VStack spacing={0} align="end">
-                      <Text fontSize="2xs" color="gray.500">Supply</Text>
+                      <Text fontSize="2xs" color="paper.textSecondary">Supply</Text>
                       <Text fontSize="sm" fontWeight="bold">{live.ibus.toFixed(2)} A</Text>
                     </VStack>
                   </HStack>
                 </Box>
                 <Box>
-                  <Text fontSize="sm" color="gray.300" mb={1}>Position:</Text>
+                  <Text fontSize="sm" color="paper.textPrimary" mb={1}>Position:</Text>
                   <HStack justify="space-between">
                     <VStack spacing={0} align="start">
-                      <Text fontSize="2xs" color="gray.500">Encoder</Text>
+                      <Text fontSize="2xs" color="paper.textSecondary">Encoder</Text>
                       <Text fontSize="sm" fontWeight="bold">{live.encoder_pos.toFixed(2)}</Text>
                     </VStack>
                     <VStack spacing={0} align="end">
-                      <Text fontSize="2xs" color="gray.500">Cable</Text>
+                      <Text fontSize="2xs" color="paper.textSecondary">Cable</Text>
                       <Text fontSize="sm" fontWeight="bold">{cablePositionM != null ? `${cablePositionM.toFixed(3)} m` : '—'}</Text>
                     </VStack>
                   </HStack>
@@ -495,7 +495,7 @@ const DeviceList = () => {
                     flex={1}
                     size="sm"
                     variant="outline"
-                    colorScheme="odrive"
+                    colorScheme="accent"
                     onClick={handleHoming}
                     isLoading={homingBusy}
                     loadingText="Homing…"
@@ -509,7 +509,7 @@ const DeviceList = () => {
                     flex={1}
                     size="sm"
                     variant="outline"
-                    colorScheme="odrive"
+                    colorScheme="accent"
                     onClick={handleGoHome}
                     isLoading={goHomeBusy}
                     loadingText="Going home…"
@@ -533,15 +533,15 @@ const DeviceList = () => {
                   onClick={() => setErrorsExpanded((v) => !v)}
                 >
                   <HStack spacing={1}>
-                    <Icon as={errorsExpanded ? ChevronUpIcon : ChevronDownIcon} color="gray.400" />
-                    <Text fontSize="sm" color="gray.300">Errors:</Text>
+                    <Icon as={errorsExpanded ? ChevronUpIcon : ChevronDownIcon} color="paper.textSecondary" />
+                    <Text fontSize="sm" color="paper.textPrimary">Errors:</Text>
                   </HStack>
                   <Badge colorScheme={hasAnyErrors ? 'red' : 'green'} variant="solid" fontSize="xs">
                     {hasAnyErrors ? `${activeErrorCount} Active` : 'None'}
                   </Badge>
                 </HStack>
                 <Collapse in={errorsExpanded} animateOpacity>
-                  <VStack spacing={2} align="stretch" mt={2} pl={2} borderLeft="2px solid" borderColor="gray.600">
+                  <VStack spacing={2} align="stretch" mt={2} pl={2} borderLeft="2px solid" borderColor="paper.border">
                     <ErrorRow label="Axis" code={errors.axis} kind="axis" onClick={handleErrorClick} />
                     <ErrorRow label="Motor" code={errors.motor} kind="motor" onClick={handleErrorClick} />
                     <ErrorRow label="Encoder" code={errors.encoder} kind="encoder" onClick={handleErrorClick} />

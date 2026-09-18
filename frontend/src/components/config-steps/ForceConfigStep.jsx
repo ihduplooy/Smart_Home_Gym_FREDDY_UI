@@ -7,9 +7,9 @@ import SoftwarePowerLimitsCard from './SoftwarePowerLimitsCard'
 // then motor phase current, then the derived torque/force ceilings) -- see
 // the comment above SCHEMA.force in configSchema.js for the full chain.
 const chainDescription = (
-  <Alert status="info" variant="left-accent" bg="gray.800" borderColor="odrive.400" mb={4} alignItems="start">
+  <Alert status="info" variant="left-accent" bg="paper.bg" borderColor="accent.500" mb={4} alignItems="start">
     <AlertIcon mt={0.5} />
-    <AlertDescription fontSize="sm" color="gray.300">
+    <AlertDescription fontSize="sm" color="paper.textPrimary">
       These limits form a chain, listed top to bottom in the order they&apos;re actually checked: the DC bus
       current limit (PSU capacity) bounds the motor phase current limit, which bounds the torque limit, which
       the app&apos;s own Software Power Limits then re-clamp in force/power terms. Whichever value is smallest —

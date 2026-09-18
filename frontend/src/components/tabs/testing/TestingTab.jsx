@@ -23,14 +23,14 @@ import RepetitiveTesting from './RepetitiveTesting'
 // Position-mode fields exactly (frontend/src/components/tabs/control/ControlTab.jsx),
 // plus the calibration-specific additions (items 6/7) below the telemetry.
 const CHART_LINES = [
-  { key: 'position_m', label: 'Position (actual)', color: '#63B3ED', unit: 'm', defaultOn: true, side: 'left' },
-  { key: 'target_position_m', label: 'Target position', color: '#63B3ED', unit: 'm', defaultOn: true, side: 'left', axisKey: 'position_m', dashed: true },
-  { key: 'corrected_torque_nm', label: 'Torque (calibrated)', color: '#F6AD55', unit: 'Nm', defaultOn: true, side: 'right' },
-  { key: 'torque_est_nm', label: 'Torque (raw estimate)', color: '#ED8936', unit: 'Nm', defaultOn: false, side: 'right' },
-  { key: 'force_est_n', label: 'Force (calculated)', color: '#4FD1C5', unit: 'N', defaultOn: true, side: 'right' },
-  { key: 'current_iq_a', label: 'Phase current', color: '#68D391', unit: 'A', defaultOn: false, side: 'right' },
-  { key: 'bus_voltage_v', label: 'Bus voltage', color: '#B794F4', unit: 'V', defaultOn: false, side: 'right' },
-  { key: 'estimated_power_w', label: 'Estimated power', color: '#FC8181', unit: 'W', defaultOn: false, side: 'right' },
+  { key: 'position_m', label: 'Position (actual)', color: '#2563eb', unit: 'm', defaultOn: true, side: 'left' },
+  { key: 'target_position_m', label: 'Target position', color: '#2563eb', unit: 'm', defaultOn: true, side: 'left', axisKey: 'position_m', dashed: true },
+  { key: 'corrected_torque_nm', label: 'Torque (calibrated)', color: '#eb6834', unit: 'Nm', defaultOn: true, side: 'right' },
+  { key: 'torque_est_nm', label: 'Torque (raw estimate)', color: '#1baf7a', unit: 'Nm', defaultOn: false, side: 'right' },
+  { key: 'force_est_n', label: 'Force (calculated)', color: '#eda100', unit: 'N', defaultOn: true, side: 'right' },
+  { key: 'current_iq_a', label: 'Phase current', color: '#e87ba4', unit: 'A', defaultOn: false, side: 'right' },
+  { key: 'bus_voltage_v', label: 'Bus voltage', color: '#008300', unit: 'V', defaultOn: false, side: 'right' },
+  { key: 'estimated_power_w', label: 'Estimated power', color: '#4a3aa7', unit: 'W', defaultOn: false, side: 'right' },
 ]
 
 // Not user-facing (item 2: "we don't need acceleration or deceleration
@@ -267,10 +267,10 @@ const TestingTab = ({ isActive = true }) => {
           </Alert>
         )}
 
-        <Card bg="gray.800" variant="elevated">
+        <Card bg="paper.bg" variant="outline" borderColor="paper.border" borderRadius="lg">
           <CardHeader>
             <HStack justify="space-between">
-              <Heading size="md" color="white">Testing — Torque/Force Calibration</Heading>
+              <Heading size="md" color="paper.textPrimary">Testing — Torque/Force Calibration</Heading>
               <HStack>
                 {running && <Badge colorScheme="green" variant="solid">Running</Badge>}
                 <Badge colorScheme={isHomed ? 'green' : 'gray'} variant="outline">{isHomed ? 'homed' : 'not homed'}</Badge>
@@ -282,29 +282,29 @@ const TestingTab = ({ isActive = true }) => {
             <VStack align="stretch" spacing={4}>
               <SimpleGrid columns={{ base: 2, md: 5 }} spacing={4}>
                 <Stat>
-                  <StatLabel color="gray.300">Home</StatLabel>
-                  <StatNumber color="odrive.300" fontSize="xl">{cable?.home_turns != null ? cable.home_turns.toFixed(3) : '—'}</StatNumber>
-                  <Text fontSize="xs" color="gray.400">turns</Text>
+                  <StatLabel color="paper.textPrimary">Home</StatLabel>
+                  <StatNumber color="accent.600" fontSize="xl">{cable?.home_turns != null ? cable.home_turns.toFixed(3) : '—'}</StatNumber>
+                  <Text fontSize="xs" color="paper.textSecondary">turns</Text>
                 </Stat>
                 <Stat>
-                  <StatLabel color="gray.300">Max extension</StatLabel>
-                  <StatNumber color="odrive.300" fontSize="xl">{cable?.max_extension_length_m != null ? cable.max_extension_length_m.toFixed(3) : '—'}</StatNumber>
-                  <Text fontSize="xs" color="gray.400">m, from home</Text>
+                  <StatLabel color="paper.textPrimary">Max extension</StatLabel>
+                  <StatNumber color="accent.600" fontSize="xl">{cable?.max_extension_length_m != null ? cable.max_extension_length_m.toFixed(3) : '—'}</StatNumber>
+                  <Text fontSize="xs" color="paper.textSecondary">m, from home</Text>
                 </Stat>
                 <Stat>
-                  <StatLabel color="gray.300">Spool radius (r0)</StatLabel>
-                  <StatNumber color="odrive.300" fontSize="xl">{r0 != null ? r0.toFixed(4) : '—'}</StatNumber>
-                  <Text fontSize="xs" color="gray.400">m</Text>
+                  <StatLabel color="paper.textPrimary">Spool radius (r0)</StatLabel>
+                  <StatNumber color="accent.600" fontSize="xl">{r0 != null ? r0.toFixed(4) : '—'}</StatNumber>
+                  <Text fontSize="xs" color="paper.textSecondary">m</Text>
                 </Stat>
                 <Stat>
-                  <StatLabel color="gray.300">Effective radius (r_eff)</StatLabel>
-                  <StatNumber color="odrive.300" fontSize="xl">{rEffAtCurrent != null ? rEffAtCurrent.toFixed(4) : '—'}</StatNumber>
-                  <Text fontSize="xs" color="gray.400">m, at current position</Text>
+                  <StatLabel color="paper.textPrimary">Effective radius (r_eff)</StatLabel>
+                  <StatNumber color="accent.600" fontSize="xl">{rEffAtCurrent != null ? rEffAtCurrent.toFixed(4) : '—'}</StatNumber>
+                  <Text fontSize="xs" color="paper.textSecondary">m, at current position</Text>
                 </Stat>
                 <Stat>
-                  <StatLabel color="gray.300">Correction (k)</StatLabel>
-                  <StatNumber color="odrive.300" fontSize="xl">{cable?.k != null ? cable.k.toExponential(2) : '—'}</StatNumber>
-                  <Text fontSize="xs" color="gray.400">m/rad</Text>
+                  <StatLabel color="paper.textPrimary">Correction (k)</StatLabel>
+                  <StatNumber color="accent.600" fontSize="xl">{cable?.k != null ? cable.k.toExponential(2) : '—'}</StatNumber>
+                  <Text fontSize="xs" color="paper.textSecondary">m/rad</Text>
                 </Stat>
               </SimpleGrid>
 
@@ -317,12 +317,12 @@ const TestingTab = ({ isActive = true }) => {
           </CardBody>
         </Card>
 
-        <Card bg="gray.800" variant="elevated">
-          <Tabs colorScheme="odrive" isLazy lazyBehavior="keepMounted">
+        <Card bg="paper.bg" variant="outline" borderColor="paper.border" borderRadius="lg">
+          <Tabs colorScheme="accent" isLazy lazyBehavior="keepMounted">
             <CardHeader pb={0}>
               <TabList border="none">
-                <Tab color="gray.300" _selected={{ color: 'odrive.300', borderColor: 'odrive.300' }}>Configure move</Tab>
-                <Tab color="gray.300" _selected={{ color: 'odrive.300', borderColor: 'odrive.300' }}>Repetitive testing</Tab>
+                <Tab color="paper.textPrimary" _selected={{ color: 'accent.600', borderColor: 'accent.600' }}>Configure move</Tab>
+                <Tab color="paper.textPrimary" _selected={{ color: 'accent.600', borderColor: 'accent.600' }}>Repetitive testing</Tab>
               </TabList>
             </CardHeader>
             <CardBody>
@@ -331,7 +331,7 @@ const TestingTab = ({ isActive = true }) => {
             <VStack align="stretch" spacing={4}>
               <HStack spacing={4} wrap="wrap">
                 <Box>
-                  <Text fontSize="xs" color="gray.400" mb={1}>Known weight</Text>
+                  <Text fontSize="xs" color="paper.textSecondary" mb={1}>Known weight</Text>
                   <InputGroup size="sm" w="140px">
                     <Input type="text" inputMode="decimal" fontFamily="mono" value={knownWeightText} onChange={(e) => setKnownWeightText(e.target.value)} />
                     <InputRightAddon px={2} fontSize="xs">kg</InputRightAddon>
@@ -339,7 +339,7 @@ const TestingTab = ({ isActive = true }) => {
                 </Box>
 
                 <Box>
-                  <Text fontSize="xs" color="gray.400" mb={1}>Move Distance</Text>
+                  <Text fontSize="xs" color="paper.textSecondary" mb={1}>Move Distance</Text>
                   <HStack spacing={1}>
                     <InputGroup size="sm" w="110px">
                       <Input type="text" inputMode="decimal" fontFamily="mono" value={moveDistanceText} onChange={(e) => setMoveDistanceText(e.target.value)} />
@@ -349,7 +349,7 @@ const TestingTab = ({ isActive = true }) => {
                       <option value="turns">turns</option>
                     </Select>
                   </HStack>
-                  <Text fontSize="0.65rem" color="gray.500" mt={0.5}>
+                  <Text fontSize="0.65rem" color="paper.textSecondary" mt={0.5}>
                     relative to current position
                     {moveUnit === 'm' && (
                       moveDistanceTurnsEstimate != null
@@ -360,7 +360,7 @@ const TestingTab = ({ isActive = true }) => {
                 </Box>
 
                 <Box>
-                  <Text fontSize="xs" color="gray.400" mb={1}>Move Velocity</Text>
+                  <Text fontSize="xs" color="paper.textSecondary" mb={1}>Move Velocity</Text>
                   <InputGroup size="sm" w="140px">
                     <Input type="text" inputMode="decimal" fontFamily="mono" value={moveVelocityText} onChange={(e) => setMoveVelocityText(e.target.value)} />
                     <InputRightAddon px={2} fontSize="xs">turns/s</InputRightAddon>
@@ -368,7 +368,7 @@ const TestingTab = ({ isActive = true }) => {
                 </Box>
 
                 <Box>
-                  <Text fontSize="xs" color="gray.400" mb={1}>Torque Limit</Text>
+                  <Text fontSize="xs" color="paper.textSecondary" mb={1}>Torque Limit</Text>
                   <HStack spacing={1}>
                     <InputGroup size="sm" w="110px">
                       <Input
@@ -387,7 +387,7 @@ const TestingTab = ({ isActive = true }) => {
                     </Select>
                   </HStack>
                   {torqueLimitText !== '' && torqueLimitUnit !== 'Nm' && (
-                    <Text fontSize="0.65rem" color="gray.500" mt={0.5}>
+                    <Text fontSize="0.65rem" color="paper.textSecondary" mt={0.5}>
                       {torqueLimitNm != null ? `≈ ${torqueLimitNm.toFixed(4)} Nm` : 'loading cable calibration…'}
                     </Text>
                   )}
@@ -396,7 +396,7 @@ const TestingTab = ({ isActive = true }) => {
                 <VStack align="stretch" spacing={1} justify="flex-end">
                   <Text fontSize="xs" color="transparent" userSelect="none">.</Text>
                   {running ? (
-                    <Button size="sm" colorScheme="odrive" onClick={handleRetarget} isDisabled={!targetValid}>
+                    <Button size="sm" colorScheme="accent" onClick={handleRetarget} isDisabled={!targetValid}>
                       Update
                     </Button>
                   ) : (
@@ -409,29 +409,29 @@ const TestingTab = ({ isActive = true }) => {
 
               <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4}>
                 <Stat>
-                  <StatLabel color="gray.300">Position</StatLabel>
-                  <StatNumber color="odrive.300" fontSize="xl">{latestSample?.position_m != null ? latestSample.position_m.toFixed(4) : '—'}</StatNumber>
-                  <Text fontSize="xs" color="gray.400">m, from home</Text>
+                  <StatLabel color="paper.textPrimary">Position</StatLabel>
+                  <StatNumber color="accent.600" fontSize="xl">{latestSample?.position_m != null ? latestSample.position_m.toFixed(4) : '—'}</StatNumber>
+                  <Text fontSize="xs" color="paper.textSecondary">m, from home</Text>
                 </Stat>
                 <Stat>
-                  <StatLabel color="gray.300">Measured torque</StatLabel>
+                  <StatLabel color="paper.textPrimary">Measured torque</StatLabel>
                   {/* Magnitude, not signed (item 3): the sign of torque_est/corrected_torque_nm
                       encodes direction, meaningful for control/debugging (see
                       TorqueModelDiagnostics' Developer panel, which shows the raw signed
                       value) -- but resistance itself isn't "negative", so this main
                       user-facing stat shows how much torque is being felt, not which way. */}
-                  <StatNumber color="odrive.300" fontSize="xl">{latestSample?.corrected_torque_nm != null ? Math.abs(latestSample.corrected_torque_nm).toFixed(3) : '—'}</StatNumber>
-                  <Text fontSize="xs" color="gray.400">Nm, calibrated</Text>
+                  <StatNumber color="accent.600" fontSize="xl">{latestSample?.corrected_torque_nm != null ? Math.abs(latestSample.corrected_torque_nm).toFixed(3) : '—'}</StatNumber>
+                  <Text fontSize="xs" color="paper.textSecondary">Nm, calibrated</Text>
                 </Stat>
                 <Stat>
-                  <StatLabel color="gray.300">Phase current</StatLabel>
-                  <StatNumber color="odrive.300" fontSize="xl">{status?.latest_sample?.current_iq != null ? status.latest_sample.current_iq.toFixed(3) : '—'}</StatNumber>
-                  <Text fontSize="xs" color="gray.400">A (Iq_measured)</Text>
+                  <StatLabel color="paper.textPrimary">Phase current</StatLabel>
+                  <StatNumber color="accent.600" fontSize="xl">{status?.latest_sample?.current_iq != null ? status.latest_sample.current_iq.toFixed(3) : '—'}</StatNumber>
+                  <Text fontSize="xs" color="paper.textSecondary">A (Iq_measured)</Text>
                 </Stat>
                 <Stat>
-                  <StatLabel color="gray.300">Measured force</StatLabel>
-                  <StatNumber color="odrive.300" fontSize="xl">{latestSample?.force_est_n != null ? Math.abs(latestSample.force_est_n).toFixed(2) : '—'}</StatNumber>
-                  <Text fontSize="xs" color="gray.400">
+                  <StatLabel color="paper.textPrimary">Measured force</StatLabel>
+                  <StatNumber color="accent.600" fontSize="xl">{latestSample?.force_est_n != null ? Math.abs(latestSample.force_est_n).toFixed(2) : '—'}</StatNumber>
+                  <Text fontSize="xs" color="paper.textSecondary">
                     N{expectedForceN != null ? ` — expected ${expectedForceN.toFixed(2)} N` : ''}
                   </Text>
                 </Stat>
@@ -454,10 +454,10 @@ const TestingTab = ({ isActive = true }) => {
           </Tabs>
         </Card>
 
-        <Card bg="gray.800" variant="elevated">
+        <Card bg="paper.bg" variant="outline" borderColor="paper.border" borderRadius="lg">
           <CardHeader>
             <HStack justify="space-between">
-              <Heading size="sm" color="white">Torque/Force calibration</Heading>
+              <Heading size="sm" color="paper.textPrimary">Torque/Force calibration</Heading>
               <Badge colorScheme={calibrationPoints.length > 0 ? 'green' : 'gray'} variant="outline">
                 {calibrationPoints.length > 0 ? `${calibrationPoints.length} point${calibrationPoints.length === 1 ? '' : 's'} recorded` : 'not calibrated'}
               </Badge>
@@ -465,7 +465,7 @@ const TestingTab = ({ isActive = true }) => {
           </CardHeader>
           <CardBody>
             <VStack align="stretch" spacing={3}>
-              <Text fontSize="xs" color="gray.400">
+              <Text fontSize="xs" color="paper.textSecondary">
                 Hang the Known Weight above and run it through several reps (e.g. Repetitive testing above, or a
                 few manual up/down moves) -- friction makes lifting and lowering read differently, so this fits a
                 separate line for each direction from the steady-state (constant-velocity) part of every rep,
@@ -477,7 +477,7 @@ const TestingTab = ({ isActive = true }) => {
                 <Alert status="error" variant="left-accent"><AlertIcon /><AlertDescription>{calibError}</AlertDescription></Alert>
               )}
               <HStack>
-                <Button size="sm" colorScheme="odrive" onClick={handleAnalyzeRun} isLoading={calibBusy} isDisabled={!isHomed || running}>
+                <Button size="sm" colorScheme="accent" onClick={handleAnalyzeRun} isLoading={calibBusy} isDisabled={!isHomed || running}>
                   Analyze last run
                 </Button>
                 <Button size="sm" variant="outline" colorScheme="red" onClick={handleClearCalibration} isLoading={calibBusy} isDisabled={calibrationPoints.length === 0}>
@@ -487,23 +487,23 @@ const TestingTab = ({ isActive = true }) => {
 
               {analysis && (
                 <VStack align="stretch" spacing={2} fontSize="xs">
-                  <Text color="gray.500" fontFamily="mono" noOfLines={1}>log: {analysis.log_path}</Text>
+                  <Text color="paper.textSecondary" fontFamily="mono" noOfLines={1}>log: {analysis.log_path}</Text>
                   {['up', 'down'].map((direction) => {
                     const result = analysis[direction]
                     const inserted = insertedDirections.has(direction)
                     return (
-                      <HStack key={direction} justify="space-between" bg="gray.750" px={3} py={2} borderRadius="md">
-                        <VStack align="stretch" spacing={0} fontFamily="mono" color="gray.300">
-                          <Text color="gray.200" fontWeight="bold">
+                      <HStack key={direction} justify="space-between" bg="paper.bg" px={3} py={2} borderRadius="md">
+                        <VStack align="stretch" spacing={0} fontFamily="mono" color="paper.textPrimary">
+                          <Text color="paper.textPrimary" fontWeight="bold">
                             {direction === 'up' ? 'Up (lifting)' : 'Down (lowering)'}
                           </Text>
                           {result ? (
                             <>
                               <Text>{result.rep_count} rep{result.rep_count === 1 ? '' : 's'} -- raw torque {result.raw_torque_nm.toFixed(4)} Nm (expected {result.expected_torque_nm.toFixed(4)} Nm), r_eff {result.r_eff_m.toFixed(4)} m</Text>
-                              <Text color="gray.500">per-rep: {result.per_rep_raw_torque_nm.map((v) => v.toFixed(3)).join(', ')}</Text>
+                              <Text color="paper.textSecondary">per-rep: {result.per_rep_raw_torque_nm.map((v) => v.toFixed(3)).join(', ')}</Text>
                             </>
                           ) : (
-                            <Text color="gray.500">No qualifying reps found in this direction in the last run.</Text>
+                            <Text color="paper.textSecondary">No qualifying reps found in this direction in the last run.</Text>
                           )}
                         </VStack>
                         <Button
@@ -523,8 +523,8 @@ const TestingTab = ({ isActive = true }) => {
               )}
 
               {calibrationPoints.length > 0 && (
-                <VStack align="stretch" spacing={1} fontSize="xs" fontFamily="mono" color="gray.300">
-                  <HStack justify="space-between" color="gray.500">
+                <VStack align="stretch" spacing={1} fontSize="xs" fontFamily="mono" color="paper.textPrimary">
+                  <HStack justify="space-between" color="paper.textSecondary">
                     <Text w="70px">weight</Text>
                     <Text w="55px">dir</Text>
                     <Text w="90px">raw torque</Text>

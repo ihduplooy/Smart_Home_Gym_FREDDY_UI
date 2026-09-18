@@ -163,18 +163,16 @@
 }
 
 .device-list {
-  background: linear-gradient(180deg, #2d3748 0%, #1a202c 100%);
+  background: transparent;
 }
 
 .device-list .device-card {
   transition: all 0.2s ease-in-out;
-  border: 1px solid #4a5568;
+  border: 1px solid #e4e4e7;
 }
 
 .device-list .device-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  border-color: #63b3ed;
+  border-color: #2563eb;
 }
 
 .device-list .device-card.connected {

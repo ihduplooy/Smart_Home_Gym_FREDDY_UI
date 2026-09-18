@@ -27,12 +27,12 @@ const ControlConfigStep = ({ wizard }) => {
   }
 
   const gainsHelper = (
-    <Card bg="gray.800" variant="outline" borderColor="gray.700" mb={4}>
+    <Card bg="paper.bg" variant="outline" borderColor="paper.border" mb={4}>
       <CardBody>
         <HStack justify="space-between" align="start">
           <VStack align="start" spacing={0}>
-            <Heading size="sm" color="odrive.300">Suggested Gains</Heading>
-            <Text fontSize="xs" color="gray.500">
+            <Heading size="sm" color="accent.600">Suggested Gains</Heading>
+            <Text fontSize="xs" color="paper.textSecondary">
               {canCalc
                 ? `pos ${fmt(suggested.posGain)} · vel ${fmt(suggested.velGain)} · vel_int ${fmt(suggested.velIntegratorGain)}`
                 : 'Set motor Kv, current limit and encoder CPR first.'}

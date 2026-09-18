@@ -17,9 +17,9 @@ const ConfigStep = ({ stepId, wizard, columns = { base: 1, lg: 2 }, extraTop, ex
       {extraTop}
       <SimpleGrid columns={columns} spacing={4}>
         {def.groups.map((group) => (
-          <Card key={group.title} bg="gray.800" variant="outline" borderColor="gray.700">
+          <Card key={group.title} bg="paper.bg" variant="outline" borderColor="paper.border">
             <CardBody>
-              <Heading size="sm" color="odrive.300" mb={3}>{group.title}</Heading>
+              <Heading size="sm" color="accent.600" mb={3}>{group.title}</Heading>
               <ParameterFormGrid
                 fields={group.fields}
                 fwLine={wizard.fwLine}
