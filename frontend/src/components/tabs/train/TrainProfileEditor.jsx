@@ -8,6 +8,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsToolti
 import { previewTrainProfile } from '../../../api/train'
 import { listTrainProfiles, saveTrainProfile, deleteTrainProfile } from '../../../utils/trainProfilesManager'
 import { forceNFromMassKg, massKgFromForceN } from '../../../utils/cableGeometry'
+import { BAND_PRESETS } from '../../../utils/bandPresets'
 
 // Resistance display unit preference (item 2, 5 Aug 2026, set in the Setup
 // tab) -- force is always stored/evaluated in Newtons server-side
@@ -41,7 +42,7 @@ function defaultSegment(startPosM, startForce, resistanceUnitKg) {
     start_pos_m: String(startPosM),
     end_pos_m: String(startPosM + 0.3),
     shape: 'constant',
-    params: { force_n: String(fallback) },
+    params: { force_n: String(fallback), inertia_kg: '0' },
   }
 }
 
@@ -60,7 +61,11 @@ function endForceOf(segment) {
 
 function paramFields(shape, resistanceUnitKg) {
   const forceUnit = resistanceUnitKg ? 'kg' : 'N'
-  if (shape === 'constant') return [{ key: 'force_n', label: 'Force', unit: forceUnit }]
+  // Inertia is always kg-equivalent -- it's a virtual mass, not a force, so
+  // it's untouched by the N/kg resistance display toggle (isForceKey() only
+  // matches keys ending in 'force_n', so it already passes straight through
+  // unconverted at the payload/load boundaries below).
+  if (shape === 'constant') return [{ key: 'force_n', label: 'Force', unit: forceUnit }, { key: 'inertia_kg', label: 'Inertia', unit: 'kg' }]
   if (shape === 'linear') return [{ key: 'start_force_n', label: 'Start force', unit: forceUnit }, { key: 'end_force_n', label: 'End force', unit: forceUnit }]
   return [
     { key: 'peak_pos_m', label: 'Peak position', unit: 'm' },
@@ -79,7 +84,7 @@ function paramFields(shape, resistanceUnitKg) {
 function defaultParams(shape, startForce, resistanceUnitKg) {
   const start = String(startForce ?? displayForceFromN(0, resistanceUnitKg))
   const eighty = String(displayForceFromN(80, resistanceUnitKg))
-  if (shape === 'constant') return { force_n: String(startForce ?? displayForceFromN(50, resistanceUnitKg)) }
+  if (shape === 'constant') return { force_n: String(startForce ?? displayForceFromN(50, resistanceUnitKg)), inertia_kg: '0' }
   if (shape === 'linear') return { start_force_n: start, end_force_n: eighty }
   // end defaults to 0 -- the original "bell returns to zero at its far
   // edge" shape -- but can be raised independently (e.g. 3 -> 10 -> 4).
@@ -175,6 +180,28 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
   }
   const removeSegment = (id) => setSegments((prev) => prev.filter((s) => s.id !== id))
 
+  // Band presets (Part B): pre-fills a linear segment's start_force_n/
+  // end_force_n from a named preset, same as if the user had typed those
+  // values in by hand -- the user can still hand-edit either field
+  // afterward, same as today. Positions (start_pos_m/end_pos_m) are
+  // untouched; only the force fields come from the preset.
+  const applyBandPreset = (id, preset) => {
+    setSegments((prev) =>
+      prev.map((s) =>
+        s.id === id
+          ? {
+              ...s,
+              params: {
+                ...s.params,
+                start_force_n: String(displayForceFromN(preset.start_force_n, resistanceUnitKg)),
+                end_force_n: String(displayForceFromN(preset.end_force_n, resistanceUnitKg)),
+              },
+            }
+          : s
+      )
+    )
+  }
+
   // Split-in-place (spec: "calibration overhaul" item 4a) -- splits one
   // segment into two at its numeric midpoint, rather than requiring the
   // whole profile to be deleted and rebuilt to insert a segment in the
@@ -236,7 +263,7 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
     try {
       const payload = buildProfilePayload(name, segments, resistanceUnitKg)
       setBuildError(null)
-      onStart(payload)
+      onStart({ profile: payload })
     } catch (e) {
       setBuildError(e.message)
     }
@@ -246,7 +273,7 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
     try {
       const payload = buildProfilePayload(name, segments, resistanceUnitKg)
       setBuildError(null)
-      onApply(payload)
+      onApply({ profile: payload })
     } catch (e) {
       setBuildError(e.message)
     }
@@ -395,6 +422,25 @@ const TrainProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRa
                       {SHAPES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                     </Select>
                   </Box>
+                  {seg.shape === 'linear' && (
+                    <Box>
+                      <Text fontSize="xs" color="paper.textSecondary" mb={1}>Band preset</Text>
+                      <HStack spacing={1}>
+                        {BAND_PRESETS.map((preset) => (
+                          <IconButton
+                            key={preset.name}
+                            aria-label={`Apply ${preset.name} band preset`}
+                            title={preset.name}
+                            icon={<Box boxSize="14px" borderRadius="full" bg={preset.color} />}
+                            size="sm"
+                            variant="outline"
+                            borderColor="paper.border"
+                            onClick={() => applyBandPreset(seg.id, preset)}
+                          />
+                        ))}
+                      </HStack>
+                    </Box>
+                  )}
                   {paramFields(seg.shape, resistanceUnitKg).map((f) => (
                     <Box key={f.key}>
                       <Text fontSize="xs" color="paper.textSecondary" mb={1}>{f.label}</Text>

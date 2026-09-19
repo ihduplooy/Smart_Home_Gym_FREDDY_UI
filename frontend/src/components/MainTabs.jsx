@@ -20,6 +20,7 @@ const InspectorTab = lazy(() => import('./tabs/inspector/InspectorTab'))
 const SetupTab = lazy(() => import('./tabs/setup/SetupTab'))
 const ControlTab = lazy(() => import('./tabs/control/ControlTab'))
 const TrainTab = lazy(() => import('./tabs/train/TrainTab'))
+const GymTab = lazy(() => import('./tabs/gym/GymTab'))
 const TestingTab = lazy(() => import('./tabs/testing/TestingTab'))
 
 // Lightweight loading component
@@ -76,6 +77,12 @@ const TAB_CONFIG = [
     requiresConnection: false
   },
   {
+    id: 'gym',
+    label: 'GYM',
+    component: GymTab,
+    requiresConnection: false
+  },
+  {
     id: 'testing',
     label: 'Testing',
     component: TestingTab,
@@ -110,6 +117,7 @@ const MainTabs = () => {
         case 'setup':
         case 'control':
         case 'train':
+        case 'gym':
         case 'testing':
           return {
             ...commonProps,

@@ -121,6 +121,25 @@ _PERSISTED_DEFAULTS = {
     "resistance_display_unit_kg": lambda: board_constants.RESISTANCE_DISPLAY_UNIT_KG_DEFAULT,
     "force_max_n": lambda: board_constants.FORCE_MAX_N,
     "regen_power_budget_w": lambda: board_constants.REGEN_POWER_BUDGET_W,
+    # Resistance-mode tuning (resistance-modes sub-phases 3/4) -- see
+    # set_inertia_settings()/set_phase_settings() below and their
+    # board_constants.py defaults' own doc comments for what each is.
+    "inertia_kg_max": lambda: board_constants.INERTIA_KG_MAX_DEFAULT,
+    "inertia_velocity_filter_alpha": lambda: board_constants.INERTIA_VELOCITY_FILTER_ALPHA_DEFAULT,
+    "phase_force_delta_max_n": lambda: board_constants.PHASE_FORCE_DELTA_MAX_N_DEFAULT,
+    "phase_velocity_deadband_m_s": lambda: board_constants.PHASE_VELOCITY_DEADBAND_M_S_DEFAULT,
+    "phase_min_sustained_velocity_m_s": lambda: board_constants.PHASE_MIN_SUSTAINED_VELOCITY_M_S_DEFAULT,
+    "phase_sustain_window_s": lambda: board_constants.PHASE_SUSTAIN_WINDOW_S_DEFAULT,
+    "phase_reversal_distance_m": lambda: board_constants.PHASE_REVERSAL_DISTANCE_M_DEFAULT,
+    "phase_ramp_duration_s": lambda: board_constants.PHASE_RAMP_DURATION_S_DEFAULT,
+    # GYM dashboard (resistance-modes sub-phase 5) -- see
+    # set_gym_dashboard_settings() below and board_constants.py's own doc
+    # comments for what each is.
+    "constant_force_tolerance_fraction": lambda: board_constants.CONSTANT_FORCE_TOLERANCE_FRACTION_DEFAULT,
+    "band_stretch_tolerance_pct": lambda: board_constants.BAND_STRETCH_TOLERANCE_PCT_DEFAULT,
+    "rep_speed_low_m_s": lambda: board_constants.REP_SPEED_LOW_M_S_DEFAULT,
+    "rep_speed_high_m_s": lambda: board_constants.REP_SPEED_HIGH_M_S_DEFAULT,
+    "rep_speed_max_m_s": lambda: board_constants.REP_SPEED_MAX_M_S_DEFAULT,
 }
 
 
@@ -167,6 +186,19 @@ class CableState:
         self.resistance_display_unit_kg = bool(settings["resistance_display_unit_kg"])
         self.force_max_n = settings["force_max_n"]
         self.regen_power_budget_w = settings["regen_power_budget_w"]
+        self.inertia_kg_max = settings["inertia_kg_max"]
+        self.inertia_velocity_filter_alpha = settings["inertia_velocity_filter_alpha"]
+        self.phase_force_delta_max_n = settings["phase_force_delta_max_n"]
+        self.phase_velocity_deadband_m_s = settings["phase_velocity_deadband_m_s"]
+        self.phase_min_sustained_velocity_m_s = settings["phase_min_sustained_velocity_m_s"]
+        self.phase_sustain_window_s = settings["phase_sustain_window_s"]
+        self.phase_reversal_distance_m = settings["phase_reversal_distance_m"]
+        self.phase_ramp_duration_s = settings["phase_ramp_duration_s"]
+        self.constant_force_tolerance_fraction = settings["constant_force_tolerance_fraction"]
+        self.band_stretch_tolerance_pct = settings["band_stretch_tolerance_pct"]
+        self.rep_speed_low_m_s = settings["rep_speed_low_m_s"]
+        self.rep_speed_high_m_s = settings["rep_speed_high_m_s"]
+        self.rep_speed_max_m_s = settings["rep_speed_max_m_s"]
 
         # Experimental multi-point spool-growth calibration (turns_from_home,
         # length_m) pairs -- persisted separately from the float-only sidecar
@@ -586,6 +618,154 @@ class CableState:
         self.train_home_guard_enforced = new_home_enforced
         self.train_telemetry_buffer_s = float(new_buffer_s)
         self.resistance_display_unit_kg = new_resistance_unit_kg
+        self._save_settings()
+
+    def set_inertia_settings(
+        self,
+        inertia_kg_max: Optional[float] = None,
+        inertia_velocity_filter_alpha: Optional[float] = None,
+    ) -> None:
+        """Constant+inertia tuning (resistance-modes sub-phase 3), live-
+        adjustable from GYM's Settings sub-tab -- both started as explicitly-
+        flagged placeholders (train_profiles.py/train_mode.py's own original
+        comments), same "let a bench/log-tuning session update them without
+        editing code and restarting the backend" rationale as every other
+        setter here.
+
+        inertia_kg_max is NOT enforced by rejecting an over-cap `inertia_kg`
+        at TrainSegment construction (that field is validated non-negative
+        only, unbounded above) -- core/cable/train_mode.py clamps the
+        EFFECTIVE value it actually uses each tick to this live setting,
+        the same "accept anything at construction, clamp what's delivered"
+        pattern force_max_n already uses. Lowering this setting live
+        therefore takes effect immediately on a running session, not just on
+        the next profile built against it."""
+        new_inertia_kg_max = self.inertia_kg_max if inertia_kg_max is None else inertia_kg_max
+        new_alpha = self.inertia_velocity_filter_alpha if inertia_velocity_filter_alpha is None else inertia_velocity_filter_alpha
+
+        if new_inertia_kg_max <= 0:
+            raise ValueError(f"inertia_kg_max must be positive, got {new_inertia_kg_max!r}")
+        if not (0 < new_alpha <= 1):
+            raise ValueError(f"inertia_velocity_filter_alpha must be in (0, 1], got {new_alpha!r}")
+
+        self.inertia_kg_max = new_inertia_kg_max
+        self.inertia_velocity_filter_alpha = new_alpha
+        self._save_settings()
+
+    def set_phase_settings(
+        self,
+        phase_force_delta_max_n: Optional[float] = None,
+        velocity_deadband_m_s: Optional[float] = None,
+        min_sustained_velocity_m_s: Optional[float] = None,
+        sustain_window_s: Optional[float] = None,
+        reversal_distance_m: Optional[float] = None,
+        ramp_duration_s: Optional[float] = None,
+    ) -> None:
+        """Concentric/eccentric phase-detector tuning (resistance-modes
+        sub-phase 4), live-adjustable from GYM's Settings sub-tab -- same
+        subset-update/validate-together/persist pattern as every setter
+        here. core/cable/train_mode.py reads these live off `self` every
+        tick when passing them to PhaseRampDetector.update() (rather than
+        baking them into the detector at construction time), so a change
+        here takes effect on the very next tick of an already-running
+        session -- deliberately, so a bench session can nudge these while
+        actually feeling a rep, the same live-tuning motivation every other
+        setter in this class already has."""
+        new = {
+            "phase_force_delta_max_n": self.phase_force_delta_max_n if phase_force_delta_max_n is None else phase_force_delta_max_n,
+            "velocity_deadband_m_s": self.phase_velocity_deadband_m_s if velocity_deadband_m_s is None else velocity_deadband_m_s,
+            "min_sustained_velocity_m_s": (
+                self.phase_min_sustained_velocity_m_s if min_sustained_velocity_m_s is None else min_sustained_velocity_m_s
+            ),
+            "sustain_window_s": self.phase_sustain_window_s if sustain_window_s is None else sustain_window_s,
+            "reversal_distance_m": self.phase_reversal_distance_m if reversal_distance_m is None else reversal_distance_m,
+            "ramp_duration_s": self.phase_ramp_duration_s if ramp_duration_s is None else ramp_duration_s,
+        }
+
+        if new["phase_force_delta_max_n"] <= 0:
+            raise ValueError(f"phase_force_delta_max_n must be positive, got {new['phase_force_delta_max_n']!r}")
+        if new["velocity_deadband_m_s"] <= 0:
+            raise ValueError(f"velocity_deadband_m_s must be positive, got {new['velocity_deadband_m_s']!r}")
+        if new["min_sustained_velocity_m_s"] <= 0:
+            raise ValueError(f"min_sustained_velocity_m_s must be positive, got {new['min_sustained_velocity_m_s']!r}")
+        if new["min_sustained_velocity_m_s"] < new["velocity_deadband_m_s"]:
+            raise ValueError(
+                f"min_sustained_velocity_m_s ({new['min_sustained_velocity_m_s']!r}) must be >= "
+                f"velocity_deadband_m_s ({new['velocity_deadband_m_s']!r}) -- a reversal candidate has to "
+                f"clear the noise deadband before it can be sustained."
+            )
+        if new["sustain_window_s"] <= 0:
+            raise ValueError(f"sustain_window_s must be positive, got {new['sustain_window_s']!r}")
+        if new["reversal_distance_m"] <= 0:
+            raise ValueError(f"reversal_distance_m must be positive, got {new['reversal_distance_m']!r}")
+        if new["ramp_duration_s"] < 0:
+            raise ValueError(f"ramp_duration_s must be non-negative, got {new['ramp_duration_s']!r}")
+
+        self.phase_force_delta_max_n = new["phase_force_delta_max_n"]
+        self.phase_velocity_deadband_m_s = new["velocity_deadband_m_s"]
+        self.phase_min_sustained_velocity_m_s = new["min_sustained_velocity_m_s"]
+        self.phase_sustain_window_s = new["sustain_window_s"]
+        self.phase_reversal_distance_m = new["reversal_distance_m"]
+        self.phase_ramp_duration_s = new["ramp_duration_s"]
+        self._save_settings()
+
+    def set_gym_dashboard_settings(
+        self,
+        constant_force_tolerance_fraction: Optional[float] = None,
+        band_stretch_tolerance_pct: Optional[float] = None,
+        rep_speed_low_m_s: Optional[float] = None,
+        rep_speed_high_m_s: Optional[float] = None,
+        rep_speed_max_m_s: Optional[float] = None,
+    ) -> None:
+        """GYM dashboard (resistance-modes sub-phase 5) display/goal-tracking
+        tuning -- none of these five are bench-validated (unlike the phase
+        constants above), so all are exposed here live-adjustable rather
+        than fixed, same rationale as every other setter in this class.
+        None of them feed TrainMode's force computation -- all are read by
+        the frontend only.
+
+        constant_force_tolerance_fraction drives the Constant panel's "time
+        in range" ring: a fraction of the live target force, not an
+        absolute N band. band_stretch_tolerance_pct drives the Band panel's
+        "reached target stretch" check and its chart's shaded band, in
+        percentage points around the user-set target-stretch %.
+        rep_speed_low_m_s/rep_speed_high_m_s/rep_speed_max_m_s are the
+        Constant panel's rep-speed gauge zone boundaries (too slow / target /
+        too fast) and its right-hand end stop."""
+        new = {
+            "constant_force_tolerance_fraction": (
+                self.constant_force_tolerance_fraction if constant_force_tolerance_fraction is None else constant_force_tolerance_fraction
+            ),
+            "band_stretch_tolerance_pct": self.band_stretch_tolerance_pct if band_stretch_tolerance_pct is None else band_stretch_tolerance_pct,
+            "rep_speed_low_m_s": self.rep_speed_low_m_s if rep_speed_low_m_s is None else rep_speed_low_m_s,
+            "rep_speed_high_m_s": self.rep_speed_high_m_s if rep_speed_high_m_s is None else rep_speed_high_m_s,
+            "rep_speed_max_m_s": self.rep_speed_max_m_s if rep_speed_max_m_s is None else rep_speed_max_m_s,
+        }
+
+        if not (0 < new["constant_force_tolerance_fraction"] <= 1):
+            raise ValueError(
+                f"constant_force_tolerance_fraction must be in (0, 1], got {new['constant_force_tolerance_fraction']!r}"
+            )
+        if not (0 < new["band_stretch_tolerance_pct"] <= 100):
+            raise ValueError(f"band_stretch_tolerance_pct must be in (0, 100], got {new['band_stretch_tolerance_pct']!r}")
+        if new["rep_speed_low_m_s"] <= 0:
+            raise ValueError(f"rep_speed_low_m_s must be positive, got {new['rep_speed_low_m_s']!r}")
+        if new["rep_speed_high_m_s"] <= new["rep_speed_low_m_s"]:
+            raise ValueError(
+                f"rep_speed_high_m_s ({new['rep_speed_high_m_s']!r}) must be greater than "
+                f"rep_speed_low_m_s ({new['rep_speed_low_m_s']!r})"
+            )
+        if new["rep_speed_max_m_s"] <= new["rep_speed_high_m_s"]:
+            raise ValueError(
+                f"rep_speed_max_m_s ({new['rep_speed_max_m_s']!r}) must be greater than "
+                f"rep_speed_high_m_s ({new['rep_speed_high_m_s']!r})"
+            )
+
+        self.constant_force_tolerance_fraction = new["constant_force_tolerance_fraction"]
+        self.band_stretch_tolerance_pct = new["band_stretch_tolerance_pct"]
+        self.rep_speed_low_m_s = new["rep_speed_low_m_s"]
+        self.rep_speed_high_m_s = new["rep_speed_high_m_s"]
+        self.rep_speed_max_m_s = new["rep_speed_max_m_s"]
         self._save_settings()
 
     def _load_settings(self) -> dict:

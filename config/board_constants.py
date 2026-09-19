@@ -560,6 +560,100 @@ RESISTANCE_DISPLAY_UNIT_KG_DEFAULT = False  # False = Newtons, True = kg
                                             # at the UI boundary.
 
 # --------------------------------------------------------------------------
+# Resistance-mode tuning (resistance-modes sub-phases 3/4) — both persisted,
+# live-adjustable CableState defaults (same pattern as Train tab above; see
+# core/cable/state.py's set_inertia_settings()/set_phase_settings()). Every
+# one of these started life as an explicitly-flagged placeholder ("bench-test
+# at low values first", "not bench-validated yet") -- live-adjustable so a
+# real bench/log-tuning session can update them without a code change and
+# backend restart, same rationale as the force/homing settings above.
+# --------------------------------------------------------------------------
+INERTIA_KG_MAX_DEFAULT = 10.0  # Ceiling on a constant segment's inertia_kg
+                               # field (core/cable/train_mode.py clamps the
+                               # EFFECTIVE value used each tick to this --
+                               # same "accept anything at construction, clamp
+                               # the delivered value" pattern FORCE_MAX_N
+                               # already uses, not a construction-time reject).
+                               # Picked well below anything a real weight
+                               # stack would use, specifically because this is
+                               # a brand-new real-time force-shaping term.
+INERTIA_VELOCITY_FILTER_ALPHA_DEFAULT = 0.2  # EMA smoothing on
+                                             # cable_velocity_m_s before
+                                             # differencing once more for the
+                                             # inertia acceleration estimate --
+                                             # raw velocity is noisy enough
+                                             # that a second derivative
+                                             # straight off it reads as
+                                             # jittery/laggy rather than
+                                             # "heavy".
+PHASE_FORCE_DELTA_MAX_N_DEFAULT = 50.0  # Conservative cap on
+                                        # |concentric_force_n -
+                                        # eccentric_force_n| (GYM's
+                                        # Concentric/Eccentric mode) -- "a
+                                        # large delta with an untested ramp is
+                                        # the 'yank the user' failure mode".
+PHASE_VELOCITY_DEADBAND_M_S_DEFAULT = 0.05  # Below this |cable_velocity_m_s|
+                                            # counts as "not moving" for phase
+                                            # detection -- rejects encoder
+                                            # noise near a stall.
+PHASE_MIN_SUSTAINED_VELOCITY_M_S_DEFAULT = 0.08  # A candidate reversal's
+                                                 # velocity must clear this
+                                                 # (stricter than the deadband
+                                                 # above) for it to count as a
+                                                 # real direction change at all.
+PHASE_SUSTAIN_WINDOW_S_DEFAULT = 0.15  # ...and stay above that threshold
+                                       # continuously for at least this long
+                                       # before a flip is even considered --
+                                       # rejects a brief pause-and-continue.
+PHASE_REVERSAL_DISTANCE_M_DEFAULT = 0.03  # ...AND cover at least this much
+                                          # net distance in the new direction
+                                          # -- the second half of the dual
+                                          # debounce (sub-phase 4 doc §3).
+PHASE_RAMP_DURATION_S_DEFAULT = 0.15  # Time to blend fully from the old
+                                      # phase's force to the new one's once a
+                                      # flip commits -- a feel parameter, not
+                                      # a detection-accuracy one; the other
+                                      # five constants above were validated
+                                      # against a real logged session
+                                      # (core/cable/phase_ramp_detector.py's
+                                      # own docstring), this one couldn't be.
+# Data-grounded, not guessed: the five detection constants above (all but
+# PHASE_RAMP_DURATION_S_DEFAULT) were simulated against a real ~124s
+# hardware pull session (logs/telemetry_20260917_143634_train-constant_real
+# .csv) before being set here -- see core/cable/phase_ramp_detector.py's own
+# module docstring for the full validation writeup.
+
+# GYM dashboard (resistance-modes sub-phase 5) -- "in range"/"reached
+# target" tolerances for the Constant/Band panels' rings and bar-chart
+# target bands. Neither is bench-validated (no recorded force-ripple-at-
+# a-held-target or stretch-repeatability data exists yet, unlike the phase
+# constants above) -- reasoned defaults, live-adjustable the same way.
+CONSTANT_FORCE_TOLERANCE_FRACTION_DEFAULT = 0.10  # Constant panel's "time in
+                                                  # range" ring: |force -
+                                                  # target| / target <= this
+                                                  # counts as "in range".
+                                                  # Fraction of the live
+                                                  # target, not an absolute N
+                                                  # band, so it scales with
+                                                  # whatever weight is
+                                                  # selected.
+BAND_STRETCH_TOLERANCE_PCT_DEFAULT = 10.0  # Band panel: a rep "reaches
+                                           # target stretch" once cable
+                                           # position is within this many
+                                           # percentage points of the
+                                           # user-set target-stretch % (also
+                                           # the shaded band's half-width on
+                                           # the peak-stretch-per-rep chart).
+REP_SPEED_LOW_M_S_DEFAULT = 0.15  # Constant panel's rep-speed gauge: below
+                                  # this is the "too slow" zone.
+REP_SPEED_HIGH_M_S_DEFAULT = 0.6  # ...above this is "too fast" -- between
+                                  # low and high is the green "target" zone.
+REP_SPEED_MAX_M_S_DEFAULT = 1.0  # Gauge's right-hand end stop. None of the
+                                 # three are bench-validated -- a reasoned
+                                 # "controlled tempo pull" guess, same
+                                 # caveat as the two tolerances above.
+
+# --------------------------------------------------------------------------
 # Axis — axis0 only; axis1 is a ghost node
 # --------------------------------------------------------------------------
 # This board only ever drives axis0. Axis1's CAN node ID must be set to 63 to
@@ -738,6 +832,19 @@ def as_dict():
             "train_max_extension_enforced_default": TRAIN_MAX_EXTENSION_ENFORCED_DEFAULT,
             "train_home_guard_enforced_default": TRAIN_HOME_GUARD_ENFORCED_DEFAULT,
             "train_telemetry_buffer_s": TRAIN_TELEMETRY_BUFFER_S,
+            "inertia_kg_max_default": INERTIA_KG_MAX_DEFAULT,
+            "inertia_velocity_filter_alpha_default": INERTIA_VELOCITY_FILTER_ALPHA_DEFAULT,
+            "phase_force_delta_max_n_default": PHASE_FORCE_DELTA_MAX_N_DEFAULT,
+            "phase_velocity_deadband_m_s_default": PHASE_VELOCITY_DEADBAND_M_S_DEFAULT,
+            "phase_min_sustained_velocity_m_s_default": PHASE_MIN_SUSTAINED_VELOCITY_M_S_DEFAULT,
+            "phase_sustain_window_s_default": PHASE_SUSTAIN_WINDOW_S_DEFAULT,
+            "phase_reversal_distance_m_default": PHASE_REVERSAL_DISTANCE_M_DEFAULT,
+            "phase_ramp_duration_s_default": PHASE_RAMP_DURATION_S_DEFAULT,
+            "constant_force_tolerance_fraction_default": CONSTANT_FORCE_TOLERANCE_FRACTION_DEFAULT,
+            "band_stretch_tolerance_pct_default": BAND_STRETCH_TOLERANCE_PCT_DEFAULT,
+            "rep_speed_low_m_s_default": REP_SPEED_LOW_M_S_DEFAULT,
+            "rep_speed_high_m_s_default": REP_SPEED_HIGH_M_S_DEFAULT,
+            "rep_speed_max_m_s_default": REP_SPEED_MAX_M_S_DEFAULT,
         },
         "axis": {
             "active_axis": ACTIVE_AXIS,

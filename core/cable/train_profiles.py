@@ -17,7 +17,7 @@ file importable and testable with zero project config dependencies.
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 CONSTANT = "constant"
 LINEAR = "linear"
@@ -35,13 +35,16 @@ _SHAPE_PARAM_KEYS = {
 }
 
 # Optional numeric params per shape, with the default applied when the caller
-# omits them. Currently only bell's edge floors (added 25 July 2026 so a bell
-# can ramp between nonzero start/end forces -- e.g. 3 -> 10 -> 4 -- instead of
-# always returning to 0 at both edges); every other shape's params are fully
-# required above.
+# omits them. Bell's edge floors (added 25 July 2026 so a bell can ramp
+# between nonzero start/end forces -- e.g. 3 -> 10 -> 4 -- instead of always
+# returning to 0 at both edges); constant's inertia_kg (added for the
+# resistance-modes sub-phase 3 "constant + inertia" feature -- see below);
+# every other shape's params are fully required above.
 _SHAPE_OPTIONAL_PARAM_DEFAULTS = {
+    CONSTANT: {"inertia_kg": 0.0},
     BELL: {"start_force_n": 0.0, "end_force_n": 0.0},
 }
+
 
 
 def _require_numeric(params: Dict[str, Any], key: str) -> float:
@@ -89,6 +92,19 @@ class TrainSegment:
         if self.shape == CONSTANT:
             if parsed["force_n"] < 0:
                 raise ValueError(f"force_n must be non-negative, got {parsed['force_n']!r}")
+            # No upper bound checked here -- same "accept anything at
+            # construction, clamp what's actually delivered" split force_n
+            # itself already uses (this file's own module docstring: "Force
+            # values here are never negative... but are otherwise unbounded
+            # -- the hard ... ceiling is a hardware concern applied by the
+            # caller"). inertia_kg's live-adjustable ceiling
+            # (CableState.inertia_kg_max, resistance-modes sub-phase 3) is
+            # clamped in TrainMode.tick() for the same reason: keeps this
+            # module free of CableState/config coupling, and a live setting
+            # change takes effect immediately on a running session rather
+            # than only on profiles built after the change.
+            if parsed["inertia_kg"] < 0:
+                raise ValueError(f"inertia_kg must be non-negative, got {parsed['inertia_kg']!r}")
         elif self.shape == LINEAR:
             if parsed["start_force_n"] < 0 or parsed["end_force_n"] < 0:
                 raise ValueError("start_force_n/end_force_n must be non-negative")
@@ -111,6 +127,13 @@ class TrainSegment:
 
     def force_at(self, position_m: float) -> float:
         if self.shape == CONSTANT:
+            # inertia_kg deliberately NOT applied here: force_at() is a pure
+            # function of position (also what preview()'s static curve
+            # samples), but the inertia term needs an acceleration estimate,
+            # which needs real tick-to-tick timing/velocity history. TrainMode
+            # (the only stateful, time-aware caller) reads inertia_kg
+            # straight off the active segment via TrainProfile.segment_at()
+            # and adds F_inertia on top of this base force itself.
             return self.params["force_n"]
 
         if self.shape == LINEAR:
@@ -168,6 +191,17 @@ class TrainProfile:
             if segment.contains(position_m):
                 return max(0.0, segment.force_at(position_m))
         return 0.0
+
+    def segment_at(self, position_m: float) -> Optional[TrainSegment]:
+        """The single segment covering `position_m`, or None outside every
+        segment -- same containment search as force_at(), but returns the
+        segment itself rather than just its force. Used by TrainMode to read
+        per-segment params beyond force_n (currently just constant's
+        inertia_kg) without duplicating this search a second way."""
+        for segment in self.segments:
+            if segment.contains(position_m):
+                return segment
+        return None
 
     def preview(self, position_range_m: Tuple[float, float], n_points: int = 200) -> List[Tuple[float, float]]:
         """Evaluate force_at() across `n_points` samples spanning

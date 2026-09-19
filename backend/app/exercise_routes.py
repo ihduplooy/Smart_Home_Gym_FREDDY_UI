@@ -139,6 +139,24 @@ def _cable_status_dict() -> dict:
         "resistance_display_unit_kg": cs.resistance_display_unit_kg,
         "position_guard_warning_turns": cs.position_guard_warning_turns,
         "position_guard_hard_turns": cs.position_guard_hard_turns,
+        # Resistance-mode tuning (resistance-modes sub-phases 3/4) --
+        # live-adjustable via /api/train/update_inertia_settings and
+        # /api/train/update_phase_settings, surfaced here the same way every
+        # other live setting above is (GYM's Settings sub-tab reads its
+        # current values from here).
+        "inertia_kg_max": cs.inertia_kg_max,
+        "inertia_velocity_filter_alpha": cs.inertia_velocity_filter_alpha,
+        "phase_force_delta_max_n": cs.phase_force_delta_max_n,
+        "phase_velocity_deadband_m_s": cs.phase_velocity_deadband_m_s,
+        "phase_min_sustained_velocity_m_s": cs.phase_min_sustained_velocity_m_s,
+        "phase_sustain_window_s": cs.phase_sustain_window_s,
+        "phase_reversal_distance_m": cs.phase_reversal_distance_m,
+        "phase_ramp_duration_s": cs.phase_ramp_duration_s,
+        "constant_force_tolerance_fraction": cs.constant_force_tolerance_fraction,
+        "band_stretch_tolerance_pct": cs.band_stretch_tolerance_pct,
+        "rep_speed_low_m_s": cs.rep_speed_low_m_s,
+        "rep_speed_high_m_s": cs.rep_speed_high_m_s,
+        "rep_speed_max_m_s": cs.rep_speed_max_m_s,
         # Zeroed-at-home position, distinct from the raw absolute encoder
         # reading in latest_sample.position -- requested 23 July 2026 (the
         # raw encoder value is whatever arbitrary number it was at power-on,

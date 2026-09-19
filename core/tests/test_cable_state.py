@@ -469,3 +469,159 @@ def test_set_force_settings_rejected_call_does_not_partially_apply(tmp_path):
     with pytest.raises(ValueError):
         state.set_force_settings(letgo_velocity_turns_s=0.5, force_ramp_in_s=-1.0)
     assert state.letgo_velocity_turns_s == original
+
+
+# ---- set_inertia_settings / set_phase_settings (resistance-modes sub-phases 3/4) ----
+
+
+def test_set_inertia_settings_updates_only_given_fields(tmp_path):
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    original_alpha = state.inertia_velocity_filter_alpha
+    state.set_inertia_settings(inertia_kg_max=25.0)
+    assert state.inertia_kg_max == 25.0
+    assert state.inertia_velocity_filter_alpha == original_alpha
+
+
+def test_set_inertia_settings_persists_across_a_fresh_instance(tmp_path):
+    sidecar = _tmp_sidecar(tmp_path)
+    state1 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    state1.set_inertia_settings(inertia_kg_max=25.0, inertia_velocity_filter_alpha=0.5)
+    state2 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    assert state2.inertia_kg_max == 25.0
+    assert state2.inertia_velocity_filter_alpha == 0.5
+
+
+def test_set_inertia_settings_rejects_nonpositive_kg_max(tmp_path):
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    with pytest.raises(ValueError):
+        state.set_inertia_settings(inertia_kg_max=0.0)
+    with pytest.raises(ValueError):
+        state.set_inertia_settings(inertia_kg_max=-1.0)
+
+
+def test_set_inertia_settings_rejects_out_of_range_filter_alpha(tmp_path):
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    with pytest.raises(ValueError):
+        state.set_inertia_settings(inertia_velocity_filter_alpha=0.0)
+    with pytest.raises(ValueError):
+        state.set_inertia_settings(inertia_velocity_filter_alpha=1.5)
+
+
+def test_set_phase_settings_updates_only_given_fields(tmp_path):
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    original_ramp = state.phase_ramp_duration_s
+    state.set_phase_settings(phase_force_delta_max_n=30.0)
+    assert state.phase_force_delta_max_n == 30.0
+    assert state.phase_ramp_duration_s == original_ramp
+
+
+def test_set_phase_settings_persists_across_a_fresh_instance(tmp_path):
+    sidecar = _tmp_sidecar(tmp_path)
+    state1 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    state1.set_phase_settings(velocity_deadband_m_s=0.02, ramp_duration_s=0.3)
+    state2 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    assert state2.phase_velocity_deadband_m_s == 0.02
+    assert state2.phase_ramp_duration_s == 0.3
+
+
+def test_set_phase_settings_rejects_nonpositive_values(tmp_path):
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    with pytest.raises(ValueError):
+        state.set_phase_settings(phase_force_delta_max_n=0.0)
+    with pytest.raises(ValueError):
+        state.set_phase_settings(velocity_deadband_m_s=-0.01)
+    with pytest.raises(ValueError):
+        state.set_phase_settings(sustain_window_s=0.0)
+    with pytest.raises(ValueError):
+        state.set_phase_settings(reversal_distance_m=0.0)
+
+
+def test_set_phase_settings_allows_zero_ramp_duration(tmp_path):
+    """ramp_duration_s=0 means an instant switch, not an error --
+    PhaseRampDetector.update() already treats <=0 as "no ramp" (see its own
+    docstring)."""
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    state.set_phase_settings(ramp_duration_s=0.0)
+    assert state.phase_ramp_duration_s == 0.0
+
+
+def test_set_phase_settings_rejects_negative_ramp_duration(tmp_path):
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    with pytest.raises(ValueError):
+        state.set_phase_settings(ramp_duration_s=-0.1)
+
+
+def test_set_phase_settings_rejects_sustained_velocity_below_deadband(tmp_path):
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    with pytest.raises(ValueError):
+        state.set_phase_settings(velocity_deadband_m_s=0.1, min_sustained_velocity_m_s=0.05)
+
+
+def test_set_phase_settings_rejected_call_does_not_partially_apply(tmp_path):
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    original = state.phase_force_delta_max_n
+    with pytest.raises(ValueError):
+        state.set_phase_settings(phase_force_delta_max_n=30.0, sustain_window_s=-1.0)
+    assert state.phase_force_delta_max_n == original
+
+
+def test_set_gym_dashboard_settings_updates_only_given_fields(tmp_path):
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    original_pct = state.band_stretch_tolerance_pct
+    original_low = state.rep_speed_low_m_s
+    state.set_gym_dashboard_settings(constant_force_tolerance_fraction=0.2)
+    assert state.constant_force_tolerance_fraction == 0.2
+    assert state.band_stretch_tolerance_pct == original_pct
+    assert state.rep_speed_low_m_s == original_low
+
+
+def test_set_gym_dashboard_settings_persists_across_a_fresh_instance(tmp_path):
+    sidecar = _tmp_sidecar(tmp_path)
+    state1 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    state1.set_gym_dashboard_settings(
+        constant_force_tolerance_fraction=0.15,
+        band_stretch_tolerance_pct=15.0,
+        rep_speed_low_m_s=0.2,
+        rep_speed_high_m_s=0.7,
+        rep_speed_max_m_s=1.2,
+    )
+    state2 = CableState(sidecar_path=sidecar, growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    assert state2.constant_force_tolerance_fraction == 0.15
+    assert state2.band_stretch_tolerance_pct == 15.0
+    assert state2.rep_speed_low_m_s == 0.2
+    assert state2.rep_speed_high_m_s == 0.7
+    assert state2.rep_speed_max_m_s == 1.2
+
+
+def test_set_gym_dashboard_settings_rejects_out_of_range_force_fraction(tmp_path):
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    with pytest.raises(ValueError):
+        state.set_gym_dashboard_settings(constant_force_tolerance_fraction=0.0)
+    with pytest.raises(ValueError):
+        state.set_gym_dashboard_settings(constant_force_tolerance_fraction=1.5)
+
+
+def test_set_gym_dashboard_settings_rejects_out_of_range_stretch_pct(tmp_path):
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    with pytest.raises(ValueError):
+        state.set_gym_dashboard_settings(band_stretch_tolerance_pct=0.0)
+    with pytest.raises(ValueError):
+        state.set_gym_dashboard_settings(band_stretch_tolerance_pct=150.0)
+
+
+def test_set_gym_dashboard_settings_rejects_out_of_order_rep_speed_zones(tmp_path):
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    with pytest.raises(ValueError):
+        state.set_gym_dashboard_settings(rep_speed_low_m_s=0.0)
+    with pytest.raises(ValueError):
+        state.set_gym_dashboard_settings(rep_speed_low_m_s=0.8, rep_speed_high_m_s=0.6)
+    with pytest.raises(ValueError):
+        state.set_gym_dashboard_settings(rep_speed_high_m_s=0.9, rep_speed_max_m_s=0.5)
+
+
+def test_set_gym_dashboard_settings_rejected_call_does_not_partially_apply(tmp_path):
+    state = CableState(sidecar_path=_tmp_sidecar(tmp_path), growth_sidecar_path=_tmp_growth_sidecar(tmp_path), torque_calibration_sidecar_path=_tmp_torque_sidecar(tmp_path))
+    original = state.constant_force_tolerance_fraction
+    with pytest.raises(ValueError):
+        state.set_gym_dashboard_settings(constant_force_tolerance_fraction=0.3, band_stretch_tolerance_pct=-1.0)
+    assert state.constant_force_tolerance_fraction == original

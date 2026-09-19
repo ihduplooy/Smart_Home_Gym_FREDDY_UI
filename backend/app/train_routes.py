@@ -66,7 +66,13 @@ def register(app) -> None:
         body = request.get_json(silent=True) or {}
         try:
             profile = _profile_from_body(body)
-            control_routes.control_session.start(mode="train", target={"action": "run", "profile": profile})
+            # phase_forces (resistance-modes sub-phase 4, concentric/
+            # eccentric): passed through as-is -- TrainMode.validate_target()
+            # (via _coerce_phase_forces) does the actual validation, same as
+            # `profile`'s dict shape is validated by TrainProfile.from_dict()
+            # rather than here.
+            target = {"action": "run", "profile": profile, "phase_forces": body.get("phase_forces")}
+            control_routes.control_session.start(mode="train", target=target)
             return jsonify(_status_dict())
         except Exception as e:
             log.exception("train/start failed")
@@ -90,14 +96,15 @@ def register(app) -> None:
     @app.route("/api/train/set_profile", methods=["POST"])
     def train_set_profile():
         """Live retarget while a Train session is running (spec §4: the
-        profile editor's "Apply" button) -- swaps the active profile in
-        place, no motor interruption."""
+        profile editor's "Apply" button; sub-phase 4: also GYM's Concentric/
+        Eccentric mode nudging its two force fields) -- swaps the active
+        profile/phase_forces in place, no motor interruption."""
         body = request.get_json(silent=True) or {}
         try:
             profile = _profile_from_body(body)
         except (ValueError, TypeError) as e:
             return jsonify({"error": str(e)}), 400
-        return _dispatch_action("set_profile", {"profile": profile})
+        return _dispatch_action("set_profile", {"profile": profile, "phase_forces": body.get("phase_forces")})
 
     @app.route("/api/train/update_settings", methods=["POST"])
     def train_update_settings():
@@ -115,6 +122,65 @@ def register(app) -> None:
                 home_guard_enforced=body.get("home_guard_enforced"),
                 telemetry_buffer_s=body.get("telemetry_buffer_s"),
                 resistance_display_unit_kg=body.get("resistance_display_unit_kg"),
+            )
+            return jsonify(_status_dict())
+        except (ValueError, TypeError) as e:
+            return jsonify({"error": str(e)}), 400
+
+    @app.route("/api/train/update_inertia_settings", methods=["POST"])
+    def train_update_inertia_settings():
+        """Live-adjustable constant+inertia tuning (resistance-modes
+        sub-phase 3's "configure in a GYM Settings sub-tab" follow-up) --
+        both started as explicitly-flagged code placeholders, same subset-
+        update/persist pattern as train_update_settings above."""
+        body = request.get_json(silent=True) or {}
+        try:
+            control_routes.cable_state.set_inertia_settings(
+                inertia_kg_max=body.get("inertia_kg_max"),
+                inertia_velocity_filter_alpha=body.get("inertia_velocity_filter_alpha"),
+            )
+            return jsonify(_status_dict())
+        except (ValueError, TypeError) as e:
+            return jsonify({"error": str(e)}), 400
+
+    @app.route("/api/train/update_phase_settings", methods=["POST"])
+    def train_update_phase_settings():
+        """Live-adjustable concentric/eccentric phase-detector tuning
+        (resistance-modes sub-phase 4's "configure in a GYM Settings sub-tab"
+        follow-up) -- same subset-update/persist pattern as
+        train_update_settings above. Takes effect on the very next tick of
+        an already-running session (core/cable/train_mode.py reads these
+        live off CableState every tick), not just on the next session
+        start."""
+        body = request.get_json(silent=True) or {}
+        try:
+            control_routes.cable_state.set_phase_settings(
+                phase_force_delta_max_n=body.get("phase_force_delta_max_n"),
+                velocity_deadband_m_s=body.get("velocity_deadband_m_s"),
+                min_sustained_velocity_m_s=body.get("min_sustained_velocity_m_s"),
+                sustain_window_s=body.get("sustain_window_s"),
+                reversal_distance_m=body.get("reversal_distance_m"),
+                ramp_duration_s=body.get("ramp_duration_s"),
+            )
+            return jsonify(_status_dict())
+        except (ValueError, TypeError) as e:
+            return jsonify({"error": str(e)}), 400
+
+    @app.route("/api/train/update_gym_dashboard_settings", methods=["POST"])
+    def train_update_gym_dashboard_settings():
+        """Live-adjustable display/goal-tracking tuning for GYM's dashboard
+        panels (resistance-modes sub-phase 5) -- tolerances plus the
+        Constant panel's rep-speed gauge zones -- same subset-update/persist
+        pattern as the settings routes above. None of these feed TrainMode's
+        force computation."""
+        body = request.get_json(silent=True) or {}
+        try:
+            control_routes.cable_state.set_gym_dashboard_settings(
+                constant_force_tolerance_fraction=body.get("constant_force_tolerance_fraction"),
+                band_stretch_tolerance_pct=body.get("band_stretch_tolerance_pct"),
+                rep_speed_low_m_s=body.get("rep_speed_low_m_s"),
+                rep_speed_high_m_s=body.get("rep_speed_high_m_s"),
+                rep_speed_max_m_s=body.get("rep_speed_max_m_s"),
             )
             return jsonify(_status_dict())
         except (ValueError, TypeError) as e:

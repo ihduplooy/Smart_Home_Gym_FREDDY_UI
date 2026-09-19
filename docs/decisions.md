@@ -3488,3 +3488,344 @@ control blends acceptably into a dark background but reads as nearly invisible o
 and re-implemented the Button `outline` variant's `gray` colorScheme case, whose default
 border (`gray.200`) was too close to the white background for this design's "structure
 from the 1px border" principle to actually hold once genuinely in light mode.
+
+## Resistance modes sub-phase 3 — inertia stays out of `train_profiles.py`'s pure evaluator
+
+`core/cable/train_profiles.py` is deliberately pure and hardware-free (its own module
+docstring: no config/board_constants import, no `CableState`) so `force_at(position_m)`
+can be the one evaluator both the profile editor's live preview graph and the live
+torque-vs-position overlay read from (spec: "one source of truth for the curve shape").
+Constant+inertia's force term (`F_inertia = inertia_kg * a_filtered`) needs an
+acceleration estimate, which needs real tick-to-tick velocity/timing history — something
+a stateless, position-only function fundamentally can't provide, and *shouldn't* try to:
+a static preview sweep has no time axis, so "acceleration" there would only ever be 0
+anyway.
+
+Decision: `inertia_kg` is stored and validated as a constant-segment param (so it
+round-trips through save/load/`to_dict`/`from_dict` for free, same as every other param),
+but `TrainSegment.force_at()` never reads it — it keeps returning just the base
+`force_n`, unchanged. `TrainMode.tick()` (the one stateful, time-aware caller, already
+computing `cable_velocity_m_s` every tick) is where the term actually gets applied: a new
+`TrainProfile.segment_at()` lets it read the active segment's `inertia_kg` without
+duplicating `force_at()`'s own containment search, and a small isolated
+`_filtered_acceleration_m_s2()` method holds the one EMA-then-differentiate calculation
+(alpha `_INERTIA_VELOCITY_FILTER_ALPHA = 0.2`, a placeholder — the handoff doc explicitly
+asked for this to be easy to retune after a bench session, not the isokinetic governor's
+heavier pattern of a `board_constants`/`CableState` live-tunable setting, since this isn't
+meant to be a user-facing knob).
+
+Net effect: `inertia_kg = 0` (the default) is exactly byte-identical to today's constant
+mode, since `0 * anything = 0` regardless of what the filter computes — verified with a
+regression test that ticks through changing velocity with `inertia_kg=0` and asserts the
+commanded force never moves off the base value.
+
+Total force (`base_force_n + inertia_force_n`) is floored at 0 before the existing
+`force_max_n` cap — same non-negative floor `TrainProfile.force_at()` already applies to
+its own return value (module docstring: "Force values here are never negative"). Without
+this, a large enough deceleration could drive the inertia term negative enough to flip the
+total negative, which would command the motor to actively assist/reel in the cable rather
+than just resist less — not what a "virtual mass" analogy implies, and not something this
+sub-phase's doc asked for.
+
+`inertia_kg` itself is capped at a new `INERTIA_KG_MAX = 10.0` (in `train_profiles.py`,
+enforced in `TrainSegment.__post_init__`) — the handoff doc's own Safety section asked for
+"a conservative maximum initially... bench-test at low values first before raising the
+cap" for what is a brand-new real-time force-shaping term; 10 kg-equivalent was picked as
+a starting ceiling well below anything a real weight stack would use, not derived from any
+bench measurement (none has happened yet).
+
+## Resistance modes sub-phase 3 — band presets are a placeholder palette, not bench-tuned
+
+`frontend/src/utils/bandPresets.js`'s four presets (Green/Blue/Purple/Black, light to
+heavy) and their Newton values are placeholders picked to be a plausible spread within
+`FORCE_MAX_N`, not measured against a real band or bench session — the handoff doc
+explicitly called this out twice ("finalize exact slope/force values from actual bench
+feel-testing, not guessed numbers"; "test the steepness of each preset live on the bench
+before locking in default values"), and there's no way to bench-test cable feel from this
+session. Documented in-file so this isn't mistaken for a validated default later. There's
+also no real cross-brand industry-standard color-to-tension code for resistance bands (it
+varies by manufacturer per the doc), so the light-to-heavy color ordering is this
+project's own scale, not a claim of matching any particular brand's.
+
+Presets are frontend-only (a plain exported array, same shape/style precedent as
+`utils/presets/factoryPresets.js`) with no backend route and no new persistence format,
+per the doc's explicit non-goal — selecting one just calls the same `updateParam`-style
+setter the linear-profile fields already use, so a preset is indistinguishable from the
+user having typed the same two numbers in by hand.
+
+## Resistance modes sub-phase 3 — no programmatic screenshot verification (no chromium-cli/Playwright in this repo)
+
+Per the UI redesign roll-out's own precedent above, the user prefers to grab their own
+screenshots rather than have them captured programmatically. Separately, this repo has no
+`chromium-cli` or Playwright installed, and installing a headless browser toolchain
+solely to capture one screenshot felt like more footprint than this two-field UI change
+warranted. Verified instead via: `eslint`/`build`/`vitest` all clean, and a live curl
+smoke test against the running mock backend (`POST /api/train/preview_profile` with
+`inertia_kg: 3` returns the unchanged base-force curve; `inertia_kg: 999` correctly
+rejected by the new cap). Mock dev servers (`npm run mock_dev`, `:5050`/`:3000`) left
+running for the user to check the new Inertia field and band-preset swatches directly.
+
+## GYM tab: parameterize TrainTab, don't duplicate it
+
+User wanted a new, separate GYM tab (not a Train rename) offering only Constant+
+Inertia and Linear/Band — explicitly not Bell. GYM's session needs are otherwise
+identical to Train's: same homing/status card, same live telemetry chart, same
+start/stop/apply lifecycle, all against the same underlying hardware. Copying
+`TrainTab.jsx`'s ~250 lines wholesale into a second file for a two-prop difference
+(heading text, which shapes the editor offers) would create two files that have to
+be kept in sync by hand for every future Train-tab change — a real maintenance
+cost for a purely cosmetic/config difference.
+
+Decision: `TrainTab`/`TrainProfileEditor` both gained optional props (`title`/
+`shapes`) that default to today's exact behavior, so Train itself is unaffected.
+`GymTab.jsx` is a 5-line wrapper that renders `<TrainTab title="GYM"
+shapes={['constant','linear']} />` — no new backend mode, no new routes, no
+duplicated session logic. GYM and Train are two UIs onto the literal same "train"
+control session (`control?.mode === 'train'` either way) — starting a session from
+one tab and switching to the other shows/controls the same running session, which
+is correct: they're driving the same physical hardware, not two independent
+resistance systems.
+
+One real edge case this surfaced: saved/loaded profiles (`utils/
+trainProfilesManager.js`) live in one shared `localStorage` key across every
+`TrainProfileEditor` instance, regardless of that instance's `shapes` restriction —
+a profile saved with a Bell segment from Train could be Loaded into GYM's
+restricted editor. Handled by always including a segment's own current shape in
+its Shape `<Select>`'s options even when it's outside the instance's allowed set
+(only the option to switch AWAY from it narrows to `shapes`), so this case renders
+correctly rather than silently corrupting/blanking the loaded value.
+
+**SUPERSEDED (same day, next user round):** the "restricted dropdown" approach
+above turned out to be the wrong read of what the user wanted — feedback was "I
+can't really see what it is... you just duplicate the Train tab." A narrower shape
+list on the same segment-list editor doesn't read as a distinct tool, even though
+it technically satisfied "only Constant+Inertia and Band" from the request before
+it. Reverted the `shapes`/`title` props on `TrainProfileEditor`/`TrainTab` and
+rebuilt GYM with its own bespoke editor (`GymProfileEditor.jsx`) instead — see the
+entry below ("GYM rebuilt with its own bespoke editor"). The "session chrome
+should be shared, not duplicated" half of this decision's reasoning still held and
+carried forward (as `TrainSessionShell.jsx`); only the "reuse the segment editor
+itself, just restricted" half was wrong.
+
+## GYM rebuilt with its own bespoke editor, not a restricted TrainProfileEditor
+
+Follow-up after the "parameterize TrainTab" decision above was found to feel like
+a plain relabeled duplicate, not a distinct tool. Clarified the actual ask via two
+rounds of questions rather than guessing again: (1) GYM keeps the full session
+shell (Start/Stop, status, live telemetry/position charts) — a real running
+session is needed to physically feel resistance while pulling, not just a static
+config form; (2) Band mode's linear ramp runs over a settable Length, then holds
+steady at the Max value for the rest of the travel (a real elastic band reaching
+full stretch, not resistance dropping to zero past that point); (3)
+"minimalistic" meant visual/layout simplicity only, not reduced control — every
+value stays directly, precisely editable (typed, not just dragged/preset-only).
+
+Decision: split what used to be `TrainTab.jsx` into two pieces along the one axis
+that's genuinely shared vs. genuinely different. `TrainSessionShell.jsx` (new)
+holds everything session/hardware-side — status card, Start/Stop/Reset, telemetry
++ position charts, all the `useTrainTelemetry`/`startTrainSession`/etc. wiring —
+parameterized by `title` and an `EditorComponent` prop; this is the part that's
+identical between Train and GYM because they're two UIs onto the literal same
+"train" control session/hardware, not two independent resistance systems.
+`TrainTab.jsx` and `GymTab.jsx` are now both 5-line wrappers around this shell,
+differing only in which editor component they hand it.
+
+`GymProfileEditor.jsx` is genuinely bespoke, not a restricted version of
+`TrainProfileEditor`: a Constant/Band mode toggle (one active at a time, not a
+multi-segment builder), Constant exposing just Weight (kg) and an Inertia
+`Slider` (0 to a client-mirrored `INERTIA_KG_MAX = 10` — see
+`core/cable/train_profiles.py`'s own constant; the backend re-validates
+regardless, so a stale mirrored value is only ever a UX staleness, never a safety
+gap), Band exposing preset swatches (reusing `BAND_PRESETS`) plus directly
+hand-editable Min/Max/Length fields. Always kg, ignoring the device-wide N/kg
+display toggle on purpose — GYM's whole point is fewer decisions, and the user
+explicitly asked for kg ("weight in kilogram"). A `buildGymProfilePayload()`
+helper assembles the real `TrainProfile` JSON: Constant becomes one full-travel
+constant segment; Band becomes a linear segment over `[0, length]` plus,
+whenever `length` doesn't already reach the travel end, a trailing constant
+segment holding the max value for the rest of the range — the two-segment
+"ramp then hold" TrainProfile.segments already supports, just assembled
+automatically from three simple fields instead of hand-built the way Train's
+general editor requires. Preview still goes through the same
+`previewTrainProfile` backend call TrainProfileEditor uses, so what's shown is
+always exactly what would actually run.
+
+Lint gotcha hit and worth remembering for this codebase: no `eslint-plugin-react`
+here, so plain `no-unused-vars` doesn't recognize a JSXIdentifier tag name
+(`<EditorComponent .../>`) as a "use" on its own. `eslint.config.js`'s
+`varsIgnorePattern: '^[A-Z_]'` is the project's existing workaround for
+component-shaped variables like this, but it only applies to `const`/`let`
+declarations, not destructured function *parameters* — `EditorComponent`
+destructured directly in `TrainSessionShell`'s signature tripped
+`no-unused-vars` even though it's genuinely used. Fixed by destructuring it from
+`props` inside the function body instead (making it a `const`), the same pattern
+`MainTabs.jsx`'s `const Component = tabConfig.component` already relies on.
+
+## Concentric/eccentric: a second, dedicated phase detector, not a reuse of ExerciseMode's
+
+`core/profiles/detectors.py`'s `PhaseDetector` already exists and is already used
+live, by `ExerciseMode`/Force Feedback, for essentially the same underlying idea --
+which direction is the cable currently moving. Reusing it for GYM's Concentric/
+Eccentric mode was the obvious-looking option and was explicitly considered (asked
+directly, before writing any code, since guessing wrong on GYM's architecture had
+already cost a rebuild once this session). Rejected in favour of a new, standalone
+`phase_ramp_detector.PhaseRampDetector` for two concrete reasons, not just "the doc
+said so":
+
+1. **Capability gap, not just a style difference.** The existing detector is a
+   single-threshold velocity-hysteresis machine (`PHASE_VEL_THRESHOLD_TURNS_S` +
+   `PHASE_HYSTERESIS_TURNS_S`) with no notion of *how far* the cable has traveled in
+   the candidate direction, and no ramp/blend output at all -- ExerciseMode's own
+   phase-aware force switching is a hard, instant reassignment the moment phase
+   flips. Sub-phase 4 explicitly needs a **dual** debounce (sustained velocity AND
+   distance traveled, specifically to reject "a brief pause-and-continue being
+   mistaken for a direction change") plus a smooth 0.0-1.0 ramp progress so
+   commanded force glides between concentric/eccentric instead of jumping. Adding
+   both onto the existing class would mean either changing its behavior (risking
+   whatever ExerciseMode/rep-counting already depends on) or growing it with
+   phase_ramp-only parameters/methods that ExerciseMode never uses -- neither is
+   "reuse," both are "quietly turn one detector into two detectors glued together."
+2. **Validated against real data, not assumed.** Simulated the new dual-debounce
+   design directly against a real ~124s hardware session
+   (`logs/telemetry_20260917_143634_train-constant_real.csv`) before writing the
+   module: 35 cleanly-alternating transitions, median ~1.2s apart. The SAME data
+   run through a naive single-threshold check (roughly what the existing detector
+   does) produced 494 "reversals" at a median 0.12s apart -- almost entirely
+   encoder-noise flicker. That's not a hypothetical gap between the two designs;
+   it's the literal failure mode sub-phase 4's doc named ("pause-and-continue")
+   demonstrated on this project's own real telemetry.
+
+Cost accepted: two related-but-different phase-detection implementations now exist
+in the codebase. Considered acceptable because they solve genuinely different
+problems (rep-gated force-feedback state machine vs. a smooth two-value force
+blend) and changing the existing one's behavior was the actual risk being avoided --
+ExerciseMode's rep counting, isokinetic governing, and let-go detection all
+already depend on `PhaseDetector`'s exact current behavior, none of which this
+sub-phase has any business touching.
+
+## Concentric/eccentric bypasses profile evaluation entirely rather than combining with it
+
+`TrainMode.tick()` now has two mutually exclusive ways to arrive at a target force:
+ordinary position-based `TrainProfile` playback (unchanged since sub-phase 3, incl.
+constant+inertia), or `phase_forces` mode. Considered adding phase-blending as
+another *segment param* alongside `inertia_kg` (same pattern sub-phase 3 used) --
+rejected, because concentric/eccentric isn't a property of a position range at all:
+it has no meaningful `start_pos_m`/`end_pos_m`, applies (or doesn't) across the
+entire travel uniformly, and needs to fully override what force means at a given
+tick, not add a term on top of it. Sub-phase 3's own Step 0 finding said this
+"plugs in alongside" the constant-profile computation -- read as "lives in the same
+file, is one of two things TrainMode can now do," not "combines arithmetically with
+whatever the profile also says," which wouldn't make physical sense (there's no
+principled way to blend "at this position, apply X newtons" with "whichever
+direction you're moving, apply Y newtons").
+
+Net effect: `self.profile` and `self.phase_forces` on `TrainMode` are exactly one
+active at a time from the caller's perspective (GYM's UI already only ever sends
+one), even though both fields technically persist on the object simultaneously --
+`tick()`'s own `if self.phase_forces is not None` branch is the single source of
+truth for which one is "live" on any given tick, mirroring the request/response
+contract (`{ profile }` XOR `{ phaseForces }`, see `api/train.js`) at the backend
+object's own field level rather than inventing a third "mode" enum to track the
+same thing redundantly.
+
+## GYM Settings sub-tab: making the placeholders configurable surfaced a real architecture bug
+
+User feedback: GYM has several "assumed" tunable values (inertia's slider range,
+the concentric/eccentric detector's deadzone/timing) and wants them configurable
+in a Settings sub-tab, not hardcoded. Working through *how* to make
+`INERTIA_KG_MAX` live-adjustable surfaced that its original design (sub-phase 3)
+was already inconsistent with this codebase's own established convention, not
+just missing a settings UI.
+
+`TrainSegment.__post_init__` (train_profiles.py) rejected `inertia_kg` above the
+cap at construction time -- a hard `ValueError`. But `force_n`, the *other* value
+on the exact same segment, was deliberately designed the opposite way: accepted
+unbounded at construction, clamped only at delivery time in `TrainMode.tick()`
+(`min(force_n, cable_state.force_max_n)`) -- the module's own docstring says so
+explicitly ("Force values here are never negative... but are otherwise
+unbounded -- the hard ... ceiling is a hardware concern applied by the caller").
+Sub-phase 3 introduced a second, materially different validation shape on the
+same dataclass without noticing the inconsistency, because at the time
+`INERTIA_KG_MAX` was still a fixed code constant and the mismatch had no visible
+consequence.
+
+It became a real consequence the moment the cap needed to be live-adjustable:
+`TrainSegment.__post_init__` has no access to `CableState` (the module is
+deliberately pure/hardware-free, same reason `train_profiles.py` can be imported
+and tested with zero project config dependencies), so a construction-time reject
+against a *live* cap would have meant either (a) breaking that purity by passing
+`cable_state` into `TrainSegment` construction, or (b) some awkward re-validation
+step bolted on elsewhere every time the cap changes. Neither was needed --
+switching `inertia_kg` to the same "accept anything non-negative, clamp what's
+delivered" pattern `force_n` already uses removed the problem entirely:
+`TrainSegment` stays pure, `TrainMode.tick()` (which already holds
+`cable_state`) does one extra `min()` call, and a live cap change now takes
+effect immediately on an already-running session instead of only on profiles
+built after the change -- strictly better UX than the reject-at-construction
+version had, not a compromise made to accommodate the refactor.
+
+Net takeaway worth remembering for future sub-phases: when two fields on the
+same data structure enforce their bounds through genuinely different
+mechanisms (one hardcoded-and-rejected, one live-and-clamped) without a
+specific reason for the difference, that's very likely a preventable
+inconsistency, not two independently-justified designs -- and it tends to stay
+invisible right up until one of the two needs to become live-configurable.
+
+## GYM dashboard redesign: reusing ExerciseMode's rep counter instead of
+## reviving TrainMode's "no rep counting" line, and skipping the ring buffer
+
+User supplied a dashboard mockup and asked for a real GYM implementation
+(gauges/rings/bar charts per mode, a shared Set Progress/Session Summary
+footer, a collapsed Ghost Trace) wired to real telemetry. Two design
+questions were asked and answered before any code: how to get rep count/
+tempo/work (nothing computed it yet), and what "in range"/"reached target"
+tolerances to use (no bench data existed for either, unlike sub-phase 4's
+phase-detector constants).
+
+**Rep counting reused `core/profiles/detectors.py`'s `PhaseDetector`+
+`RepCounter` rather than extending `_phase_ramp_detector` or writing a third
+detector.** `train_mode.py`'s original docstring said "no phase detection, no
+rep counting" for the ordinary profile-playback path -- worth being precise
+about what that sentence actually protected: it meant force computation
+doesn't depend on phase or rep count (still true, unchanged), not that
+TrainMode could never report a rep count as telemetry. The CSV logger had
+reserved `phase`/`rep_count` columns since the original session-3 spec
+specifically for "profile runs" generally; TrainMode just never populated
+them. Running the exact `PhaseDetector`+`RepCounter` instances `ExerciseMode`
+already uses (already tested, already tuned) as a second, parallel, read-only
+pair -- ticking every homed sample, writing only `extra["rep_count"]`, never
+touching `force_n` -- reuses proven code and fills in a column that was
+always meant to hold this. It runs alongside `_phase_ramp_detector` rather
+than merging into it because the two solve different problems at different
+granularities: `_phase_ramp_detector`'s 2-state output is tuned for smooth
+force-blend timing (how fast to cross-fade between two force values),
+`PhaseDetector`'s 4-state phase (with top/bottom holds) + `RepCounter`'s
+EWMA-proximity check is what's actually validated for discrete rep
+boundaries. Trying to make one detector serve both would have meant
+compromising whichever one's tuning didn't fit the other's job.
+
+**Per-rep peak-force/stretch history and the Ghost Trace overlay come from
+polling `extra`, not from extending `core/control/session.py`'s ring
+buffer.** The ring buffer that backs `/api/control/telemetry` stores plain
+`TelemetrySample` (hardware-only fields: position/velocity/torque/t) --
+`extra` (phase, rep_count, target_force_n, ...) is a session-level "last
+tick" snapshot only, never persisted per-sample into that buffer. Getting a
+rep-tagged force/position history could have meant changing that ring
+buffer's contents and its two serialization sites (`/api/control/telemetry`
+REST + the `/ws/control-telemetry` push) -- both shared by every mode
+(Control tab, Testing tab, Exercise), a much larger blast radius than GYM's
+own dashboard needed. Instead, a new `useGymRepTracking(extra, running)`
+hook derives everything client-side from the `extra` object
+`TrainSessionShell`'s *existing* ~150ms status poll already delivers as a
+prop -- no second subscription, no shared-infrastructure change, and the
+per-rep resolution (~150ms) is already finer than anything a rep's visible
+peak/tempo/shape needs.
+
+**Band's "target stretch" became its own field, not derived from Length.**
+The obvious shortcut -- target = some fixed % of the existing Length field --
+was proposed and explicitly turned down in favor of a separate, independently
+editable Target Stretch % input. Reasoning offered: Length defines the
+physical ramp shape (where resistance stops increasing), target stretch is a
+goal a user might want short of, at, or arguably past full engagement --
+conflating the two would have meant "retune how the band behaves" and
+"retune what counts as a good rep" could never be adjusted independently.

@@ -10,6 +10,59 @@ def test_constant_segment_force():
     assert seg.force_at(1.0) == 50.0
 
 
+# ---- constant + inertia (resistance-modes sub-phase 3) ----
+
+
+def test_constant_segment_inertia_kg_defaults_to_zero():
+    seg = TrainSegment(0.0, 1.0, "constant", {"force_n": 50.0})
+    assert seg.params["inertia_kg"] == 0.0
+
+
+def test_constant_segment_accepts_explicit_inertia_kg():
+    seg = TrainSegment(0.0, 1.0, "constant", {"force_n": 50.0, "inertia_kg": 3.5})
+    assert seg.params["inertia_kg"] == pytest.approx(3.5)
+
+
+def test_constant_segment_force_at_ignores_inertia_kg():
+    """force_at() is the pure, time-independent evaluator preview() also
+    samples -- inertia only makes sense with real tick-to-tick velocity
+    history, so it must NOT perturb this static curve. TrainMode applies it
+    separately, on top of this base force."""
+    seg = TrainSegment(0.0, 1.0, "constant", {"force_n": 50.0, "inertia_kg": 3.5})
+    assert seg.force_at(0.25) == 50.0
+    assert seg.force_at(0.75) == 50.0
+
+
+def test_constant_segment_rejects_negative_inertia_kg():
+    with pytest.raises(ValueError):
+        TrainSegment(0.0, 1.0, "constant", {"force_n": 50.0, "inertia_kg": -1.0})
+
+
+def test_constant_segment_accepts_large_inertia_kg():
+    """No upper bound checked here -- same "accept anything at construction,
+    clamp what's delivered" split force_n itself already uses. The live-
+    adjustable ceiling (CableState.inertia_kg_max) is enforced in
+    TrainMode.tick(), not at construction -- see test_train_mode.py's own
+    inertia-related tests for that half."""
+    seg = TrainSegment(0.0, 1.0, "constant", {"force_n": 50.0, "inertia_kg": 1000.0})
+    assert seg.params["inertia_kg"] == pytest.approx(1000.0)
+
+
+def test_profile_segment_at_returns_covering_segment():
+    seg_a = TrainSegment(0.0, 1.0, "constant", {"force_n": 10.0, "inertia_kg": 2.0})
+    seg_b = TrainSegment(1.0, 2.0, "constant", {"force_n": 20.0})
+    profile = TrainProfile(segments=[seg_a, seg_b])
+    assert profile.segment_at(0.5) is seg_a
+    assert profile.segment_at(1.5) is seg_b
+    assert profile.segment_at(0.5).params["inertia_kg"] == pytest.approx(2.0)
+
+
+def test_profile_segment_at_returns_none_outside_every_segment():
+    profile = TrainProfile(segments=[TrainSegment(1.0, 2.0, "constant", {"force_n": 10.0})])
+    assert profile.segment_at(0.0) is None
+    assert profile.segment_at(5.0) is None
+
+
 def test_linear_segment_interpolates():
     seg = TrainSegment(0.0, 1.0, "linear", {"start_force_n": 0.0, "end_force_n": 100.0})
     assert seg.force_at(0.0) == pytest.approx(0.0)

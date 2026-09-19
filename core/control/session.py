@@ -269,6 +269,7 @@ class ControlSession:
                         bus_voltage_v=extra.get("bus_voltage_v", ""),
                         estimated_power_w=extra.get("estimated_power_w", ""),
                         target_position_m=extra.get("target_position_m", ""),
+                        total_work_j=extra.get("total_work_j", ""),
                     )
                 except Exception:
                     log.exception("CSV logger write failed")
