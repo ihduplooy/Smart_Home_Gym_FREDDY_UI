@@ -6,3 +6,7 @@ flask-sock==0.7.0
 # 1B config script (config/odrive_config.py) — the client library version must match
 # firmware for the fibre/USB protocol. Not required when running with ODRIVE_MOCK=1.
 odrive==0.5.1.post0
+# GYM tab rotary encoder (core/hardware/weight_encoder.py) -- reads a plain
+# quadrature knob wired to GPIO17/27 on the Pi.
+gpiozero==2.0.1
+

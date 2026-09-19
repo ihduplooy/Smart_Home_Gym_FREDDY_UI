@@ -18,6 +18,7 @@ from . import anticogging_routes
 from . import control_routes
 from . import exercise_routes
 from . import force_routes
+from . import gym_routes
 from . import train_routes
 from .api_reference import load_api_reference, reference_line
 from .telemetry import telemetry_session
@@ -293,6 +294,7 @@ def create_app() -> Flask:
     control_routes.register(app, sock)
     exercise_routes.register(app)
     force_routes.register(app)
+    gym_routes.register(app)
     train_routes.register(app)
 
     return app

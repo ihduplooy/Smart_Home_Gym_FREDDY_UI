@@ -5,6 +5,7 @@ import {
   Alert, AlertIcon, AlertDescription,
 } from '@chakra-ui/react'
 import { previewTrainProfile } from '../../../api/train'
+import { getGymWeight, setGymWeight } from '../../../api/gym'
 import { forceNFromMassKg, massKgFromForceN } from '../../../utils/cableGeometry'
 import { BAND_PRESETS } from '../../../utils/bandPresets'
 import { useGymRepTracking } from '../../../hooks/useGymRepTracking'
@@ -169,6 +170,43 @@ const GymProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRang
   const [buildError, setBuildError] = useState(null)
   const [previewError, setPreviewError] = useState(null)
 
+  // Rotary encoder link (core/hardware/weight_encoder.py): a physical knob
+  // wired to the Pi can nudge Weight by +-1kg live, without a page reload or
+  // Start/Apply click. Polling, not a websocket, matching every other tab's
+  // precedent -- Constant mode only, so it stops the instant another mode is
+  // selected. isWeightFieldFocusedRef guards against a mid-type poll
+  // stomping on what the user is currently typing.
+  const isWeightFieldFocusedRef = useRef(false)
+  const weightSyncDebounceRef = useRef(null)
+
+  useEffect(() => {
+    if (mode !== 'constant') return
+    const id = setInterval(async () => {
+      if (isWeightFieldFocusedRef.current) return
+      try {
+        const { weight_kg } = await getGymWeight()
+        setWeightKg(String(weight_kg))
+      } catch {
+        // Ignore -- the next poll retries.
+      }
+    }, 200)
+    return () => clearInterval(id)
+  }, [mode])
+
+  // A manually-typed value re-syncs the encoder's own backend counter (also
+  // debounced, same pattern as the preview validation effect below) so
+  // turning the knob afterward continues from what's now on screen rather
+  // than jumping back to wherever the knob last was.
+  const handleWeightChange = (e) => {
+    const value = e.target.value
+    setWeightKg(value)
+    if (weightSyncDebounceRef.current) clearTimeout(weightSyncDebounceRef.current)
+    weightSyncDebounceRef.current = setTimeout(() => {
+      const parsed = Number(value)
+      if (Number.isFinite(parsed)) setGymWeight(parsed).catch(() => {})
+    }, 300)
+  }
+
   const domain = useMemo(() => positionRangeM ?? [0, 1], [positionRangeM])
   const fields = useMemo(
     () => ({ weightKg, inertiaKg, minKg, maxKg, lengthM, concentricKg, eccentricKg }),
@@ -300,7 +338,9 @@ const GymProfileEditor = ({ onStart, onApply, sessionRunning, busy, positionRang
                     inputMode="decimal"
                     fontFamily="mono"
                     value={weightKg}
-                    onChange={(e) => setWeightKg(e.target.value)}
+                    onChange={handleWeightChange}
+                    onFocus={() => { isWeightFieldFocusedRef.current = true }}
+                    onBlur={() => { isWeightFieldFocusedRef.current = false }}
                   />
                   <InputRightAddon px={2} fontSize="xs">kg</InputRightAddon>
                 </InputGroup>

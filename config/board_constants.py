@@ -654,6 +654,18 @@ REP_SPEED_MAX_M_S_DEFAULT = 1.0  # Gauge's right-hand end stop. None of the
                                  # caveat as the two tolerances above.
 
 # --------------------------------------------------------------------------
+# GYM tab rotary encoder (core/hardware/weight_encoder.py) — a physical knob
+# wired directly to the Pi (GPIO17/27), independent of the ODrive/ its own
+# board constants above. Each detent nudges GYM's Constant-mode Weight field
+# by STEP_KG, clamped to [WEIGHT_KG_MIN, WEIGHT_KG_MAX].
+# --------------------------------------------------------------------------
+STEP_KG = 1.0  # Weight change per detent.
+WEIGHT_KG_MIN = 0.0
+WEIGHT_KG_MAX = 50.0  # Placeholder ceiling -- revisit against a real sane
+                      # max resistance in kg once one exists elsewhere in
+                      # this project.
+
+# --------------------------------------------------------------------------
 # Axis — axis0 only; axis1 is a ghost node
 # --------------------------------------------------------------------------
 # This board only ever drives axis0. Axis1's CAN node ID must be set to 63 to
